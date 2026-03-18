@@ -195,7 +195,7 @@ export class LLMService {
         messages: messages,
         stream: true,
         temperature: 0.7,
-        max_tokens: 2048,
+        max_tokens: 999999, // Увеличено для поддержки длинных ответов с Reasoning
       });
 
       // Обрабатываем поток

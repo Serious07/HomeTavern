@@ -46,20 +46,22 @@ cmake --build build --config Release
 .\build\bin\Release\llama-main.exe --model .\models\qwen-3.5.gguf --port 1234
 ```
 
-### Рекомендуемые параметры
+### Рекомендуемые параметры (для Qwen 3.5 с Reasoning)
 
 ```powershell
 .\build\bin\Release\llama-server.exe `
   --model ./models/qwen-3.5.gguf `
   --port 1234 `
   --host 127.0.0.1 `
-  --n-ctx 4096 `
+  --n-ctx 8192 `
   --n-thread 8 `
   --n-gpu-layers 35 `
   --flash-attn `
   --batch-size 2048 `
   --ubatch-size 4096
 ```
+
+**Важно:** Для работы с длинными ответами (Reasoning) необходимо установить `--n-ctx` не менее 8192 токенов. Если модель поддерживает, можно увеличить до 16384 или 32768 для ещё более длинных диалогов.
 
 **Параметры:**
 
@@ -68,7 +70,7 @@ cmake --build build --config Release
 | `--model` | путь к файлу | Путь к модели в формате GGUF |
 | `--port` | 1234 | Порт для API (обязательно 1234) |
 | `--host` | 127.0.0.1 | Хост для прослушивания |
-| `--n-ctx` | 4096 | Размер контекстного окна |
+| `--n-ctx` | 8192 | Размер контекстного окна (увеличено для Reasoning) |
 | `--n-thread` | 8 | Количество CPU потоков |
 | `--n-gpu-layers` | 35 | Слоёв для GPU (для CUDA/Vulkan) |
 | `--flash-attn` | - | Включить Flash Attention |
@@ -81,12 +83,14 @@ cmake --build build --config Release
 .\build\bin\Release\llama-server.exe `
   --model ./models/qwen-3.5.gguf `
   --port 1234 `
-  --n-ctx 4096 `
+  --n-ctx 8192 `
   --n-thread 8 `
   --mlock
 ```
 
 `--mlock` блокирует память, чтобы система не выгружала модель.
+
+**Примечание:** Для Qwen 3.5 с включенным Reasoning рекомендуется `--n-ctx 8192` или больше.
 
 ### Параметры для GPU (CUDA)
 
@@ -223,6 +227,14 @@ npm run server
 ```
 
 ## Решение проблем
+
+### Ошибка: "Слишком длинное сообщение" или "Message too long" для Qwen 3.5 с Reasoning
+
+Если при использовании Qwen 3.5 с включенным Reasoning ответ обрывается досрочно, это связано с ограничением длины сообщения:
+
+1. **Увеличьте `--n-ctx` в llama.cpp** до 8192 или больше (рекомендуется 16384 для длинных диалогов)
+2. **Проверьте `max_tokens` в сервере HomeTavern** - должно быть установлено на 999999 (уже настроено по умолчанию)
+3. **Убедитесь, что модель поддерживает указанное контекстное окно** - некоторые модели имеют максимальный размер контекста
 
 ### Ошибка: "Connection refused"
 
