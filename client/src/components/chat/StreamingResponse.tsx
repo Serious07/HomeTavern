@@ -177,7 +177,7 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
 
   return (
     <div className="bg-gray-700/50 rounded-2xl p-4 animate-fadeIn">
-      {/* Typing indicator и кнопка Stop */}
+      {/* Typing indicator */}
       {isStreaming && (
         <div className="flex items-center gap-2 mb-3">
           <div className="flex gap-1">
@@ -186,12 +186,6 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
             <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce delay-200"></span>
           </div>
           <span className="text-sm text-gray-400">Печатает...</span>
-          <button
-            onClick={handleStop}
-            className="ml-2 px-3 py-1 bg-red-600 hover:bg-red-700 rounded-lg text-sm text-white transition"
-          >
-            Стоп
-          </button>
         </div>
       )}
 
@@ -234,6 +228,21 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       {error && (
         <div className="mt-3 p-3 bg-red-900/30 border border-red-700 rounded-lg">
           <p className="text-red-400 text-sm">{error}</p>
+        </div>
+      )}
+
+      {/* Stop button - внизу сообщения для всегда доступного доступа */}
+      {isStreaming && (
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={handleStop}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm text-white transition flex items-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+            Прервать генерацию
+          </button>
         </div>
       )}
     </div>
