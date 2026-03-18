@@ -1,5 +1,6 @@
 import React from 'react';
 import { Message } from '../../types';
+import { MarkdownRenderer } from '../common/MarkdownRenderer';
 
 interface MessageListProps {
   messages: Message[];
@@ -160,9 +161,11 @@ const MessageList: React.FC<MessageListProps> = ({
                   <div className="whitespace-pre-wrap">
                     {/* Показываем перевод для assistant сообщений, если доступен */}
                     {message.role === 'assistant' && message.translated_content ? (
-                      showOriginal[message.id] ? message.content : message.translated_content
+                      <MarkdownRenderer>
+                        {showOriginal[message.id] ? message.content : message.translated_content}
+                      </MarkdownRenderer>
                     ) : (
-                      message.content
+                      <MarkdownRenderer>{message.content}</MarkdownRenderer>
                     )}
                   </div>
                 )}

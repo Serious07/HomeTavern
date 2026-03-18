@@ -48,3 +48,6 @@ export const generateRandomString = (length: number): string => {
   }
   return result;
 };
+
+// Re-export statusBar utilities
+export { parseStatusBar, extractStatusBar, type StatusBarData } from './statusBar';

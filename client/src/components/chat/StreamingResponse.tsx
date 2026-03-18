@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Message } from '../../types';
 import { STORAGE_KEYS } from '../../constants/storage';
+import { MarkdownRenderer } from '../common/MarkdownRenderer';
 
 interface StreamingResponseProps {
   chatId: number;
@@ -225,7 +226,9 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       )}
 
       {/* Streaming content */}
-      <div className="text-white whitespace-pre-wrap">{content}</div>
+      <div className="text-white">
+        <MarkdownRenderer streaming>{content}</MarkdownRenderer>
+      </div>
 
       {/* Error message */}
       {error && (
