@@ -26,7 +26,10 @@ const corsOrigin = process.env.CORS_ORIGIN || '*';
 app.use(cors({
   origin: corsOrigin === '*' ? '*' : corsOrigin.split(',')
 }));
-app.use(express.json());
+
+// Увеличиваем лимит размера тела запроса до 100MB для поддержки загрузки аватарок
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 // Health check route
 app.get('/api/health', (req: Request, res: Response) => {
