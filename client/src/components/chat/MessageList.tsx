@@ -136,7 +136,7 @@ const MessageList: React.FC<MessageListProps> = ({
               <div
                 className={`rounded-2xl px-4 py-3 ${
                   isUser
-                    ? 'bg-blue-600 text-white rounded-br-md'
+                    ? 'bg-gray-600 text-white rounded-br-md'
                     : 'bg-gray-700/80 text-white rounded-bl-md'
                 }`}
               >
@@ -174,16 +174,16 @@ const MessageList: React.FC<MessageListProps> = ({
                 {isEditing ? (
                   <div className="space-y-2">
                     <textarea
-                       value={editContent}
-                       onChange={(e) => setEditContent(e.target.value)}
-                       className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none min-h-[600px]"
-                       rows={16}
-                     />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleEditSave}
-                        className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition"
-                      >
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                        className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-3 text-white focus:outline-none focus:ring-2 focus:ring-gray-500 resize-none min-h-[600px]"
+                        rows={16}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleEditSave}
+                          className="px-3 py-1 bg-gray-600 hover:bg-gray-500 rounded-lg text-sm font-medium transition"
+                        >
                         Сохранить
                       </button>
                       <button
@@ -226,9 +226,9 @@ const MessageList: React.FC<MessageListProps> = ({
                  {!isEditing && (
                    <div className="flex items-center gap-1">
                      {/* Индикатор перевода */}
-                     {message.role === 'assistant' && translatingMessageId === message.id && (
-                       <span className="text-xs text-blue-400 animate-pulse">Перевод...</span>
-                     )}
+                      {message.role === 'assistant' && translatingMessageId === message.id && (
+                        <span className="text-xs text-gray-400 animate-pulse">Перевод...</span>
+                      )}
                      {/* Кнопка переключения оригинал/перевод для assistant сообщений с переводом */}
                      {message.role === 'assistant' && message.translated_content && (
                        <button
@@ -242,12 +242,12 @@ const MessageList: React.FC<MessageListProps> = ({
                      {/* Кнопка перевода для assistant сообщений без перевода */}
                      {message.role === 'assistant' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
                        <button
-                         onClick={() => onTranslate(message.id)}
-                         className="p-1 px-2 text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 rounded transition text-xs font-medium bg-gray-800/50"
-                         title="Перевести на русский"
-                       >
-                         RU
-                       </button>
+                          onClick={() => onTranslate(message.id)}
+                          className="p-1 px-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition text-xs font-medium bg-gray-800/50"
+                          title="Перевести на русский"
+                        >
+                          RU
+                        </button>
                      )}
                      {/* Кнопка переключения оригинал/перевод для user сообщений с переводом */}
                        {message.role === 'user' && message.translated_content && (
@@ -263,7 +263,7 @@ const MessageList: React.FC<MessageListProps> = ({
                       {message.role === 'user' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
                         <button
                           onClick={() => onTranslate(message.id)}
-                          className="p-1 px-2 text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 rounded transition text-xs font-medium bg-gray-800/50"
+                          className="p-1 px-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition text-xs font-medium bg-gray-800/50"
                           title="Перевести на английский"
                         >
                           EN

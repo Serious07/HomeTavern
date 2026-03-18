@@ -145,7 +145,7 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
                 type="file"
                 accept="image/*"
                 onChange={handleAvatarChange}
-                className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
+                className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gray-600 file:text-white hover:file:bg-gray-500"
                 disabled={isLoading}
               />
             </div>
@@ -162,9 +162,9 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
               name="name"
               value={formData.name}
               onChange={handleInputChange}
-              className={`w-full px-4 py-3 bg-gray-700/50 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${
+              className={`w-full px-4 py-3 bg-gray-700/50 border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 transition ${
                 errors.name ? 'border-red-500' : 'border-gray-600'
-              } text-white placeholder-gray-500`}
+            } text-white placeholder-gray-500`}
               placeholder="Например: Гермиона Грейнджер"
               disabled={isLoading}
             />
@@ -182,9 +182,9 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
               value={formData.description}
               onChange={handleInputChange}
               rows={4}
-              className={`w-full px-4 py-3 bg-gray-700/50 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition resize-none ${
+              className={`w-full px-4 py-3 bg-gray-700/50 border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 transition resize-none ${
                 errors.description ? 'border-red-500' : 'border-gray-600'
-              } text-white placeholder-gray-500`}
+            } text-white placeholder-gray-500`}
               placeholder="Подробное описание персонажа, его история, внешность, контекст..."
               disabled={isLoading}
             />
@@ -202,7 +202,7 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
               value={formData.personality}
               onChange={handleInputChange}
               rows={3}
-              className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition resize-none text-white placeholder-gray-500"
+              className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 transition resize-none text-white placeholder-gray-500"
               placeholder="Характер, черты личности, манера речи..."
               disabled={isLoading}
             />
@@ -219,9 +219,9 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
               value={formData.first_message}
               onChange={handleInputChange}
               rows={3}
-              className={`w-full px-4 py-3 bg-gray-700/50 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition resize-none ${
+              className={`w-full px-4 py-3 bg-gray-700/50 border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 transition resize-none ${
                 errors.first_message ? 'border-red-500' : 'border-gray-600'
-              } text-white placeholder-gray-500`}
+            } text-white placeholder-gray-500`}
               placeholder="Приветственное сообщение персонажа..."
               disabled={isLoading}
             />
@@ -239,7 +239,7 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
               value={formData.system_prompt}
               onChange={handleInputChange}
               rows={3}
-              className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition resize-none text-white placeholder-gray-500"
+              className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 transition resize-none text-white placeholder-gray-500"
               placeholder="Инструкции для ИИ (как вести себя, ограничения...)"
               disabled={isLoading}
             />
@@ -258,7 +258,7 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
             <button
               type="submit"
               disabled={isLoading}
-              className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed rounded-lg font-semibold text-white transition"
+              className="flex-1 py-3 px-4 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg font-semibold text-white transition"
             >
               {isLoading ? 'Сохранение...' : 'Сохранить'}
             </button>

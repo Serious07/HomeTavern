@@ -28,7 +28,7 @@ body {
 
 /* Custom component styles */
 .btn-primary {
-  @apply px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition;
+  @apply px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg font-semibold transition;
 }
 
 .btn-secondary {
@@ -36,7 +36,7 @@ body {
 }
 
 .input {
-  @apply w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500;
+  @apply w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500;
 }
 
 .card {
@@ -49,7 +49,7 @@ body {
 }
 
 .message-bubble-user {
-  @apply message-bubble bg-blue-600 text-white rounded-br-md;
+  @apply message-bubble bg-gray-600 text-white rounded-br-md;
 }
 
 .message-bubble-assistant {
@@ -107,12 +107,12 @@ body {
 
 /* Focus styles for accessibility */
 :focus-visible {
-  @apply outline-none ring-2 ring-blue-500 ring-offset-2 ring-offset-gray-900;
+  @apply outline-none ring-2 ring-gray-500 ring-offset-2 ring-offset-gray-900;
 }
 
 /* Selection color */
 ::selection {
-  @apply bg-blue-600/30;
+  @apply bg-gray-600/50;
 }
 
 /* Loading spinner */
@@ -214,11 +214,11 @@ body {
 }
 
 .markdown-content blockquote {
-  @apply border-l-4 border-blue-500 pl-4 py-2 my-4 bg-gray-800/50 italic text-gray-300;
+  @apply border-l-4 border-gray-600 pl-4 py-2 my-4 bg-gray-800/50 italic text-gray-300;
 }
 
 .markdown-content a {
-  @apply text-blue-400 hover:text-blue-300 underline;
+  @apply text-cyan-400 hover:text-cyan-300 underline;
 }
 
 .markdown-content strong {

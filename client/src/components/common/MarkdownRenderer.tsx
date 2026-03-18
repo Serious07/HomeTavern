@@ -89,7 +89,7 @@ export const MarkdownRenderer: React.FC<{ children: string; streaming?: boolean 
           ),
           // Цитаты
           blockquote: ({ children }) => (
-            <blockquote className="border-l-4 border-blue-500 pl-4 py-2 my-4 bg-gray-800/50 italic text-gray-300">
+            <blockquote className="border-l-4 border-gray-600 pl-4 py-2 my-4 bg-gray-800/50 italic text-gray-300">
               {children}
             </blockquote>
           ),
@@ -99,7 +99,7 @@ export const MarkdownRenderer: React.FC<{ children: string; streaming?: boolean 
           a: ({ href, children }) => (
             <a 
               href={href} 
-              className="text-blue-400 hover:text-blue-300 underline" 
+              className="text-cyan-400 hover:text-cyan-300 underline" 
               target="_blank" 
               rel="noopener noreferrer"
             >

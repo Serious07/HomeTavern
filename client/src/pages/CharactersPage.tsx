@@ -165,7 +165,7 @@ const CharactersPage: React.FC = () => {
             {error === 'Требуется авторизация' && (
               <button
                 onClick={() => navigate('/login')}
-                className="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white text-sm"
+                className="mt-2 px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-white text-sm"
               >
                 Перейти на страницу входа
               </button>
@@ -177,7 +177,7 @@ const CharactersPage: React.FC = () => {
         <div className="flex flex-wrap gap-4 mb-8">
           <button
             onClick={handleCreateClick}
-            className="flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold text-white transition"
+            className="flex items-center gap-2 px-4 py-3 bg-gray-600 hover:bg-gray-500 rounded-lg font-semibold text-white transition"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -198,7 +198,7 @@ const CharactersPage: React.FC = () => {
         {/* Loading state */}
         {isLoading && (
           <div className="flex items-center justify-center py-12">
-            <svg className="animate-spin h-10 w-10 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <svg className="animate-spin h-10 w-10 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
@@ -220,7 +220,7 @@ const CharactersPage: React.FC = () => {
           {characters.map((character) => (
             <div
               key={character.id}
-              className="bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden hover:border-blue-500/50 transition group"
+              className="bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden hover:border-gray-500/50 transition group"
             >
               {/* Card header with avatar */}
               <div className="p-4 flex items-start gap-4">
@@ -232,7 +232,7 @@ const CharactersPage: React.FC = () => {
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-600 to-purple-600">
+                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-600 to-gray-500">
                       <span className="text-white text-xl font-bold">
                         {character.name.charAt(0).toUpperCase()}
                       </span>
@@ -265,7 +265,7 @@ const CharactersPage: React.FC = () => {
                       alert(err.response?.data?.message || 'Ошибка при создании чата');
                     }
                   }}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white text-sm font-medium transition"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-white text-sm font-medium transition"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />

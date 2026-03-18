@@ -7,18 +7,18 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Custom dark theme colors
+        // Custom dark theme colors (VS Code Dark+ inspired - neutral gray)
         primary: {
-          50: '#eff6ff',
-          100: '#dbeafe',
-          200: '#bfdbfe',
-          300: '#93c5fd',
-          400: '#60a5fa',
-          500: '#3b82f6',
-          600: '#2563eb',
-          700: '#1d4ed8',
-          800: '#1e40af',
-          900: '#1e3a8a',
+          50: '#f7f7f7',
+          100: '#e8e8e8',
+          200: '#d4d4d4',
+          300: '#a8a8a8',
+          400: '#808080',
+          500: '#6e6e6e',
+          600: '#525252',
+          700: '#404040',
+          800: '#2d2d2d',
+          900: '#1a1a1a',
         },
       },
       animation: {

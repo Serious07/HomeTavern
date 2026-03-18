@@ -45,7 +45,7 @@ const SettingsPage: React.FC = () => {
             <h2 className="text-xl font-bold text-white mb-4">Профиль пользователя</h2>
             
             <div className="flex items-center gap-4 mb-6">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
+              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-gray-600 to-gray-500 flex items-center justify-center">
                 <span className="text-white text-2xl font-bold">
                   {authState.user?.username?.charAt(0).toUpperCase() || 'U'}
                 </span>
@@ -71,7 +71,7 @@ const SettingsPage: React.FC = () => {
                   <p className="text-white font-medium">Тёмная тема</p>
                   <p className="text-gray-400 text-sm">Использовать тёмную тему интерфейса</p>
                 </div>
-                <div className="w-12 h-6 bg-blue-600 rounded-full relative">
+                <div className="w-12 h-6 bg-gray-600 rounded-full relative">
                   <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full"></div>
                 </div>
               </div>
