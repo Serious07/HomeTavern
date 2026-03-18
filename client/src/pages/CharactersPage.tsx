@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { charactersApi } from '../services/api';
+import { charactersApi, chatsApi } from '../services/api';
 import { Character } from '../types';
 import CharacterEditor from '../components/characters/CharacterEditor';
 
@@ -252,7 +252,19 @@ const CharactersPage: React.FC = () => {
               {/* Card actions */}
               <div className="px-4 py-3 bg-gray-800/80 border-t border-gray-700 flex items-center justify-between">
                 <button
-                  onClick={() => navigate(`/chats`)}
+                  onClick={async () => {
+                    if (!character.id) return;
+                    try {
+                      const response = await chatsApi.create({
+                        character_id: character.id,
+                        title: `Чат с ${character.name}`,
+                      });
+                      navigate(`/chats/${response.data.id}`);
+                    } catch (err: any) {
+                      console.error('Error creating chat:', err);
+                      alert(err.response?.data?.message || 'Ошибка при создании чата');
+                    }
+                  }}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white text-sm font-medium transition"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

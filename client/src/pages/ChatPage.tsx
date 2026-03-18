@@ -117,19 +117,6 @@ const ChatPage: React.FC = () => {
     }
   }, [chatId, navigate]);
 
-  const fetchCharacters = useCallback(async () => {
-    try {
-      const response = await charactersApi.getAll();
-      setCharacters(response.data);
-    } catch (err: any) {
-      if (err.response?.status === 401) {
-        navigate('/login');
-      } else {
-        console.error('Error fetching characters:', err);
-      }
-    }
-  }, [navigate]);
-
   const fetchMessages = useCallback(async () => {
     if (!chatId) return;
     
@@ -168,6 +155,19 @@ const ChatPage: React.FC = () => {
     setIsStreaming(false);
     setIsSending(false);
   }, [fetchMessages]);
+
+  const fetchCharacters = useCallback(async () => {
+    try {
+      const response = await charactersApi.getAll();
+      setCharacters(response.data);
+    } catch (err: any) {
+      if (err.response?.status === 401) {
+        navigate('/login');
+      } else {
+        console.error('Error fetching characters:', err);
+      }
+    }
+  }, [navigate]);
 
   useEffect(() => {
     fetchChats();
@@ -354,25 +354,6 @@ const ChatPage: React.FC = () => {
     setShowDeleteConfirm(false);
   };
 
-  const handleCreateNewChat = async () => {
-    try {
-      const firstCharacterId = characters[0]?.id;
-      if (!firstCharacterId) {
-        console.error('No characters available');
-        return;
-      }
-      const response = await chatsApi.create({
-        character_id: firstCharacterId, // Use first character by default
-      });
-      
-      const newChat = response.data;
-      setChats((prev) => [newChat, ...prev]);
-      navigate(`/chats/${newChat.id}`);
-    } catch (err: any) {
-      console.error('Error creating chat:', err);
-    }
-  };
-
   const getCharacterById = (id: number) => {
     return characters.find((c) => c.id === id);
   };
@@ -478,19 +459,6 @@ const ChatPage: React.FC = () => {
                 </button>
               );
             })}
-          </div>
-
-          {/* New chat button */}
-          <div className="shrink-0 p-4 border-t border-gray-700">
-            <button
-              onClick={handleCreateNewChat}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold text-white transition"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Новый чат
-            </button>
           </div>
       </div>
 
