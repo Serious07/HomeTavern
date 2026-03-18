@@ -68,9 +68,17 @@ function formatMessagesForQwen(
     if (msg.hidden) continue; // Пропускаем скрытые сообщения
 
     const role = msg.role === 'user' ? 'user' : 'assistant';
+    
+    // Для LLM всегда используем английский текст:
+    // - user сообщения: translated_content (перевод с русского на английский)
+    // - assistant сообщения: content (оригинал на английском)
+    const contentForLLM = msg.role === 'user'
+      ? (msg.translated_content || msg.content)  // Если есть перевод, используем его
+      : msg.content;  // Для assistant используем оригинал (уже на английском)
+    
     messages.push({
       role,
-      content: msg.content
+      content: contentForLLM
     });
   }
 
@@ -173,6 +181,9 @@ export class LLMService {
 
       const { character, heroProfile, historyMessages } = context;
 
+      // Debug: логирование текущего сообщения перед отправкой в LLM
+      console.log('[LLMService] Current user message to LLM:', userMessage.substring(0, 100));
+
       // Формируем историю сообщений для Qwen 3.5
       const messages = formatMessagesForQwen(
         character,
@@ -180,6 +191,9 @@ export class LLMService {
         historyMessages,
         userMessage
       );
+
+      // Debug: логирование сформированной истории
+      console.log('[LLMService] Messages to LLM:', JSON.stringify(messages, null, 2).substring(0, 500));
 
       // Проверяем наличие клиента
       if (!this.client) {

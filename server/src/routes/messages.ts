@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { messageService } from '../services/message.service';
 import { chatService } from '../services/chat.service';
+import { translationService } from '../services/translation.service';
 
 const router = Router();
 
@@ -35,7 +36,7 @@ router.get('/chats/:chatId/messages', (req: AuthenticatedRequest, res: Response)
  * Создание сообщения
  * Body: { role: string, content: string, translated_content?: string }
  */
-router.post('/chats/:chatId/messages', (req: AuthenticatedRequest, res: Response) => {
+router.post('/chats/:chatId/messages', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
     const chatId = parseInt(req.params.chatId, 10);
@@ -49,7 +50,25 @@ router.post('/chats/:chatId/messages', (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ error: 'role and content are required' });
     }
 
-    const message = messageService.createMessage(chatId, userId, role, content, translated_content);
+    // Автоматический перевод сообщения пользователя на английский
+    let translatedContent = translated_content;
+    if (role === 'user' && !translatedContent) {
+      try {
+        const detectedLang = await translationService.detectLanguage(content);
+        if (detectedLang !== 'en') {
+          translatedContent = await translationService.translate(content, { sourceLang: detectedLang, targetLang: 'en' }).then(r => r.translatedText);
+          console.log(`[Translation] Translated user message from ${detectedLang} to en:`, translatedContent);
+        } else {
+          translatedContent = content; // Уже на английском
+        }
+      } catch (translateError) {
+        console.error('[Translation] Translation error:', translateError);
+        // Если перевод не удался, используем оригинал
+        translatedContent = content;
+      }
+    }
+
+    const message = messageService.createMessage(chatId, userId, role, content, translatedContent);
     res.status(201).json(message);
   } catch (error) {
     const error_ = error as Error & { statusCode?: number };

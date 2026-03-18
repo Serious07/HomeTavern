@@ -96,21 +96,28 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     const lastUserMessage = userMessages[userMessages.length - 1];
 
     // 3. Используем контент сообщения (уже может быть переведен на английский)
+    console.log('[ChatsRoute] Last user message content:', lastUserMessage.content);
+    console.log('[ChatsRoute] Last user message translated_content:', lastUserMessage.translated_content);
     const messageText = lastUserMessage.translated_content || lastUserMessage.content;
+    console.log('[ChatsRoute] Using message text:', messageText);
     const detectedLang = await translationService.detectLanguage(messageText);
+    console.log('[ChatsRoute] Detected language:', detectedLang);
     let messageInEnglish = messageText;
 
     if (detectedLang === 'ru') {
-      sendSSEEvent(res, 'translation', { 
+      sendSSEEvent(res, 'translation', {
         type: 'user_message_translation',
         from: 'ru',
         to: 'en'
       });
       messageInEnglish = await translationService.translateToEnglish(messageText);
       console.log(`Translated user message: "${messageText}" -> "${messageInEnglish}"`);
+    } else {
+      console.log('[ChatsRoute] Message is already in English, no translation needed');
     }
 
     // 4. Генерируем поток ответа от LLM
+    console.log('[ChatsRoute] Sending to LLM:', messageInEnglish);
     const stream = llmService.generateStream(userId, chatId, messageInEnglish);
 
     // 5. Создаем сообщение ассистента в БД ПЕРЕД потоком (чтобы получить ID)
@@ -316,25 +323,31 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // 2. Переводим сообщение пользователя на английский (если на русском)
+    console.log('[ChatsRoute] Original message:', message);
     const detectedLang = await translationService.detectLanguage(message);
+    console.log('[ChatsRoute] Detected language:', detectedLang);
     let messageInEnglish = message;
 
     if (detectedLang === 'ru') {
-      sendSSEEvent(res, 'translation', { 
+      sendSSEEvent(res, 'translation', {
         type: 'user_message_translation',
         from: 'ru',
         to: 'en'
       });
       messageInEnglish = await translationService.translateToEnglish(message);
       console.log(`Translated user message: "${message}" -> "${messageInEnglish}"`);
+    } else {
+      console.log('[ChatsRoute] Message is already in English, no translation needed');
     }
 
     // 3. Сохраняем сообщение пользователя в БД
+    const shouldSaveTranslation = messageInEnglish !== message && messageInEnglish.trim() !== '';
+    console.log('[ChatsRoute] Should save translation:', shouldSaveTranslation, '- messageInEnglish:', messageInEnglish);
     const userMessage = messageRepository.createMessage(
       chatIdNum,
       'user',
       message,
-      messageInEnglish !== message ? messageInEnglish : undefined
+      shouldSaveTranslation ? messageInEnglish : undefined
     );
 
     // 4. Генерируем поток ответа от LLM
