@@ -7,6 +7,7 @@ interface StreamingResponseProps {
   onStop?: () => void;
   onComplete?: (message: Message) => void;
   onError?: (error: string) => void;
+  onTokenUpdate?: () => void;  // Колбэк для уведомления о каждом новом токене
 }
 
 const StreamingResponse: React.FC<StreamingResponseProps> = ({
@@ -14,6 +15,7 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   onStop,
   onComplete,
   onError,
+  onTokenUpdate,
 }) => {
   const [isStreaming, setIsStreaming] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +48,8 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
           return newValue;
         });
         setShowThinking(true);
+        // Вызываем колбэк для скролла
+        onTokenUpdate?.();
       } catch (err) {
         // Ignore parse errors
       }
@@ -59,6 +63,8 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
           contentRef.current = newValue;
           return newValue;
         });
+        // Вызываем колбэк для скролла
+        onTokenUpdate?.();
       } catch (err) {
         // Ignore parse errors
       }

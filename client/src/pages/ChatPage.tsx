@@ -78,8 +78,8 @@ const ChatPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
  const [translatingMessageId, setTranslatingMessageId] = useState<number | null>(null);
-  
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+ 
+ const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const fetchChats = useCallback(async () => {
     try {
@@ -148,7 +148,7 @@ const ChatPage: React.FC = () => {
   }, [chatId, navigate]);
 
   // Callbacks для StreamingResponse - обернуты в useCallback чтобы избежать пересоздания
-  const handleStreamingComplete = useCallback(async (message: Message) => {
+  const handleStreamingComplete = useCallback(async (_message: Message) => {
     // Сначала обновляем сообщения, потом устанавливаем isStreaming и isSending в false
     await fetchMessages();
     setIsStreaming(false);
@@ -179,10 +179,15 @@ const ChatPage: React.FC = () => {
     }
   }, [chatId, fetchMessages]);
 
+  // Функция скролла к концу (используется в onTokenUpdate)
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+  }, []);
+
   useEffect(() => {
-    // Scroll to bottom when messages change
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    // Scroll to bottom when messages change or streaming starts
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+  }, [messages, isStreaming]);
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !chatId || isSending || isStreaming) return;
@@ -528,66 +533,70 @@ const ChatPage: React.FC = () => {
           </div>
         </div>
 
-       {/* Messages area - скроллим только историю */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {!currentChat ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <svg className="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
-                </svg>
-                <p className="text-gray-400">Выберите чат или создайте новый</p>
-              </div>
-            </div>
-          ) : isChatLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <svg className="animate-spin h-12 w-12 text-blue-500 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <p className="text-gray-400">Загрузка сообщений...</p>
-              </div>
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <svg className="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
-                </svg>
-                <p className="text-gray-400">Начните разговор!</p>
-              </div>
-            </div>
-          ) : (
-            <MessageList
-                messages={messages}
-                onRegenerate={handleRegenerate}
-                onEdit={handleEditMessage}
-                onDelete={handleDeleteMessage}
-                showThinking={showThinking}
-                onToggleThinking={handleToggleThinking}
-                translatingMessageId={translatingMessageId}
-                onTranslate={handleTranslateMessage}
-              />
-          )}
-          
-          <div ref={messagesEndRef} />
-        </div>
+        {/* Messages area - скроллим только историю */}
+         <div className="flex-1 overflow-y-auto p-4">
+           {!currentChat ? (
+             <div className="flex items-center justify-center h-full">
+               <div className="text-center">
+                 <svg className="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
+                 </svg>
+                 <p className="text-gray-400">Выберите чат или создайте новый</p>
+               </div>
+             </div>
+           ) : isChatLoading ? (
+             <div className="flex items-center justify-center h-full">
+               <div className="text-center">
+                 <svg className="animate-spin h-12 w-12 text-blue-500 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                 </svg>
+                 <p className="text-gray-400">Загрузка сообщений...</p>
+               </div>
+             </div>
+           ) : messages.length === 0 ? (
+             <div className="flex items-center justify-center h-full">
+               <div className="text-center">
+                 <svg className="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
+                 </svg>
+                 <p className="text-gray-400">Начните разговор!</p>
+               </div>
+             </div>
+           ) : (
+             <MessageList
+                 messages={messages}
+                 onRegenerate={handleRegenerate}
+                 onEdit={handleEditMessage}
+                 onDelete={handleDeleteMessage}
+                 showThinking={showThinking}
+                 onToggleThinking={handleToggleThinking}
+                 translatingMessageId={translatingMessageId}
+                 onTranslate={handleTranslateMessage}
+               />
+           )}
+           
+           {/* Streaming response - ВНУТРИ скроллируемой области, чтобы скролл работал корректно */}
+           {isStreaming && (
+             <div
+               key={`streaming-${chatId}`}
+               className="mt-4 bg-gray-800/30 border-t border-gray-700 p-4"
+             >
+               <StreamingResponse
+                 chatId={parseInt(chatId || '0')}
+                 onStop={handleStreamingStop}
+                 onComplete={handleStreamingComplete}
+                 onError={handleStreamingError}
+                 onTokenUpdate={scrollToBottom}
+               />
+             </div>
+           )}
+           
+           <div ref={messagesEndRef} />
+         </div>
 
-        {/* Streaming response - ВНЕ скроллируемой области */}
-        {isStreaming && (
-          <div key={`streaming-${chatId}`} className="shrink-0 bg-gray-800/30 border-t border-gray-700 p-4">
-            <StreamingResponse
-              chatId={parseInt(chatId || '0')}
-              onStop={handleStreamingStop}
-              onComplete={handleStreamingComplete}
-              onError={handleStreamingError}
-            />
-          </div>
-        )}
-
-        {/* Message input - зафиксировано снизу */}
-        <div className="shrink-0 bg-gray-800/50 border-t border-gray-700 p-4">
+         {/* Message input - зафиксировано снизу */}
+         <div className="shrink-0 bg-gray-800/50 border-t border-gray-700 p-4">
           <div className="flex items-end gap-4">
             <textarea
               value={messageInput}
