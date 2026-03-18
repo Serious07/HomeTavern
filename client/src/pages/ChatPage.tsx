@@ -80,6 +80,7 @@ const ChatPage: React.FC = () => {
  const [translatingMessageId, setTranslatingMessageId] = useState<number | null>(null);
  
  const messagesEndRef = useRef<HTMLDivElement>(null);
+ const messageInputRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchChats = useCallback(async () => {
     try {
@@ -188,6 +189,14 @@ const ChatPage: React.FC = () => {
     // Scroll to bottom when messages change or streaming starts
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, isStreaming]);
+
+  // Автофокус на поле ввода после окончания стриминга
+  useEffect(() => {
+    if (!isStreaming && isSending) {
+      messageInputRef.current?.focus();
+      setIsSending(false);
+    }
+  }, [isStreaming, isSending]);
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !chatId || isSending || isStreaming) return;
@@ -590,6 +599,7 @@ const ChatPage: React.FC = () => {
          <div className="shrink-0 bg-gray-800/50 border-t border-gray-700 p-4">
           <div className="flex items-end gap-4">
             <textarea
+              ref={messageInputRef}
               value={messageInput}
               onChange={(e) => setMessageInput(e.target.value)}
               onKeyDown={(e) => {
