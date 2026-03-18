@@ -236,17 +236,8 @@ const ChatPage: React.FC = () => {
       // Fetch updated messages
       await fetchMessages();
       
-      // The user message is now the last message, trigger regeneration
-      const lastUserMessage = messages.filter(m => m.role === 'user').pop();
-      if (lastUserMessage) {
-        // Send the same message again
-        await chatsApi.sendMessage(parseInt(chatId), {
-          content: lastUserMessage.content,
-          role: 'user',
-        });
-        
-        setIsStreaming(true);
-      }
+      // Start streaming response - server will find the last user message from DB
+      setIsStreaming(true);
     } catch (err: any) {
       console.error('Error regenerating:', err);
     }
