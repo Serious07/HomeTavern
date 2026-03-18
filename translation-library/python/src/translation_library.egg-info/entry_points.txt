@@ -1,0 +1,2 @@
+[console_scripts]
+translation-cli = translation_library.cli:main

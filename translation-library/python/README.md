@@ -1,0 +1,279 @@
+# Translation Library for Python
+
+Библиотека перевода для Python, которая поддерживает следующие сервисы:
+- Google Translate
+- Yandex Translate
+- LibreTranslate (самостоятельный хостинг)
+
+## Установка
+
+```bash
+pip install -e .
+```
+
+## Зависимости
+
+- `googletrans==4.0.0-rc1` - для Google Translate
+- `yandextranslate` - для Yandex Translate
+- `aiohttp` - для асинхронных запросов
+
+## Использование
+
+### Базовый перевод
+
+```python
+from translation_library import TranslationLibrary, TranslatorProvider
+
+# Создаём библиотеку
+library = TranslationLibrary(
+    default_provider=TranslatorProvider.GOOGLE,
+    default_api_key='your-api-key',
+)
+
+# Переводим текст
+result = library.translate(
+    text='Hello, world!',
+    target_language='ru',
+)
+print(result.text)  # Привет, мир!
+```
+
+### Асинхронный перевод
+
+```python
+import asyncio
+from translation_library import TranslationLibrary, TranslatorProvider
+
+async def main():
+    library = TranslationLibrary(
+        default_provider=TranslatorProvider.LIBRETRANSLATE,
+        default_endpoint='https://libretranslate.de/translate',
+    )
+    
+    result = await library.translate_async(
+        text='Hello, world!',
+        target_language='ru',
+    )
+    print(result.text)
+    
+    await library.close()
+
+asyncio.run(main())
+```
+
+### Определение языка
+
+```python
+from translation_library import TranslationLibrary, TranslatorProvider
+
+library = TranslationLibrary(
+    default_provider=TranslatorProvider.GOOGLE,
+)
+
+# Определяем язык
+lang = library.detect_language('Привет, мир!')
+print(lang)  # ru
+```
+
+### Получение списка поддерживаемых языков
+
+```python
+from translation_library import TranslationLibrary, TranslatorProvider
+
+library = TranslationLibrary(
+    default_provider=TranslatorProvider.GOOGLE,
+)
+
+# Получаем список языков
+languages = library.get_supported_languages()
+print(languages)
+```
+
+### Использование с Yandex Translate
+
+```python
+from translation_library import TranslationLibrary, TranslatorProvider
+
+library = TranslationLibrary(
+    default_provider=TranslatorProvider.YANDEX,
+    default_api_key='your-yandex-api-key',
+)
+
+result = library.translate(
+    text='Hello, world!',
+    target_language='ru',
+)
+print(result.text)
+```
+
+### Использование с LibreTranslate
+
+```python
+from translation_library import TranslationLibrary, TranslatorProvider
+
+library = TranslationLibrary(
+    default_provider=TranslatorProvider.LIBRETRANSLATE,
+    default_endpoint='https://libretranslate.de/translate',
+    default_api_key='your-api-key',  # Опционально
+)
+
+result = library.translate(
+    text='Hello, world!',
+    target_language='ru',
+)
+print(result.text)
+```
+
+### Перевод с указанием исходного языка
+
+```python
+from translation_library import TranslationLibrary, TranslatorProvider
+
+library = TranslationLibrary(
+    default_provider=TranslatorProvider.GOOGLE,
+)
+
+result = library.translate(
+    text='Hello, world!',
+    target_language='ru',
+    source_language='en',
+)
+print(result.text)
+```
+
+### Обработка ошибок
+
+```python
+from translation_library import TranslationLibrary, TranslatorProvider, TranslationError
+
+library = TranslationLibrary(
+    default_provider=TranslatorProvider.GOOGLE,
+)
+
+try:
+    result = library.translate(
+        text='',  # Пустой текст вызовет ошибку
+        target_language='ru',
+    )
+except TranslationError as error:
+    print(f'Ошибка перевода: {error.message}')
+    print(f'Провайдер: {error.provider}')
+```
+
+### Настройка таймаута и количества попыток
+
+```python
+from translation_library import TranslationLibrary, TranslatorProvider
+
+library = TranslationLibrary(
+    default_provider=TranslatorProvider.GOOGLE,
+    default_timeout=60000,  # 60 секунд
+    default_retries=5,
+)
+```
+
+### Использование CLI
+
+```bash
+# Перевод текста
+python -m translation_library.cli "Hello, world!" -t ru -p google
+
+# Определение языка
+python -m translation_library.cli "Привет, мир!" --detect -p google
+
+# Список языков
+python -m translation_library.cli --languages -p google
+```
+
+## API
+
+### TranslationLibrary
+
+Класс для работы с библиотекой перевода.
+
+#### Конструктор
+
+```python
+TranslationLibrary(
+    default_provider: Optional[TranslatorProvider] = None,
+    default_api_key: Optional[str] = None,
+    default_endpoint: Optional[str] = None,
+    default_timeout: int = 30000,
+    default_retries: int = 3,
+)
+```
+
+#### Методы
+
+- `translate(text, target_language, source_language=None, provider=None, api_key=None, endpoint=None, timeout=None, retries=None) -> TranslationResult`
+  Выполняет перевод текста.
+
+- `translate_async(text, target_language, source_language=None, provider=None, api_key=None, endpoint=None, timeout=None, retries=None) -> TranslationResult`
+  Асинхронный перевод текста.
+
+- `detect_language(text, provider=None) -> str`
+  Определяет язык текста.
+
+- `detect_language_async(text, provider=None) -> str`
+  Асинхронное определение языка текста.
+
+- `get_supported_languages(provider=None) -> List[str]`
+  Получает список поддерживаемых языков.
+
+- `get_supported_languages_async(provider=None) -> List[str]`
+  Асинхронное получение списка поддерживаемых языков.
+
+- `close()`
+  Закрывает все ресурсы.
+
+### TranslationResult
+
+Результат перевода.
+
+- `text: str` - Переведённый текст
+- `source_language: Optional[str]` - Исходный язык
+- `provider: TranslatorProvider` - Провайдер перевода
+
+### TranslationOptions
+
+Опции перевода.
+
+- `target_language: str` - Целевой язык
+- `source_language: Optional[str]` - Исходный язык
+
+### TranslationError
+
+Ошибка перевода.
+
+- `message: str` - Сообщение об ошибке
+- `provider: Optional[TranslatorProvider]` - Провайдер перевода
+- `status_code: Optional[int]` - Код статуса HTTP
+- `details: Optional[object]` - Дополнительные детали
+
+### TranslatorProvider
+
+Перечисление провайдеров перевода.
+
+- `GOOGLE` - Google Translate
+- `YANDEX` - Yandex Translate
+- `LIBRETRANSLATE` - LibreTranslate
+
+## Поддерживаемые языки
+
+### Google Translate
+
+Google Translate поддерживает более 100 языков, включая:
+- af, sq, am, ar, hy, az, eu, be, bn, bs, bg, ca, zh-CN, zh-TW, hr, cs, da, nl, en, eo, et, fi, fr, gl, ka, de, el, gu, ht, he, hi, hu, is, id, ga, it, ja, jw, kn, kk, km, ko, ku, ky, lo, la, lv, lt, mk, ms, ml, mt, mi, mr, mn, my, ne, no, fa, pl, pt, pa, ro, ru, sr, sk, sl, es, sw, sv, tl, ta, te, th, tr, uk, ur, uz, vi, cy, yi, zu
+
+### Yandex Translate
+
+Yandex Translate поддерживает более 100 языков, включая:
+- af, sq, am, ar, hy, az, be, bn, bg, ca, ceb, zh-CN, co, cs, da, nl, en, eo, et, fi, fr, fy, gl, ka, de, el, gu, ht, ha, haw, he, hi, hmn, hu, is, ig, id, ga, it, ja, jv, kn, kk, km, rw, ko, ku, ky, lo, la, lv, lt, lb, mk, mg, ms, ml, mt, mi, mr, mn, my, ne, no, ny, or, ps, fa, pl, pt, pa, ro, ru, sm, gd, sr, st, sn, sd, si, sk, sl, so, es, su, sw, sv, tg, ta, tt, te, th, tr, tk, uk, ur, ug, uz, vi, cy, xh, yi, yo, zu
+
+### LibreTranslate
+
+LibreTranslate поддерживает языки, доступные на выбранном сервере. Обычно это основные мировые языки.
+
+## Лицензия
+
+MIT License

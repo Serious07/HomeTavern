@@ -1,0 +1,20 @@
+{
+  "name": "hometavern-v5",
+  "version": "1.0.0",
+  "description": "HomeTavern V5 - Fullstack приложение для ролевых игр с LLM",
+  "scripts": {
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm run dev",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "cd server && npm run build",
+    "build:client": "cd client && npm run build",
+    "start": "cd server && npm start"
+  },
+  "keywords": ["rpg", "llm", "chat", "homebrew"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

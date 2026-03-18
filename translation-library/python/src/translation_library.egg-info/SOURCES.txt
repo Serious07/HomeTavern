@@ -1,0 +1,17 @@
+README.md
+pyproject.toml
+src/translation_library/__init__.py
+src/translation_library/chunker.py
+src/translation_library/cli.py
+src/translation_library/core.py
+src/translation_library/types.py
+src/translation_library.egg-info/PKG-INFO
+src/translation_library.egg-info/SOURCES.txt
+src/translation_library.egg-info/dependency_links.txt
+src/translation_library.egg-info/entry_points.txt
+src/translation_library.egg-info/requires.txt
+src/translation_library.egg-info/top_level.txt
+src/translation_library/translators/base.py
+src/translation_library/translators/google.py
+src/translation_library/translators/libretranslate.py
+src/translation_library/translators/yandex.py
