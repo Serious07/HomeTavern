@@ -5,7 +5,7 @@ const db: any = new Database('hometavern.db');
 // Enable foreign keys
 db.pragma('foreign_keys = ON');
 
-// Initialize database tables (placeholder)
+// Initialize database tables
 db.exec(`
   -- Users table
   CREATE TABLE IF NOT EXISTS users (
@@ -52,10 +52,36 @@ db.exec(`
     role TEXT NOT NULL,
     content TEXT NOT NULL,
     translated_content TEXT,
+    reasoning_content TEXT,
     message_id TEXT,
     hidden INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+  );
+
+  -- Hero Variations table - stores different versions of the user's hero profile
+  CREATE TABLE IF NOT EXISTS hero_variations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    avatar TEXT,
+    is_active INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  -- Settings table
+  CREATE TABLE IF NOT EXISTS settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE(user_id, key)
   );
 `);
 

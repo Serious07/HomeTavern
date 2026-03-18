@@ -133,3 +133,50 @@ export interface LoginResponse {
   token: string;
   user: Omit<User, 'password_hash'>;
 }
+
+// Hero Variation types
+export interface HeroVariation {
+  id: number;
+  user_id: number;
+  name: string;
+  description: string | null;
+  avatar: string | null;
+  is_active: number;  // 0 or 1
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateHeroVariationInput {
+  user_id: number;
+  name: string;
+  description?: string;
+  avatar?: string;
+  is_active?: boolean;
+}
+
+export interface UpdateHeroVariationInput {
+  name?: string;
+  description?: string;
+  avatar?: string;
+  is_active?: boolean;
+}
+
+// Settings types
+export interface Setting {
+  id: number;
+  user_id: number;
+  key: string;
+  value: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateSettingInput {
+  user_id: number;
+  key: string;
+  value: string | null;
+}
+
+export interface UpdateSettingInput {
+  value: string | null;
+}

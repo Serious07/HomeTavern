@@ -45,3 +45,14 @@ export interface Hero {
   created_at?: string;
   updated_at?: string;
 }
+
+export interface HeroVariation {
+  id: number;
+  user_id: number;
+  name: string;
+  description: string | null;
+  avatar: string | null;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+}

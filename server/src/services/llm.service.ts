@@ -6,6 +6,7 @@
 import { characterRepository } from '../repositories/character.repository';
 import { chatRepository } from '../repositories/chat.repository';
 import { userRepository } from '../repositories/user.repository';
+import { heroVariationRepository } from '../repositories/hero.variation.repository';
 
 // Типы для LLM
 export interface LLMMessage {
@@ -29,7 +30,34 @@ export interface ChatContext {
   chat: any;
   character: any;
   heroProfile: string | null;
+  heroName: string | null;
   historyMessages: any[];
+}
+
+/**
+ * Заменяет плейсхолдеры {{user}}, {user}, {{USER}}, {USER} и т.д. на имя героя
+ */
+function replaceUserPlaceholders(text: string, heroName: string | null): string {
+  if (!heroName) {
+    return text;
+  }
+  
+  // Заменяем различные варианты плейсхолдеров (регистронезависимо)
+  const placeholders = [
+    /\{\{user\}\}/gi,
+    /\{user\}/gi,
+    /\{\{USER\}\}/gi,
+    /\{USER\}/gi,
+    /\{\{User\}\}/gi,
+    /\{User\}/gi,
+  ];
+  
+  let result = text;
+  for (const placeholder of placeholders) {
+    result = result.replace(placeholder, heroName);
+  }
+  
+  return result;
 }
 
 /**
@@ -39,6 +67,7 @@ export interface ChatContext {
 function formatMessagesForQwen(
   character: any,
   heroProfile: string | null,
+  heroName: string | null,
   historyMessages: any[],
   currentMessage: string
 ): LLMMessage[] {
@@ -48,7 +77,9 @@ function formatMessagesForQwen(
   const systemParts: string[] = [];
   
   if (character.system_prompt) {
-    systemParts.push(character.system_prompt);
+    // Заменяем плейсхолдеры {{user}} на имя героя в системном промпте
+    const processedSystemPrompt = replaceUserPlaceholders(character.system_prompt, heroName);
+    systemParts.push(processedSystemPrompt);
   }
   
   if (heroProfile) {
@@ -82,10 +113,11 @@ function formatMessagesForQwen(
     });
   }
 
-  // 3. Текущее сообщение пользователя
+  // 3. Текущее сообщение пользователя (также заменяем плейсхолдеры)
+  const processedCurrentMessage = replaceUserPlaceholders(currentMessage, heroName);
   messages.push({
     role: 'user',
-    content: currentMessage
+    content: processedCurrentMessage
   });
 
   return messages;
@@ -138,9 +170,12 @@ export class LLMService {
         return null;
       }
 
-      // Получаем профиль героя пользователя (из настроек или расширенных данных)
-      // Для примера используем описание персонажа как профиль
-      const heroProfile = character.description || null;
+      // Получаем профиль героя пользователя
+      const heroProfile = heroVariationRepository.getHeroProfileForLLM(userId);
+      
+      // Получаем имя героя для подстановки в промпты
+      const activeHero = heroVariationRepository.getActiveHeroVariationByUserId(userId);
+      const heroName = activeHero?.name || null;
 
       // Получаем историю сообщений
       const historyMessages = chatRepository.getChatWithMessages(chatId)?.messages || [];
@@ -149,6 +184,7 @@ export class LLMService {
         chat,
         character,
         heroProfile,
+        heroName,
         historyMessages,
       };
     } catch (error) {
@@ -179,15 +215,18 @@ export class LLMService {
         throw new Error('Chat context not found');
       }
 
-      const { character, heroProfile, historyMessages } = context;
+      const { character, heroProfile, heroName, historyMessages } = context;
 
       // Debug: логирование текущего сообщения перед отправкой в LLM
       console.log('[LLMService] Current user message to LLM:', userMessage.substring(0, 100));
+      console.log('[LLMService] Hero name:', heroName);
+      console.log('[LLMService] Hero profile:', heroProfile);
 
       // Формируем историю сообщений для Qwen 3.5
       const messages = formatMessagesForQwen(
         character,
         heroProfile,
+        heroName,
         historyMessages,
         userMessage
       );

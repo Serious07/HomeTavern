@@ -99,10 +99,6 @@ const MessageList: React.FC<MessageListProps> = ({
   return (
     <div className="space-y-4">
       {messages.map((message, index) => {
-        // Находим первое сообщение assistant
-        const firstAssistantMessageIndex = messages.findIndex((m) => m.role === 'assistant');
-        // Первое сообщение assistant - это первое сообщение в чате от assistant
-        const isFirstMessage = index === firstAssistantMessageIndex && message.role === 'assistant';
         // Находим последнее сообщение assistant
         const lastAssistantMessageIndex = messages.map(m => m.role).lastIndexOf('assistant');
         // Последнее сообщение assistant - это последнее сообщение от assistant в чате

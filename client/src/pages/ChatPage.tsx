@@ -479,6 +479,15 @@ const ChatPage: React.FC = () => {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => navigate('/hero')}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
+              title="Профиль героя"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a5 5 0 00-5 5h10a5 5 0 00-5-5z" />
+              </svg>
+            </button>
+            <button
               onClick={() => navigate('/characters')}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
               title="Персонажи"
