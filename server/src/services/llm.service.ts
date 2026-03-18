@@ -202,21 +202,22 @@ export class LLMService {
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta || {};
         const content = delta.content || '';
+        const reasoningContent = delta.reasoning_content || '';
 
+        // Отправляем reasoning_token если есть reasoning_content
+        if (reasoningContent) {
+          yield {
+            type: 'reasoning_token',
+            token: reasoningContent
+          };
+        }
+
+        // Отправляем content_token если есть content
         if (content) {
-          // Простая эвристика для разделения reasoning и content
-          // В реальном использовании LLM должен возвращать reasoning отдельно
-          if (delta.reasoning_content) {
-            yield {
-              type: 'reasoning_token',
-              token: delta.reasoning_content
-            };
-          } else {
-            yield {
-              type: 'content_token',
-              token: content
-            };
-          }
+          yield {
+            type: 'content_token',
+            token: content
+          };
         }
       }
     } catch (error) {
