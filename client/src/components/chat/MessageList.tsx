@@ -33,11 +33,17 @@ const MessageList: React.FC<MessageListProps> = ({
 
   const handleEditStart = (message: Message) => {
     setEditingMessageId(message.id);
-    // Для assistant и user сообщений с переводом используем текущее отображаемое состояние
-    if ((message.role === 'assistant' || message.role === 'user') && message.translated_content) {
+    // Для assistant сообщений с переводом используем текущее отображаемое состояние
+    if (message.role === 'assistant' && message.translated_content) {
       // Если показывается оригинал, используем content, иначе translated_content
       setEditContent(showOriginal[message.id] ? message.content : message.translated_content);
-    } else {
+    }
+    // Для user сообщений с переводом на английский - по умолчанию показываем оригинал (RU)
+    else if (message.role === 'user' && message.translated_content) {
+      // Если showOriginal[message.id] === true, показываем перевод (EN), иначе оригинал (RU)
+      setEditContent(showOriginal[message.id] === true ? message.translated_content : message.content);
+    }
+    else {
       setEditContent(message.content);
     }
   };
@@ -79,9 +85,9 @@ const MessageList: React.FC<MessageListProps> = ({
     if (message.role === 'assistant' && message.translated_content) {
       textToCopy = showOriginal[message.id] ? message.content : message.translated_content;
     }
-    // Для user сообщений с переводом на английский также используем showOriginal
+    // Для user сообщений с переводом на английский - по умолчанию показываем оригинал (RU)
     else if (message.role === 'user' && message.translated_content) {
-      textToCopy = showOriginal[message.id] ? message.content : message.translated_content;
+      textToCopy = showOriginal[message.id] === true ? message.translated_content : message.content;
     }
     
     navigator.clipboard.writeText(textToCopy).then(() => {
@@ -197,7 +203,7 @@ const MessageList: React.FC<MessageListProps> = ({
                         </MarkdownRenderer>
                       ) : message.role === 'user' && message.translated_content ? (
                         <MarkdownRenderer>
-                          {showOriginal[message.id] ? message.content : message.translated_content}
+                          {showOriginal[message.id] === true ? message.translated_content : message.content}
                         </MarkdownRenderer>
                       ) : (
                         <MarkdownRenderer>{message.content}</MarkdownRenderer>
@@ -244,15 +250,15 @@ const MessageList: React.FC<MessageListProps> = ({
                        </button>
                      )}
                      {/* Кнопка переключения оригинал/перевод для user сообщений с переводом */}
-                      {message.role === 'user' && message.translated_content && (
-                        <button
-                          onClick={() => toggleOriginal(message.id)}
-                          className="p-1 px-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs font-medium bg-gray-800/50"
-                          title={showOriginal[message.id] ? 'Показать оригинал (RU)' : 'Показать перевод (EN)'}
-                        >
-                          {showOriginal[message.id] ? 'RU' : 'EN'}
-                        </button>
-                      )}
+                       {message.role === 'user' && message.translated_content && (
+                         <button
+                           onClick={() => toggleOriginal(message.id)}
+                           className="p-1 px-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs font-medium bg-gray-800/50"
+                           title={showOriginal[message.id] ? 'Показать перевод (EN)' : 'Показать оригинал (RU)'}
+                         >
+                           {showOriginal[message.id] ? 'EN' : 'RU'}
+                         </button>
+                       )}
                       {/* Кнопка перевода для user сообщений без перевода */}
                       {message.role === 'user' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
                         <button
