@@ -166,9 +166,9 @@ class HeroVariationRepository {
     
     // Форматируем профиль героя для использования в промптах
     const parts: string[] = [];
-    parts.push(`Имя: ${heroVariation.name}`);
+    parts.push(`Name: ${heroVariation.name}`);
     if (heroVariation.description) {
-      parts.push(`Описание: ${heroVariation.description}`);
+      parts.push(`Description: ${heroVariation.description}`);
     }
     
     return parts.join('\n');

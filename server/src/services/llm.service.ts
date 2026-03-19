@@ -73,19 +73,32 @@ function formatMessagesForQwen(
 ): LLMMessage[] {
   const messages: LLMMessage[] = [];
 
-  // 1. Объединяем системный промпт и профиль героя в ОДНО системное сообщение
+  // 1. Системный промпт персонажа
   const systemParts: string[] = [];
   
   if (character.system_prompt) {
-    // Заменяем плейсхолдеры {{user}} на имя героя в системном промпте
     const processedSystemPrompt = replaceUserPlaceholders(character.system_prompt, heroName);
     systemParts.push(processedSystemPrompt);
   }
-  
-  if (heroProfile) {
-    systemParts.push(`Профиль героя: ${heroProfile}`);
+
+  // 2. Описание персонажа (Character profile)
+  const characterProfileParts: string[] = [];
+  characterProfileParts.push(`Name: ${character.name}`);
+  if (character.description) {
+    characterProfileParts.push(`Description: ${character.description}`);
   }
-  
+  if (character.personality) {
+    characterProfileParts.push(`Personality: ${character.personality}`);
+  }
+  if (characterProfileParts.length > 0) {
+    systemParts.push(`Character:\n${characterProfileParts.join('\n')}`);
+  }
+
+  // 3. Профиль героя (Hero profile)
+  if (heroProfile) {
+    systemParts.push(`Hero Profile:\n${heroProfile}`);
+  }
+
   // Добавляем одно системное сообщение только если есть что-то
   if (systemParts.length > 0) {
     messages.push({
