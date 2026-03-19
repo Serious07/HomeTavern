@@ -1,10 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useEcoMode } from '../contexts/EcoModeContext';
 
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
   const { authState, logout } = useAuth();
+  const { ecoModeEnabled, toggleEcoMode } = useEcoMode();
   
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
@@ -92,6 +94,25 @@ const SettingsPage: React.FC = () => {
                 </div>
                 <button className="w-12 h-6 bg-gray-600 rounded-full relative">
                   <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full"></div>
+                </button>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white font-medium">Экономичный режим</p>
+                  <p className="text-gray-400 text-sm">Экономить заряд батареи (отключить анимации)</p>
+                </div>
+                <button
+                  onClick={toggleEcoMode}
+                  className={`w-12 h-6 rounded-full relative transition-colors ${
+                    ecoModeEnabled ? 'bg-green-600' : 'bg-gray-600'
+                  }`}
+                >
+                  <div
+                    className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${
+                      ecoModeEnabled ? 'right-1' : 'left-1'
+                    }`}
+                  />
                 </button>
               </div>
             </div>

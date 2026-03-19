@@ -272,3 +272,57 @@ body {
 .markdown-content .quote-wrapper {
   @apply text-orange-400 font-medium;
 }
+
+/* ========================================
+   Экономичный режим - для экономии батареи
+   ======================================== */
+
+/* Отключаем все анимации в экономичном режиме */
+body.eco-mode * {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+
+/* Отключаем фоновые анимации */
+body.eco-mode .animate-spin,
+body.eco-mode .animate-bounce,
+body.eco-mode .animate-pulse,
+body.eco-mode .animate-fadeIn {
+  animation: none !important;
+}
+
+/* Убираем размытие фона */
+body.eco-mode .backdrop-blur-sm,
+body.eco-mode .backdrop-blur,
+body.eco-mode .backdrop-blur-md,
+body.eco-mode .backdrop-blur-lg {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Упрощаем тени */
+body.eco-mode .shadow-lg,
+body.eco-mode .shadow,
+body.eco-mode .shadow-md,
+body.eco-mode .shadow-sm {
+  box-shadow: none !important;
+}
+
+/* Отключаем градиенты */
+body.eco-mode .bg-gradient-to-br,
+body.eco-mode .bg-gradient-to-r,
+body.eco-mode .bg-gradient-to-l,
+body.eco-mode .bg-gradient-to-t {
+  background: #111827 !important; /* gray-900 */
+}
+
+/* Уменьшаем количество перерисовок */
+body.eco-mode .will-change-transform,
+body.eco-mode .will-change-scroll,
+body.eco-mode .will-change-all {
+  will-change: auto !important;
+}
+
+/* Chat header/footer styles - removed to restore default appearance */

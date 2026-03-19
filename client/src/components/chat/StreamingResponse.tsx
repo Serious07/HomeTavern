@@ -233,7 +233,7 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
 
       {/* Stop button - внизу сообщения для всегда доступного доступа */}
       {isStreaming && (
-        <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex justify-start">
           <button
             onClick={handleStop}
             className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm text-white transition flex items-center gap-2"

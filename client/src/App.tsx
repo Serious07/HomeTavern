@@ -6,10 +6,12 @@ import ChatPage from './pages/ChatPage';
 import HeroPage from './pages/HeroPage';
 import SettingsPage from './pages/SettingsPage';
 import ProtectedRoute from './components/auth/ProtectedRoute';
+import { EcoModeProvider } from './contexts/EcoModeContext';
 
 function App() {
   return (
-    <Routes>
+    <EcoModeProvider>
+      <Routes>
       {/* Public routes */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
@@ -70,6 +72,7 @@ function App() {
       {/* 404 route */}
       <Route path="*" element={<Navigate to="/characters" replace />} />
     </Routes>
+    </EcoModeProvider>
   );
 }
 

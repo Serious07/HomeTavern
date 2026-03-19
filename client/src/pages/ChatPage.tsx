@@ -69,7 +69,6 @@ const ChatPage: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [isSending, setIsSending] = useState(false);
-  const [messageInput, setMessageInput] = useState('');
   const [showSidebar, setShowSidebar] = useState(false);
   const [showThinking, setShowThinking] = useState<Record<number, boolean>>({});
   const [isStreaming, setIsStreaming] = useState(false);
@@ -78,10 +77,13 @@ const ChatPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showHeaderFooter, setShowHeaderFooter] = useState(true);
- const [translatingMessageId, setTranslatingMessageId] = useState<number | null>(null);
- 
- const messagesEndRef = useRef<HTMLDivElement>(null);
- const messageInputRef = useRef<HTMLTextAreaElement>(null);
+  const [translatingMessageId, setTranslatingMessageId] = useState<number | null>(null);
+  // Для оптимизации: используем ref для хранения значения input чтобы избежать лишних ре-рендеров
+  const messageInputValueRef = useRef<string>('');
+  const [messageInput, setMessageInput] = useState('');
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchChats = useCallback(async () => {
     try {
@@ -192,14 +194,14 @@ const ChatPage: React.FC = () => {
   }, [messages, isStreaming]);
 
   // Авто-ресайз textarea в зависимости от количества строк
-  const autoResizeInput = useCallback(() => {
+  const autoResizeInput = useCallback((_value: string) => {
     const textarea = messageInputRef.current;
     if (!textarea) return;
     
     // Сбросить высоту чтобы пересчитать
     textarea.style.height = 'auto';
     
-    // Получить новую высоту на основе scrollHeight
+    // Установить новую высоту на основе scrollHeight
     // Ограничиваем максимум 6 строками (примерно 200px при line-height ~33px)
     const maxHeight = 200;
     const newHeight = textarea.scrollHeight;
@@ -207,11 +209,6 @@ const ChatPage: React.FC = () => {
     // Установить высоту с ограничением
     textarea.style.height = `${Math.min(newHeight, maxHeight)}px`;
   }, []);
-  
-  // Вызываем авто-ресайз при изменении значения input
-  useEffect(() => {
-    autoResizeInput();
-  }, [messageInput, autoResizeInput]);
   
   // Автофокус на поле ввода после окончания стриминга
   useEffect(() => {
@@ -222,11 +219,13 @@ const ChatPage: React.FC = () => {
   }, [isStreaming, isSending]);
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !chatId || isSending || isStreaming) return;
+    const messageToSend = messageInput.trim();
+    if (!messageToSend || !chatId || isSending || isStreaming) return;
     
     setIsSending(true);
-    const userMessage = messageInput;
+    const userMessage = messageToSend;
     setMessageInput('');
+    messageInputValueRef.current = '';
 
     try {
       // Optimistically add user message
@@ -490,129 +489,145 @@ const ChatPage: React.FC = () => {
       </div>
 
       {/* Main chat area */}
-      <div className="flex-1 flex flex-col h-screen">
-       {/* Chat header - fixed на мобильных, static на десктопе */}
-         <div className={`md:static fixed md:static top-0 left-0 right-0 md:left-auto md:right-auto z-40 md:z-0 bg-gray-800/50 border-b border-gray-700 p-4 flex items-center justify-between transition-all duration-300 ${
-           showHeaderFooter ? 'md:flex flex' : 'md:flex hidden'
-         }`}>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setShowSidebar(true)}
-              className="md:hidden p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-            <h1 className="text-xl font-bold text-white">{getCurrentChatTitle()}</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate('/hero')}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-              title="Профиль героя"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a5 5 0 00-5 5h10a5 5 0 00-5-5z" />
-              </svg>
-            </button>
-            <button
-              onClick={() => navigate('/characters')}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-              title="Персонажи"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-            </button>
-            {currentChat && (
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+        {/* Chat header */}
+        <div className={`shrink-0 border-b border-gray-700 transition-all duration-300 chat-header ${
+          showHeaderFooter ? 'flex flex-col' : 'hidden'
+        }`}>
+          {/* Верхняя строка - заголовок чата */}
+          <div className="w-full flex items-center justify-between p-4 border-b border-gray-700/50">
+            <div className="flex items-center gap-4">
               <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition"
-                title="Удалить чат"
+                onClick={() => setShowSidebar(true)}
+                className="md:hidden p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
-            )}
+              <h1 className="text-xl font-bold text-white">{getCurrentChatTitle()}</h1>
+            </div>
+          </div>
+          {/* Нижняя строка - кнопки управления */}
+          <div className="w-full flex items-center justify-between p-3 border-b border-gray-700/30">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate('/hero')}
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
+                title="Профиль героя"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a5 5 0 00-5 5h10a5 5 0 00-5-5z" />
+                </svg>
+              </button>
+              <button
+                onClick={() => navigate('/characters')}
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
+                title="Персонажи"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+              </button>
+              <button
+                onClick={() => navigate('/settings')}
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
+                title="Настройки"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
+            </div>
+            <div>
+              {currentChat && (
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition"
+                  title="Удалить чат"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Messages area - скроллим только историю */}
-          <div className={`flex-1 overflow-y-auto p-4 md:pt-0 ${
-            showHeaderFooter ? 'pt-14 md:pb-0 pb-20' : 'pt-0 md:pb-0 pb-0'
-          }`}>
-           {!currentChat ? (
-             <div className="flex items-center justify-center h-full">
-               <div className="text-center">
-                 <svg className="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
-                 </svg>
-                 <p className="text-gray-400">Выберите чат или создайте новый</p>
-               </div>
-             </div>
-           ) : isChatLoading ? (
-             <div className="flex items-center justify-center h-full">
-               <div className="text-center">
-                 <svg className="animate-spin h-12 w-12 text-gray-500 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                 </svg>
-                 <p className="text-gray-400">Загрузка сообщений...</p>
-               </div>
-             </div>
-           ) : messages.length === 0 ? (
-             <div className="flex items-center justify-center h-full">
-               <div className="text-center">
-                 <svg className="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
-                 </svg>
-                 <p className="text-gray-400">Начните разговор!</p>
-               </div>
-             </div>
-           ) : (
-             <MessageList
-                 messages={messages}
-                 onRegenerate={handleRegenerate}
-                 onEdit={handleEditMessage}
-                 onDelete={handleDeleteMessage}
-                 showThinking={showThinking}
-                 onToggleThinking={handleToggleThinking}
-                 translatingMessageId={translatingMessageId}
-                 onTranslate={handleTranslateMessage}
-               />
-           )}
-           
-           {/* Streaming response - ВНУТРИ скроллируемой области, чтобы скролл работал корректно */}
-           {isStreaming && (
-             <div
-               key={`streaming-${chatId}`}
-               className="mt-4 bg-gray-800/30 border-t border-gray-700 p-4"
-             >
-               <StreamingResponse
-                 chatId={parseInt(chatId || '0')}
-                 onStop={handleStreamingStop}
-                 onComplete={handleStreamingComplete}
-                 onError={handleStreamingError}
-                 onTokenUpdate={scrollToBottom}
-               />
-             </div>
-           )}
-           
-           <div ref={messagesEndRef} />
-         </div>
+        {/* Messages area */}
+        <div className="flex-1 overflow-y-auto">
+          {!currentChat ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center">
+                <svg className="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
+                </svg>
+                <p className="text-gray-400">Выберите чат или создайте новый</p>
+              </div>
+            </div>
+          ) : isChatLoading ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center">
+                <svg className="animate-spin h-12 w-12 text-gray-500 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p className="text-gray-400">Загрузка сообщений...</p>
+              </div>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center">
+                <svg className="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
+                </svg>
+                <p className="text-gray-400">Начните разговор!</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <MessageList
+                messages={messages}
+                onRegenerate={handleRegenerate}
+                onEdit={handleEditMessage}
+                onDelete={handleDeleteMessage}
+                showThinking={showThinking}
+                onToggleThinking={handleToggleThinking}
+                translatingMessageId={translatingMessageId}
+                onTranslate={handleTranslateMessage}
+              />
+              {/* Streaming response */}
+              {isStreaming && (
+                <div className="shrink-0 mt-4 bg-gray-800/30 border-t border-gray-700 p-4">
+                  <StreamingResponse
+                    chatId={parseInt(chatId || '0')}
+                    onStop={handleStreamingStop}
+                    onComplete={handleStreamingComplete}
+                    onError={handleStreamingError}
+                    onTokenUpdate={scrollToBottom}
+                  />
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </>
+          )}
+        </div>
 
-         {/* Message input - fixed на мобильных, static на десктопе */}
-           <div className={`shrink-0 bg-gray-800/50 border-t border-gray-700 p-4 md:static fixed md:static bottom-0 left-0 right-0 md:left-auto md:right-auto z-40 md:z-0 transition-all duration-300 ${
-             showHeaderFooter ? 'md:flex flex' : 'md:flex hidden'
-           }`}>
-           <div className="flex items-end gap-3 w-full">
-             <textarea
+        {/* Message input */}
+        <div className={`shrink-0 border-t border-gray-700 p-4 chat-footer ${
+          showHeaderFooter ? 'flex' : 'hidden'
+        }`}>
+          <div className="flex items-end gap-3 w-full">
+            <textarea
               ref={messageInputRef}
               value={messageInput}
               onChange={(e) => {
-                setMessageInput(e.target.value);
+                const value = e.target.value;
+                messageInputValueRef.current = value;
+                setMessageInput(value);
+                autoResizeInput(value);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -621,14 +636,14 @@ const ChatPage: React.FC = () => {
                 }
               }}
               placeholder="Введите сообщение..."
-               className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-3 py-0 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 resize-none overflow-y-auto"
-               style={{ minHeight: '18px', maxHeight: '200px' }}
+              className="w-full bg-gray-700/30 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 resize-none"
+              style={{ minHeight: '40px', maxHeight: '200px' }}
               disabled={isSending || isStreaming || !currentChat}
             />
             <button
               onClick={handleSendMessage}
               disabled={isSending || isStreaming || !messageInput.trim() || !currentChat}
-              className="p-3 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg transition"
+              className="p-3 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg transition shrink-0"
             >
               <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
