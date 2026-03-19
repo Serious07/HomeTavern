@@ -77,6 +77,7 @@ const ChatPage: React.FC = () => {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showHeaderFooter, setShowHeaderFooter] = useState(true);
  const [translatingMessageId, setTranslatingMessageId] = useState<number | null>(null);
  
  const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -190,6 +191,28 @@ const ChatPage: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, isStreaming]);
 
+  // Авто-ресайз textarea в зависимости от количества строк
+  const autoResizeInput = useCallback(() => {
+    const textarea = messageInputRef.current;
+    if (!textarea) return;
+    
+    // Сбросить высоту чтобы пересчитать
+    textarea.style.height = 'auto';
+    
+    // Получить новую высоту на основе scrollHeight
+    // Ограничиваем максимум 6 строками (примерно 200px при line-height ~33px)
+    const maxHeight = 200;
+    const newHeight = textarea.scrollHeight;
+    
+    // Установить высоту с ограничением
+    textarea.style.height = `${Math.min(newHeight, maxHeight)}px`;
+  }, []);
+  
+  // Вызываем авто-ресайз при изменении значения input
+  useEffect(() => {
+    autoResizeInput();
+  }, [messageInput, autoResizeInput]);
+  
   // Автофокус на поле ввода после окончания стриминга
   useEffect(() => {
     if (!isStreaming && isSending) {
@@ -354,6 +377,10 @@ const ChatPage: React.FC = () => {
     setShowDeleteConfirm(false);
   };
 
+  const handleToggleHeaderFooter = () => {
+    setShowHeaderFooter((prev) => !prev);
+  };
+
   const getCharacterById = (id: number) => {
     return characters.find((c) => c.id === id);
   };
@@ -464,8 +491,10 @@ const ChatPage: React.FC = () => {
 
       {/* Main chat area */}
       <div className="flex-1 flex flex-col h-screen">
-        {/* Chat header - fixed на мобильных, static на десктопе */}
-        <div className="md:static fixed md:static top-0 left-0 right-0 md:left-auto md:right-auto z-40 md:z-0 bg-gray-800/50 border-b border-gray-700 p-4 flex items-center justify-between">
+       {/* Chat header - fixed на мобильных, static на десктопе */}
+         <div className={`md:static fixed md:static top-0 left-0 right-0 md:left-auto md:right-auto z-40 md:z-0 bg-gray-800/50 border-b border-gray-700 p-4 flex items-center justify-between transition-all duration-300 ${
+           showHeaderFooter ? 'md:flex flex' : 'md:flex hidden'
+         }`}>
           <div className="flex items-center gap-4">
             <button
               onClick={() => setShowSidebar(true)}
@@ -511,7 +540,9 @@ const ChatPage: React.FC = () => {
         </div>
 
         {/* Messages area - скроллим только историю */}
-         <div className="flex-1 overflow-y-auto p-4 md:pt-0 pt-14 md:pb-0 pb-20">
+          <div className={`flex-1 overflow-y-auto p-4 md:pt-0 ${
+            showHeaderFooter ? 'pt-14 md:pb-0 pb-20' : 'pt-0 md:pb-0 pb-0'
+          }`}>
            {!currentChat ? (
              <div className="flex items-center justify-center h-full">
                <div className="text-center">
@@ -573,12 +604,16 @@ const ChatPage: React.FC = () => {
          </div>
 
          {/* Message input - fixed на мобильных, static на десктопе */}
-         <div className="shrink-0 bg-gray-800/50 border-t border-gray-700 p-4 md:static fixed md:static bottom-0 left-0 right-0 md:left-auto md:right-auto z-40 md:z-0">
-          <div className="flex items-end gap-4">
-            <textarea
+           <div className={`shrink-0 bg-gray-800/50 border-t border-gray-700 p-4 md:static fixed md:static bottom-0 left-0 right-0 md:left-auto md:right-auto z-40 md:z-0 transition-all duration-300 ${
+             showHeaderFooter ? 'md:flex flex' : 'md:flex hidden'
+           }`}>
+           <div className="flex items-end gap-3 w-full">
+             <textarea
               ref={messageInputRef}
               value={messageInput}
-              onChange={(e) => setMessageInput(e.target.value)}
+              onChange={(e) => {
+                setMessageInput(e.target.value);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -586,7 +621,8 @@ const ChatPage: React.FC = () => {
                 }
               }}
               placeholder="Введите сообщение..."
-              className="w-full flex-1 bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 resize-none min-h-[40px]"
+               className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-3 py-0 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 resize-none overflow-y-auto"
+               style={{ minHeight: '18px', maxHeight: '200px' }}
               disabled={isSending || isStreaming || !currentChat}
             />
             <button
@@ -602,8 +638,29 @@ const ChatPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Delete confirmation modal */}
-      {showDeleteConfirm && (
+     {/* Toggle header/footer button - mobile only */}
+        <button
+          onClick={handleToggleHeaderFooter}
+          className="fixed bottom-[calc(80px+1rem)] right-4 z-50 md:hidden w-12 h-12 rounded-full bg-gray-700/70 hover:bg-gray-600/80 backdrop-blur-sm shadow-lg flex items-center justify-center text-white transition-all duration-300"
+          title={showHeaderFooter ? 'Скрыть хедер и футер' : 'Показать хедер и футер'}
+        >
+          {showHeaderFooter ? (
+            // Eye off icon (hide)
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+              <line x1="1" y1="1" x2="23" y2="23"></line>
+            </svg>
+          ) : (
+            // Eye on icon (show)
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          )}
+        </button>
+
+       {/* Delete confirmation modal */}
+       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 max-w-sm w-full mx-4 shadow-xl">
             <h3 className="text-xl font-bold text-white mb-2">Удалить чат?</h3>

@@ -96,8 +96,8 @@ const MessageList: React.FC<MessageListProps> = ({
     });
   };
 
-  return (
-    <div className="space-y-4">
+   return (
+    <div className="space-y-4 px-4 pt-4 pb-4">
       {messages.map((message, index) => {
         // Находим последнее сообщение assistant
         const lastAssistantMessageIndex = messages.map(m => m.role).lastIndexOf('assistant');
@@ -288,8 +288,8 @@ const MessageList: React.FC<MessageListProps> = ({
                          className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition"
                          title="Редактировать"
                        >
-                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 17.293a2 2 0 01-2.828 0l-2.829-2.828a2 2 0 010-2.828l8.486-8.485zM18 17h3" />
+                         <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                           <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
                          </svg>
                        </button>
                      )}
@@ -300,8 +300,9 @@ const MessageList: React.FC<MessageListProps> = ({
                           className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded-full transition"
                           title="Перегенерировать"
                         >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m16.518 2.848l-1.518-1.518m0 0L13.5 7.5M19.018 10.5l-1.518-1.518m0 0L16 7.5m-2.5-2.5L12 6.5m0 0L9.5 4m0 0L8 5.5m0 0L6.5 7m0 0L4 8.5m0 0L2.5 10m0 0L1 11.5m0 0L.5 13m0 0L0 14.5m0 0L.5 16m0 0L1 17.5m0 0L2.5 19m0 0L4 20.5m0 0L5.5 22m0 0L7 20.5m0 0L8.5 19m0 0L10 17.5m0 0L11.5 16m0 0L13 14.5m0 0L14.5 13m0 0L16 11.5m0 0L17.5 10m0 0L19 8.5m0 0L20.5 7m0 0L22 5.5m0 0L21 4m0 0L19.5 2.5m0 0L18 1m0 0L16.5 2.5m0 0L15 4m0 0L13.5 5.5m0 0L12 7m0 0L10.5 8.5m0 0L9 10m0 0L7.5 11.5m0 0L6 13m0 0L4.5 14.5m0 0L3 16m0 0L1.5 17.5m0 0L0 19m0 0L.5 20.5m0 0L1 22m0 0L2.5 20.5m0 0L4 19m0 0L5.5 17.5m0 0L7 16m0 0L8.5 14.5m0 0L10 13m0 0L11.5 11.5m0 0L13 10m0 0L14.5 8.5m0 0L16 7m0 0L17.5 5.5m0 0L19 4m0 0L20.5 2.5m0 0L22 1m0 0L20.5 2.5m0 0L19 4m0 0L17.5 5.5m0 0L16 7m0 0L14.5 8.5m0 0L13 10m0 0L11.5 11.5m0 0L10 13m0 0L8.5 14.5m0 0L7 16m0 0L5.5 17.5m0 0L4 19m0 0L2.5 20.5m0 0L1 22" />
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21.5 2v6h-6M2.5 22v-6h6"></path>
+                            <path d="M2 12c0-4.4 3.6-8 8-8 3.3 0 6.1 2 7.3 4.8M22 12c0 4.4-3.6 8-8 8-3.3 0-6.1-2-7.3-4.8"></path>
                           </svg>
                         </button>
                       )}
