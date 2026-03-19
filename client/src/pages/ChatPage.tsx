@@ -410,7 +410,7 @@ const ChatPage: React.FC = () => {
       <div
         className={`fixed md:static inset-y-0 left-0 z-30 w-72 bg-gray-800/50 border-r border-gray-700 transform transition-transform duration-300 ${
           showSidebar ? 'translate-x-0' : '-translate-x-full'
-        } md:translate-x-0 flex flex-col overflow-hidden`}
+        } md:translate-x-0 flex flex-col`}
       >
         {/* Sidebar header */}
         <div className="shrink-0 p-4 border-b border-gray-700">
@@ -462,10 +462,10 @@ const ChatPage: React.FC = () => {
           </div>
       </div>
 
-      {/* Main chat area - flex-col с зафиксированным хедером и полем отправки */}
+      {/* Main chat area */}
       <div className="flex-1 flex flex-col h-screen">
-        {/* Chat header - зафиксирован сверху */}
-        <div className="sticky top-0 z-20 bg-gray-800/50 border-b border-gray-700 p-4 flex items-center justify-between shadow-lg">
+        {/* Chat header - fixed на мобильных, static на десктопе */}
+        <div className="md:static fixed md:static top-0 left-0 right-0 md:left-auto md:right-auto z-40 md:z-0 bg-gray-800/50 border-b border-gray-700 p-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button
               onClick={() => setShowSidebar(true)}
@@ -511,7 +511,7 @@ const ChatPage: React.FC = () => {
         </div>
 
         {/* Messages area - скроллим только историю */}
-         <div className="flex-1 overflow-y-auto p-4">
+         <div className="flex-1 overflow-y-auto p-4 md:pt-0 pt-14 md:pb-0 pb-20">
            {!currentChat ? (
              <div className="flex items-center justify-center h-full">
                <div className="text-center">
@@ -572,8 +572,8 @@ const ChatPage: React.FC = () => {
            <div ref={messagesEndRef} />
          </div>
 
-         {/* Message input - зафиксировано снизу */}
-         <div className="shrink-0 bg-gray-800/50 border-t border-gray-700 p-4">
+         {/* Message input - fixed на мобильных, static на десктопе */}
+         <div className="shrink-0 bg-gray-800/50 border-t border-gray-700 p-4 md:static fixed md:static bottom-0 left-0 right-0 md:left-auto md:right-auto z-40 md:z-0">
           <div className="flex items-end gap-4">
             <textarea
               ref={messageInputRef}

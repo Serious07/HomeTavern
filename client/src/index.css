@@ -8,6 +8,37 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* Mobile viewport fixes - prevent header from being cut off */
+@supports (height: 100dvh) {
+  /* Use dynamic viewport height on mobile */
+  @media (max-width: 768px) {
+    html {
+      /* Prevent address bar from hiding/showing causing layout shifts */
+      height: -webkit-fill-available;
+    }
+    body {
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+  }
+}
+
+/* Prevent header from being cut off when keyboard is shown */
+@media (max-width: 768px) {
+  /* Ensure fixed header stays visible */
+  .fixed.top-0 {
+    position: fixed !important;
+    top: 0 !important;
+  }
+}
+
+/* Prevent zoom on input focus on iOS */
+@media screen and (max-width: 768px) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+}
+
 /* Custom scrollbar for webkit browsers */
 ::-webkit-scrollbar {
   width: 8px;
