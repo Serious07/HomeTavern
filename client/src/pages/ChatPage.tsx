@@ -7,6 +7,9 @@ import StreamingResponse from '../components/chat/StreamingResponse';
 import MessageInput from '../components/chat/MessageInput';
 import ContextStatsDisplay from '../components/chat/ContextStatsDisplay';
 import { useContextStats, useContextStatsDuringGeneration } from '../hooks/useContextStats';
+import { useCompression } from '../hooks/useCompression';
+import { EditBlockModal } from '../components/chat/EditBlockModal';
+import { ChatBlockWithParsedIds } from '../types/compression';
 
 /**
  * Форматирование даты последнего сообщения
@@ -83,16 +86,37 @@ const ChatPage: React.FC = () => {
   const [translatingMessageId, setTranslatingMessageId] = useState<number | null>(null);
   const [messageInput, setMessageInput] = useState('');
   
+  // State для модального окна редактирования блока
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingBlock, setEditingBlock] = useState<ChatBlockWithParsedIds | null>(null);
+  
   // Context stats for token usage tracking
   const currentChatId = chatId ? parseInt(chatId) : null;
   const { stats: contextStats, isLoading: isContextLoading, sync: syncContextStats } = useContextStats(
     currentChatId,
-    { enabled: !!currentChatId, intervalMs: 30000 }
+    { enabled: !!currentChatId }
   );
   const { sync: syncDuringGeneration } = useContextStatsDuringGeneration(
     currentChatId,
     isStreaming
   );
+  
+  // Compression hooks
+  const {
+    blocks,
+    compress,
+    editBlock,
+    toggleCompression,
+    deleteBlock,
+    loadBlocks,
+    checkNeedsCompression,
+    isSelectionMode,
+    selectionStart,
+    selectionEnd,
+    startSelection,
+    cancelSelection,
+    handleSelectionClick,
+  } = useCompression(currentChatId);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Ref для хранения ID requestAnimationFrame для отмены при размонтировании
@@ -197,8 +221,13 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     if (chatId) {
       fetchMessages();
+      // Загружаем блоки сжатия для текущего чата
+      loadBlocks();
+      // Проверяем необходимость сжатия
+      checkNeedsCompression();
     }
-  }, [chatId, fetchMessages]);
+  }, [chatId, fetchMessages, loadBlocks, checkNeedsCompression]);
+
 
   // Функция скролла к концу с requestAnimationFrame для оптимизации на мобильных
   const scrollToBottom = useCallback(() => {
@@ -402,6 +431,54 @@ const ChatPage: React.FC = () => {
     setShowHeaderFooter((prev) => !prev);
   };
 
+  // Handlers для сжатия истории
+  const handleManualCompress = useCallback(async () => {
+    if (!currentChatId) return;
+    await compress();
+    // После сжатия обновляем сообщения
+    await fetchMessages();
+  }, [currentChatId, compress, fetchMessages]);
+
+  const handleCloseEditModal = useCallback(() => {
+    setIsEditModalOpen(false);
+    setEditingBlock(null);
+  }, []);
+
+  const handleEditBlock = useCallback((blockId: number, updates: { title?: string; summary?: string }) => {
+    // Находим блок по ID и открываем модальное окно
+    const blockToEdit = blocks.find((b) => b.id === blockId);
+    if (blockToEdit) {
+      setEditingBlock({ ...blockToEdit, title: updates.title ?? blockToEdit.title, summary: updates.summary ?? blockToEdit.summary });
+      setIsEditModalOpen(true);
+    }
+  }, [blocks]);
+
+  const handleExpandBlock = useCallback((block: ChatBlockWithParsedIds) => {
+    // Этот обработчик будет использоваться MessageList для управления состоянием развертывания
+    // Состояние развертывания управляется внутри MessageList
+    console.log('Expand block:', block.id);
+  }, []);
+
+  const handleToggleBlockCompression = useCallback(async (blockId: number, isCompressed: boolean) => {
+    await toggleCompression(blockId, isCompressed);
+  }, [toggleCompression]);
+
+  const handleDeleteBlock = useCallback(async (blockId: number) => {
+    await deleteBlock(blockId);
+  }, [deleteBlock]);
+
+  const handleStartSelection = useCallback(() => {
+    startSelection();
+  }, [startSelection]);
+
+  const handleCancelSelection = useCallback(() => {
+    cancelSelection();
+  }, [cancelSelection]);
+
+  const handleCompressionSelectionClick = useCallback((messageId: number) => {
+    handleSelectionClick(messageId);
+  }, [handleSelectionClick]);
+
   const getCharacterById = (id: number) => {
     return characters.find((c) => c.id === id);
   };
@@ -568,19 +645,40 @@ const ChatPage: React.FC = () => {
                 </svg>
               </button>
             </div>
-            <div>
-              {currentChat && (
-                <button
-                  onClick={() => setShowDeleteConfirm(true)}
-                  className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition"
-                  title="Удалить чат"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              )}
-            </div>
+            <div className="flex items-center gap-2">
+               {/* Кнопка ручного сжатия истории */}
+               <button
+                 onClick={handleManualCompress}
+                 className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition"
+                 title="Сжать историю"
+               >
+                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                 </svg>
+               </button>
+               {/* Кнопка ручного выделения для сжатия */}
+               <button
+                 onClick={handleStartSelection}
+                 disabled={isSelectionMode}
+                 className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition disabled:opacity-50"
+                 title="Выделить сообщения для сжатия"
+               >
+                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                 </svg>
+               </button>
+               {currentChat && (
+                 <button
+                   onClick={() => setShowDeleteConfirm(true)}
+                   className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition"
+                   title="Удалить чат"
+                 >
+                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                   </svg>
+                 </button>
+               )}
+             </div>
           </div>
         </div>
 
@@ -616,16 +714,27 @@ const ChatPage: React.FC = () => {
             </div>
           ) : (
             <>
-              <MessageList
-                messages={messages}
-                onRegenerate={handleRegenerate}
-                onEdit={handleEditMessage}
-                onDelete={handleDeleteMessage}
-                showThinking={showThinking}
-                onToggleThinking={handleToggleThinking}
-                translatingMessageId={translatingMessageId}
-                onTranslate={handleTranslateMessage}
-              />
+               <MessageList
+                  messages={messages}
+                  onRegenerate={handleRegenerate}
+                  onEdit={handleEditMessage}
+                  onDelete={handleDeleteMessage}
+                  showThinking={showThinking}
+                  onToggleThinking={handleToggleThinking}
+                  translatingMessageId={translatingMessageId}
+                  onTranslate={handleTranslateMessage}
+                  // Пропсы для сжатия истории
+                  blocks={blocks}
+                  onEditBlock={handleEditBlock}
+                  onToggleBlockCompression={handleToggleBlockCompression}
+                  onDeleteBlock={handleDeleteBlock}
+                  onExpandBlock={handleExpandBlock}
+                  isSelectionMode={isSelectionMode}
+                  selectionStart={selectionStart}
+                  selectionEnd={selectionEnd}
+                  onMessageSelectionClick={handleCompressionSelectionClick}
+                  onCancelSelection={handleCancelSelection}
+                />
               {/* Streaming response */}
               {isStreaming && (
                 <div className="shrink-0 mt-4 bg-gray-800/30 border-t border-gray-700 p-4">
@@ -678,8 +787,22 @@ const ChatPage: React.FC = () => {
           )}
         </button>
 
-       {/* Delete confirmation modal */}
-       {showDeleteConfirm && (
+     {/* Edit block modal */}
+     {isEditModalOpen && editingBlock && (
+       <EditBlockModal
+         block={editingBlock}
+         onSave={async (blockId, updates) => {
+           await editBlock(blockId, updates);
+           handleCloseEditModal();
+           // После успешного сохранения обновляем блоки
+           await loadBlocks();
+         }}
+         onCancel={handleCloseEditModal}
+       />
+     )}
+
+      {/* Delete confirmation modal */}
+        {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 max-w-sm w-full mx-4 shadow-xl">
             <h3 className="text-xl font-bold text-white mb-2">Удалить чат?</h3>

@@ -325,13 +325,13 @@ body.eco-mode .will-change-all {
   will-change: auto !important;
 }
 
-/* Chat header/footer styles */
+/* Chat header/footer styles - removed display: flex to allow conditional hiding */
 .chat-header {
-  @apply flex flex-col;
+  @apply flex-col;
 }
 
 .chat-footer {
-  @apply flex;
+  /* No display property, just padding/border */
 }
 
 /* Context stats container styles */

@@ -4,10 +4,12 @@
  */
 
 import { characterRepository } from '../repositories/character.repository';
-import { chatRepository } from '../repositories/chat.repository';
+import { chatRepository, Message } from '../repositories/chat.repository';
 import { userRepository } from '../repositories/user.repository';
 import { heroVariationRepository } from '../repositories/hero.variation.repository';
 import { contextRepository } from '../repositories/context.repository';
+import { chatBlockRepository, ChatBlock } from '../repositories/chat-block.repository';
+import { compressionService } from './compression.service';
 
 // Типы для LLM
 export interface LLMMessage {
@@ -156,6 +158,131 @@ export function formatMessagesForQwen(
   return messages;
 }
 
+/**
+ * Внутренняя функция форматирования с поддержкой сжатых блоков
+ */
+function formatMessagesForQwenInternal(
+  character: any,
+  heroProfile: string | null,
+  heroName: string | null,
+  historyMessages: Message[],
+  currentMessage: string,
+  compressedBlocks: ChatBlock[] | null  // Сжатые блоки (null = без сжатия)
+): LLMMessage[] {
+  const messages: LLMMessage[] = [];
+
+  // 1. Системный промпт персонажа
+  const systemParts: string[] = [];
+  
+  if (character.system_prompt) {
+    const processedSystemPrompt = replaceUserPlaceholders(character.system_prompt, heroName);
+    systemParts.push(processedSystemPrompt);
+  }
+
+  // 2. Описание персонажа (Character profile)
+  const characterProfileParts: string[] = [];
+  characterProfileParts.push(`Name: ${character.name}`);
+  if (character.description) {
+    characterProfileParts.push(`Description: ${character.description}`);
+  }
+  if (character.personality) {
+    characterProfileParts.push(`Personality: ${character.personality}`);
+  }
+  if (characterProfileParts.length > 0) {
+    systemParts.push(`Character:\n${characterProfileParts.join('\n')}`);
+  }
+
+  // 3. Профиль героя (Hero profile)
+  if (heroProfile) {
+    systemParts.push(`Hero Profile:\n${heroProfile}`);
+  }
+
+  // Добавляем одно системное сообщение только если есть что-то
+  if (systemParts.length > 0) {
+    messages.push({
+      role: 'system',
+      content: systemParts.join('\n\n')
+    });
+  }
+
+  // Создаем маппинг message_id -> block для быстрого поиска
+  const messageToBlock = new Map<number, ChatBlock>();
+  if (compressedBlocks) {
+    for (const block of compressedBlocks) {
+      const messageIds = JSON.parse(block.original_message_ids || '[]') as number[];
+      messageIds.forEach(msgId => {
+        messageToBlock.set(msgId, block);
+      });
+    }
+  }
+
+  // 4. История сообщений (с учётом hidden и сжатых блоков)
+  for (const msg of historyMessages) {
+    if (msg.hidden) continue; // Пропускаем скрытые сообщения
+
+    // Проверяем, входит ли сообщение в сжатый блок
+    const block = messageToBlock.get(msg.id);
+
+    if (block && block.is_compressed === 1) {
+      // Если это первое сообщение блока (start_message_id), добавляем summary
+      if (msg.id === block.start_message_id) {
+        messages.push({
+          role: 'system',
+          content: `[Сжатая история: ${block.title}]\n${block.summary}`
+        });
+      }
+      // Пропускаем остальные сообщения блока (они уже в summary)
+      continue;
+    }
+
+    // Если сообщение не в блоке или сжатие отключено, добавляем как обычно
+    const role = msg.role === 'user' ? 'user' : 'assistant';
+    
+    // Для LLM всегда используем английский текст:
+    // - user сообщения: translated_content (перевод с русского на английский)
+    // - assistant сообщения: content (оригинал на английском)
+    const contentForLLM = msg.role === 'user'
+      ? (msg.translated_content || msg.content)  // Если есть перевод, используем его
+      : msg.content;  // Для assistant используем оригинал (уже на английском)
+    
+    messages.push({
+      role,
+      content: contentForLLM
+    });
+  }
+
+  // 5. Текущее сообщение пользователя (также заменяем плейсхолдеры)
+  const processedCurrentMessage = replaceUserPlaceholders(currentMessage, heroName);
+  messages.push({
+    role: 'user',
+    content: processedCurrentMessage
+  });
+
+  return messages;
+}
+
+/**
+ * Форматирование истории с учётом сжатых блоков
+ * ВАЖНО: summary добавляется ОДИН РАЗ для каждого блока
+ */
+export function formatMessagesForQwenWithCompression(
+  character: any,
+  heroProfile: string | null,
+  heroName: string | null,
+  historyMessages: Message[],
+  currentMessage: string,
+  compressedBlocks: ChatBlock[]
+): LLMMessage[] {
+  return formatMessagesForQwenInternal(
+    character,
+    heroProfile,
+    heroName,
+    historyMessages,
+    currentMessage,
+    compressedBlocks
+  );
+}
+
 export class LLMService {
   private baseURL: string;
   private apiKey: string;
@@ -257,14 +384,26 @@ export class LLMService {
       console.log('[LLMService] Hero name:', heroName);
       console.log('[LLMService] Hero profile:', heroProfile);
 
-      // Формируем историю сообщений для Qwen 3.5
-      const messages = formatMessagesForQwen(
-        character,
-        heroProfile,
-        heroName,
-        historyMessages,
-        userMessage
-      );
+      // Получаем сжатые блоки для чата
+      const compressedBlocks = chatBlockRepository.getBlocksByChatId(chatId);
+      
+      // Формируем историю сообщений для Qwen 3.5 с учётом сжатых блоков
+      const messages = compressedBlocks.length > 0
+        ? formatMessagesForQwenWithCompression(
+            character,
+            heroProfile,
+            heroName,
+            historyMessages,
+            userMessage,
+            compressedBlocks
+          )
+        : formatMessagesForQwen(
+            character,
+            heroProfile,
+            heroName,
+            historyMessages,
+            userMessage
+          );
 
       // Debug: логирование сформированной истории
       console.log('[LLMService] Messages to LLM:', JSON.stringify(messages, null, 2).substring(0, 500));

@@ -30,6 +30,7 @@ AI-powered role-playing companion application. Создавайте персон
 - **SSE Streaming** - Real-time streaming of LLM responses with reasoning tokens
 - **Context Monitoring** - Real-time token usage tracking with llama.cpp
 - **Eco Mode** - Resource optimization for LLM inference
+- **Smart History Compression** - Automatically summarizes long conversation histories to save tokens
 
 ## Project Structure
 
@@ -39,9 +40,9 @@ hometavern-v5/
 │   ├── src/
 │   │   ├── config/        # Database configuration
 │   │   ├── middleware/    # Express middleware (auth, error)
-│   │   ├── routes/        # API routes (auth, characters, chats, messages, hero, context, admin, settings)
-│   │   ├── repositories/  # Data access layer (user, character, chat, message, hero.variation, context)
-│   │   ├── services/      # Business logic (auth, character, chat, message, llm, context, translation)
+│   │   ├── routes/        # API routes (auth, characters, chats, messages, hero, context, admin, settings, compression)
+│   │   ├── repositories/  # Data access layer (user, character, chat, message, hero.variation, context, chat-block)
+│   │   ├── services/      # Business logic (auth, character, chat, message, llm, context, translation, compression)
 │   │   ├── types/         # TypeScript types
 │   │   └── index.ts       # Server entry point
 │   ├── package.json
@@ -52,16 +53,16 @@ hometavern-v5/
 │   │   ├── components/    # React components
 │   │   │   ├── auth/      # Authentication components
 │   │   │   ├── characters/ # Character editor
-│   │   │   ├── chat/      # Chat components (MessageList, MessageInput, StreamingResponse, ContextStatsDisplay)
+│   │   │   ├── chat/      # Chat components (MessageList, MessageInput, StreamingResponse, ContextStatsDisplay, ChatBlock, EditBlockModal, SelectionToolbar)
 │   │   │   ├── common/    # Reusable UI components
 │   │   │   └── hero/      # Hero profile components
 │   │   ├── constants/     # Application constants
 │   │   ├── contexts/      # React contexts (AuthContext, EcoModeContext)
-│   │   ├── hooks/         # Custom React hooks (useAuth, useContextStats)
+│   │   ├── hooks/         # Custom React hooks (useAuth, useContextStats, useCompression)
 │   │   ├── pages/         # Page components (CharactersPage, ChatPage, HeroPage, HomePage, LoginPage, RegisterPage, SettingsPage)
 │   │   ├── services/      # API services
 │   │   ├── store/         # State management
-│   │   ├── types/         # TypeScript type definitions
+│   │   ├── types/         # TypeScript type definitions (including compression)
 │   │   ├── utils/         # Utility functions
 │   │   ├── App.tsx        # Root component with routing
 │   │   └── main.tsx       # Entry point
@@ -107,7 +108,8 @@ hometavern-v5/
 ├── plans/                 # Project planning docs
 │   ├── architecture.md
 │   ├── chat-stats-panel.md
-│   └── markdown-chat-improvement.md
+│   ├── markdown-chat-improvement.md
+│   └── smart-history-compression.md
 ├── start.bat              # Quick start script for Windows
 ├── package.json           # Root package with scripts
 └── README.md
@@ -351,6 +353,17 @@ HomeTavern V5 включает встроенный мониторинг исп�
 | GET | `/api/context/slots` | Получить список активных слотов |
 | GET | `/api/context/props` | Получить настройки контекста сервера |
 
+### Compression (Smart History Compression)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/compression/auto` | Автоматически сжать историю чата |
+| POST | `/api/compression/select` | Сжать выбранный диапазон сообщений |
+| PUT | `/api/compression/block/:id` | Обновить блок (title, summary, is_compressed) |
+| DELETE | `/api/compression/block/:id` | Удалить блок сжатия |
+| DELETE | `/api/compression/undo/:chatId` | Отменить последнее сжатие |
+| GET | `/api/compression/blocks/:chatId` | Получить все блоки сжатия для чата |
+
 ### Settings
 
 | Метод | Endpoint | Описание |
@@ -500,6 +513,66 @@ start.bat
 
 - Увеличьте `--n-ctx` в llama.cpp до 16384 или 32768
 - Проверьте размер истории сообщений - возможно, стоит ограничить количество сохраняемых токенов
+
+## Smart History Compression
+
+HomeTavern V5 includes an advanced "Smart History Compression" feature that automatically summarizes long conversation histories to save token usage when approaching context limits.
+
+### How It Works
+
+1. **Automatic Trigger**: When context usage reaches 90% of the available limit, the system automatically compresses the history
+2. **Semantic Block Splitting**: The conversation is divided into semantic "chapters" or blocks
+3. **Summary Generation**: Each block is summarized by the LLM, creating a concise overview
+4. **Translation**: Summaries are translated to English for LLM prompts while displaying Russian versions to users
+5. **Flexible Display**: Blocks can be expanded to view original messages or compressed to save tokens
+
+### Features
+
+- **Editable Summaries**: Users can manually edit block titles and summaries
+- **Toggle Compression**: Per-block control to use either the summary or original messages in prompts
+- **Expand/Collapse**: View original messages within any compressed block
+- **Manual Compression**: Select specific message ranges to compress manually
+- **Undo Support**: Revert the last compression operation
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/compression/auto` | Automatically compress chat history |
+| POST | `/api/compression/select` | Compress selected message range |
+| PUT | `/api/compression/block/:id` | Update block (title, summary, is_compressed) |
+| DELETE | `/api/compression/block/:id` | Delete a compression block |
+| DELETE | `/api/compression/undo/:chatId` | Undo last compression |
+| GET | `/api/compression/blocks/:chatId` | Get all compression blocks for a chat |
+
+### Database Schema
+
+New table `chat_blocks` stores compressed history:
+
+```sql
+CREATE TABLE chat_blocks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  summary_translation_hash TEXT,  -- Hash for caching translations
+  original_message_ids TEXT NOT NULL,  -- JSON array of message IDs
+  start_message_id INTEGER,
+  end_message_id INTEGER,
+  is_compressed INTEGER DEFAULT 1,  -- 0 = use original messages, 1 = use summary
+  sort_order INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+```
+
+### Usage in Chat
+
+In the chat interface, compressed blocks appear as styled "chapters" that can be:
+- **Expanded** to view original messages
+- **Edited** to modify the summary
+- **Toggled** to use original messages instead of summary in LLM prompts
 
 ## License
 

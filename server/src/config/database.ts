@@ -83,6 +83,25 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE(user_id, key)
   );
+
+  -- Chat Blocks table - stores compressed history blocks (chapters)
+  CREATE TABLE IF NOT EXISTS chat_blocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    title TEXT NOT NULL,              -- Заголовок блока (главы)
+    summary TEXT NOT NULL,            -- Краткий пересказ блока
+    original_message_ids TEXT NOT NULL, -- JSON массив ID оригинальных сообщений
+    start_message_id INTEGER,         -- ID первого сообщения в блоке
+    end_message_id INTEGER,           -- ID последнего сообщения в блоке
+    is_compressed INTEGER DEFAULT 1,  -- Флаг: использовать сжатие (1) или оригинал (0)
+    sort_order INTEGER NOT NULL,      -- Порядок блоков в истории
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+  );
+
+  -- Индекс для быстрого поиска по chat_id
+  CREATE INDEX IF NOT EXISTS idx_chat_blocks_chat_id ON chat_blocks(chat_id);
 `);
 
 // Миграция: Добавление колонок для статистики сообщений
@@ -92,6 +111,13 @@ try {
     ALTER TABLE messages ADD COLUMN tokens_per_sec REAL;
     ALTER TABLE messages ADD COLUMN total_tokens INTEGER;
   `);
+  
+  // Добавление колонок для контекста в таблице chats
+  db.exec(`
+    ALTER TABLE chats ADD COLUMN context_tokens_used INTEGER;
+    ALTER TABLE chats ADD COLUMN context_last_synced TEXT;
+  `);
+  
   console.log('[Database] Migrations completed successfully');
 } catch (error) {
   // Если колонки уже существуют, игнорируем ошибку
@@ -100,6 +126,22 @@ try {
     console.log('[Database] Columns already exist, skipping migration');
   } else {
     console.error('[Database] Migration error:', error);
+  }
+}
+
+// Миграция: Добавление колонок для перевода краткого пересказа
+try {
+  db.exec(`
+    ALTER TABLE chat_blocks ADD COLUMN summary_translation_hash TEXT;
+  `);
+  
+  console.log('[Database] Translation hash migration completed successfully');
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate column')) {
+    console.log('[Database] Translation hash column already exists');
+  } else {
+    console.error('[Database] Translation hash migration error:', error);
   }
 }
 

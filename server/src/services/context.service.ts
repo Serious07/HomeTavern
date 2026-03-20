@@ -11,7 +11,8 @@ import { contextRepository } from '../repositories/context.repository';
 import { chatRepository } from '../repositories/chat.repository';
 import { characterRepository } from '../repositories/character.repository';
 import { heroVariationRepository } from '../repositories/hero.variation.repository';
-import { formatMessagesForQwen, replaceUserPlaceholders } from './llm.service';
+import { formatMessagesForQwen, formatMessagesForQwenWithCompression, replaceUserPlaceholders } from './llm.service';
+import { chatBlockRepository } from '../repositories/chat-block.repository';
 
 // Типы для llama.cpp API
 interface LlamaProps {
@@ -247,6 +248,7 @@ export class ContextService {
    *
    * Это гарантирует, что оценка токенов соответствует реальному использованию контекста.
    * Использует ту же логику, что и formatMessagesForQwen в llm.service.ts
+   * Учитывает сжатые блоки (chat_blocks) для точного подсчета токенов
    */
  private buildPromptTextForChat(chatId: number, userId: number): string {
     try {
@@ -266,14 +268,26 @@ export class ContextService {
       const activeHero = heroVariationRepository.getActiveHeroVariationByUserId(userId);
       const heroName = activeHero?.name || null;
 
+      // Получаем сжатые блоки
+      const compressedBlocks = chatBlockRepository.getBlocksByChatId(chatId);
+
       // Используем ту же логику форматирования, что и в llm.service.ts
-      const messages = formatMessagesForQwen(
-        character,
-        heroProfile,
-        heroName,
-        chatWithMessages.messages,
-        '' // currentMessage не нужен для оценки текущего контекста
-      );
+      const messages = compressedBlocks.length > 0
+        ? formatMessagesForQwenWithCompression(
+            character,
+            heroProfile,
+            heroName,
+            chatWithMessages.messages,
+            '', // currentMessage не нужен для оценки текущего контекста
+            compressedBlocks
+          )
+        : formatMessagesForQwen(
+            character,
+            heroProfile,
+            heroName,
+            chatWithMessages.messages,
+            '' // currentMessage не нужен для оценки текущего контекста
+          );
 
       // Преобразуем сообщения в текстовый формат для оценки
       const textParts: string[] = [];

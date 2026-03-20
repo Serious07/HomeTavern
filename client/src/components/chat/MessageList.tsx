@@ -1,7 +1,14 @@
-import React, { memo, useMemo, useState, useRef, useEffect } from 'react';
+import React, { memo, useMemo, useState, useCallback } from 'react';
 import { Message } from '../../types';
 import { MarkdownRenderer } from '../common/MarkdownRenderer';
 import { MessageStatsPanel } from './MessageStatsPanel';
+import { ChatBlockWithParsedIds } from '../../types/compression';
+import { ChatBlock } from './ChatBlock';
+
+interface ExpandedBlockMessages {
+  blockId: number;
+  messages: Message[];
+}
 
 interface MessageListProps {
   messages: Message[];
@@ -12,6 +19,18 @@ interface MessageListProps {
   onToggleThinking?: (messageId: number) => void;
   translatingMessageId?: number | null;
   onTranslate?: (messageId: number) => void;
+  // Новые пропсы для сжатия истории
+  blocks?: ChatBlockWithParsedIds[];
+  onEditBlock?: (blockId: number, updates: { title?: string; summary?: string }) => void;
+  onToggleBlockCompression?: (blockId: number, isCompressed: boolean) => void;
+  onDeleteBlock?: (blockId: number) => void;
+  onExpandBlock?: (block: ChatBlockWithParsedIds) => void;
+  // Для ручного выделения сообщений
+  isSelectionMode?: boolean;
+  selectionStart?: number | null;
+  selectionEnd?: number | null;
+  onMessageSelectionClick?: (messageId: number) => void;
+  onCancelSelection?: () => void;
 }
 
 /**
@@ -41,6 +60,9 @@ const MessageItem = memo(({
   onTranslate,
   isLastAssistantMessage,
   messageIndex,
+  isSelectionMode,
+  isSelected,
+  onSelectionClick,
 }: {
   message: Message;
   onRegenerate?: (messageId: number) => void;
@@ -52,6 +74,9 @@ const MessageItem = memo(({
   onTranslate?: (messageId: number) => void;
   isLastAssistantMessage: boolean;
   messageIndex: number;
+  isSelectionMode?: boolean;
+  isSelected?: boolean;
+  onSelectionClick?: (messageId: number) => void;
 }) => {
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState('');
@@ -124,9 +149,18 @@ const MessageItem = memo(({
     return message.content;
   };
 
+  const handleSelectionClick = () => {
+    if (isSelectionMode && onSelectionClick) {
+      onSelectionClick(message.id);
+    }
+  };
+
   return (
     <div
-      className={`flex ${isUser ? 'justify-end' : 'justify-start'} py-2`}
+      className={`flex ${isUser ? 'justify-end' : 'justify-start'} py-2 ${
+        isSelectionMode ? 'cursor-pointer' : ''
+      } ${isSelected ? 'bg-cyan-900/30 -mx-4 px-4' : ''}`}
+      onClick={handleSelectionClick}
     >
       <div
         className={`max-w-[80%] md:max-w-[70%] lg:max-w-[60%] ${
@@ -145,7 +179,10 @@ const MessageItem = memo(({
           {message.reasoning_content && (
             <div className="mb-3 pb-3 border-b border-gray-600">
               <button
-                onClick={() => onToggleThinking?.(message.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleThinking?.(message.id);
+                }}
                 className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-300 transition"
               >
                 <svg
@@ -231,7 +268,10 @@ const MessageItem = memo(({
               {/* Кнопка переключения оригинал/перевод для assistant сообщений с переводом */}
               {message.role === 'assistant' && message.translated_content && (
                 <button
-                  onClick={toggleOriginal}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleOriginal();
+                  }}
                   className="p-1 px-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs font-medium bg-gray-800/50"
                   title={showOriginal ? 'Показать перевод' : 'Показать оригинал'}
                 >
@@ -242,7 +282,10 @@ const MessageItem = memo(({
               {/* Кнопка перевода для assistant сообщений без перевода */}
               {message.role === 'assistant' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
                 <button
-                  onClick={() => onTranslate(message.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTranslate(message.id);
+                  }}
                   className="p-1 px-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition text-xs font-medium bg-gray-800/50"
                   title="Перевести на русский"
                 >
@@ -253,7 +296,10 @@ const MessageItem = memo(({
               {/* Кнопка переключения оригинал/перевод для user сообщений с переводом */}
               {message.role === 'user' && message.translated_content && (
                 <button
-                  onClick={toggleOriginal}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleOriginal();
+                  }}
                   className="p-1 px-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs font-medium bg-gray-800/50"
                   title={showOriginal ? 'Показать перевод (EN)' : 'Показать оригинал (RU)'}
                 >
@@ -264,7 +310,10 @@ const MessageItem = memo(({
               {/* Кнопка перевода для user сообщений без перевода */}
               {message.role === 'user' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
                 <button
-                  onClick={() => onTranslate(message.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTranslate(message.id);
+                  }}
                   className="p-1 px-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition text-xs font-medium bg-gray-800/50"
                   title="Перевести на английский"
                 >
@@ -274,7 +323,10 @@ const MessageItem = memo(({
               
               {/* Кнопка копирования для всех сообщений */}
               <button
-                onClick={handleCopy}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCopy();
+                }}
                 className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition"
                 title="Копировать"
               >
@@ -292,7 +344,10 @@ const MessageItem = memo(({
               {/* Кнопка редактирования для user сообщений и всех сообщений assistant */}
               {(isUser || message.role === 'assistant') && onEdit && (
                 <button
-                  onClick={handleEditStart}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEditStart();
+                  }}
                   className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition"
                   title="Редактировать"
                 >
@@ -305,7 +360,10 @@ const MessageItem = memo(({
               {/* Кнопка перегенерации только для последнего сообщения assistant */}
               {onRegenerate && isLastAssistantMessage && (
                 <button
-                  onClick={() => onRegenerate(message.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRegenerate(message.id);
+                  }}
                   className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded-full transition"
                   title="Перегенерировать"
                 >
@@ -319,7 +377,10 @@ const MessageItem = memo(({
               {/* Кнопка удаления */}
               {onDelete && (
                 <button
-                  onClick={() => onDelete(message.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(message.id);
+                  }}
                   className="p-1 text-gray-400 hover:text-red-400 hover:bg-red-900/30 rounded transition"
                   title="Удалить"
                 >
@@ -339,8 +400,7 @@ const MessageItem = memo(({
 MessageItem.displayName = 'MessageItem';
 
 /**
- * Компонент списка сообщений - упрощенная версия без виртуализации
- * Для отладки проблемы с пропаданием сообщений
+ * Компонент списка сообщений - поддерживает сжатые блоки
  */
 const MessageList: React.FC<MessageListProps> = ({
   messages,
@@ -351,132 +411,218 @@ const MessageList: React.FC<MessageListProps> = ({
   onToggleThinking,
   translatingMessageId = null,
   onTranslate,
+  // Новые пропсы для сжатия
+  blocks = [],
+  onEditBlock,
+  onToggleBlockCompression,
+  onDeleteBlock,
+  onExpandBlock,
+  // Для ручного выделения
+  isSelectionMode = false,
+  selectionStart = null,
+  selectionEnd = null,
+  onMessageSelectionClick,
+  onCancelSelection,
 }) => {
-  // Находим индекс последнего сообщения assistant
-  const lastAssistantMessageIndex = useMemo(() => {
-    return messages.map(m => m.role).lastIndexOf('assistant');
-  }, [messages]);
+  // State для развернутых блоков
+  const [expandedBlockMessages, setExpandedBlockMessages] = useState<ExpandedBlockMessages | null>(null);
 
-  // Простой рендер всех сообщений
+  // Обработчик развертывания блока
+  const handleExpandBlock = useCallback((block: ChatBlockWithParsedIds) => {
+    // Фильтруем сообщения, которые входят в этот блок
+    const blockMessages = messages.filter(msg => block.original_message_ids.includes(msg.id));
+    setExpandedBlockMessages({ blockId: block.id, messages: blockMessages });
+    // Вызываем внешний обработчик если есть
+    onExpandBlock?.(block);
+  }, [messages, onExpandBlock]);
+
+  // Сворачивание блока
+  const handleCollapseBlock = useCallback(() => {
+    setExpandedBlockMessages(null);
+  }, []);
+  // Создаем маппинг message_id -> block для быстрого поиска
+  const messageToBlock = useMemo(() => {
+    const map = new Map<number, ChatBlockWithParsedIds>();
+    for (const block of blocks) {
+      block.original_message_ids.forEach(msgId => {
+        map.set(msgId, block);
+      });
+    }
+    return map;
+  }, [blocks]);
+
+  // Строим список элементов для рендера (чередование блоков и сообщений)
+  const renderItems = useMemo(() => {
+    const items: Array<{ type: 'block'; block: ChatBlockWithParsedIds } | { type: 'message'; message: Message }> = [];
+    const processedMessageIds = new Set<number>();
+
+    // Проходим по сообщениям в порядке created_at
+    for (const msg of messages) {
+      const block = messageToBlock.get(msg.id);
+
+      if (block) {
+        // Если это start_message_id блока, добавляем блок
+        if (msg.id === block.start_message_id) {
+          items.push({ type: 'block', block });
+        }
+        // Помечаем сообщения блока как обработанные
+        block.original_message_ids.forEach(id => processedMessageIds.add(id));
+      } else {
+        // Сообщение не в блоке - добавляем как обычно
+        items.push({ type: 'message', message: msg });
+      }
+    }
+
+    return items;
+  }, [messages, messageToBlock]);
+
+  // Обработка клика по сообщению в режиме выделения
+  const handleSelectionClick = (messageId: number) => {
+    if (!onMessageSelectionClick) return;
+    
+    if (selectionStart === null) {
+      // Первое выделение
+      onMessageSelectionClick(messageId);
+    } else if (messageId > selectionStart) {
+      // Второе выделение (конец диапазона)
+      onMessageSelectionClick(messageId);
+    } else {
+      // Обновляем начало выделения
+      onMessageSelectionClick(messageId);
+    }
+  };
+
+  // Вычисляем количество сообщений в выделении
+  const selectionCount = useMemo(() => {
+    if (selectionStart === null || selectionEnd === null) return 0;
+    const start = Math.min(selectionStart, selectionEnd);
+    const end = Math.max(selectionStart, selectionEnd);
+    return messages.filter(m => m.id >= start && m.id <= end).length;
+  }, [selectionStart, selectionEnd, messages]);
+
   return (
-    <div className="flex-1 overflow-y-auto px-4 pt-4 pb-4">
-      <div className="space-y-2">
-        {messages.map((message, index) => {
-          const isLastAssistantMessage = index === lastAssistantMessageIndex && message.role === 'assistant';
-          return (
-            <MessageItem
-              key={message.id}
-              message={message}
-              onRegenerate={onRegenerate}
-              onEdit={onEdit}
-              onDelete={onDelete}
-              showThinking={showThinking}
-              onToggleThinking={onToggleThinking}
-              translatingMessageId={translatingMessageId}
-              onTranslate={onTranslate}
-              isLastAssistantMessage={isLastAssistantMessage}
-              messageIndex={index}
-            />
-          );
-        })}
+    <div className="flex-1 flex flex-col h-full">
+      {/* Список сообщений и блоков */}
+      <div className="flex-1 overflow-y-auto px-4 pt-4 pb-4">
+        <div className="space-y-2">
+          {renderItems.map((item, index) => {
+            if (item.type === 'block') {
+              const isExpanded = expandedBlockMessages && expandedBlockMessages.blockId === item.block.id;
+              return (
+                <React.Fragment key={`block-fragment-${item.block.id}`}>
+                  <ChatBlock
+                     block={item.block}
+                     onEdit={(blockId, updates) => onEditBlock?.(blockId, updates)}
+                     onToggleCompression={(blockId, isCompressed) => onToggleBlockCompression?.(blockId, isCompressed)}
+                     onDelete={(blockId) => onDeleteBlock?.(blockId)}
+                     onExpand={handleExpandBlock}
+                     isExpanded={!!isExpanded}
+                   />
+                  {/* Отображение развернутых сообщений блока */}
+                  {isExpanded && (
+                    <div className="ml-4 border-l-2 border-cyan-700 pl-4 py-2 mb-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs text-cyan-400 font-medium">Оригинальные сообщения ({expandedBlockMessages.messages.length})</span>
+                        <button
+                          onClick={handleCollapseBlock}
+                          className="text-xs text-cyan-400 hover:text-cyan-300 transition"
+                        >
+                          ▲ Свернуть
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        {expandedBlockMessages.messages.map((msg) => (
+                          <MessageItem
+                            key={msg.id}
+                            message={msg}
+                            onRegenerate={onRegenerate}
+                            onEdit={onEdit}
+                            onDelete={onDelete}
+                            showThinking={showThinking}
+                            onToggleThinking={onToggleThinking}
+                            translatingMessageId={translatingMessageId}
+                            onTranslate={onTranslate}
+                            isLastAssistantMessage={false}
+                            messageIndex={index}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </React.Fragment>
+               );
+            } else {
+              const isLastAssistantMessage = 
+                item.message.role === 'assistant' && 
+                index === renderItems.findIndex(i => i.type === 'message' && i.message.role === 'assistant');
+              
+              // Проверяем, выделено ли сообщение
+              const isSelected = isSelectionMode && 
+                selectionStart !== null && 
+                selectionEnd !== null &&
+                item.message.id >= Math.min(selectionStart, selectionEnd) &&
+                item.message.id <= Math.max(selectionStart, selectionEnd);
+
+              return (
+                <MessageItem
+                  key={item.message.id}
+                  message={item.message}
+                  onRegenerate={onRegenerate}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  showThinking={showThinking}
+                  onToggleThinking={onToggleThinking}
+                  translatingMessageId={translatingMessageId}
+                  onTranslate={onTranslate}
+                  isLastAssistantMessage={isLastAssistantMessage}
+                  messageIndex={index}
+                  isSelectionMode={isSelectionMode}
+                  isSelected={isSelected}
+                  onSelectionClick={handleSelectionClick}
+                />
+              );
+            }
+          })}
+        </div>
       </div>
+
+      {/* Тулбар выделения */}
+      {isSelectionMode && (
+        <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800 border border-cyan-700 rounded-lg shadow-xl p-4 z-40">
+          <div className="flex items-center gap-4">
+            {selectionStart && selectionEnd ? (
+              <>
+                <div className="text-cyan-300">
+                  Выделено сообщений: <span className="font-bold">{selectionCount}</span>
+                </div>
+                <button
+                  onClick={() => {
+                    // Запуск сжатия выделенного диапазона
+                    const end = Math.max(selectionStart, selectionEnd);
+                    onMessageSelectionClick?.(end); // Это вызовет сжатие
+                  }}
+                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded transition"
+                >
+                  Сжать выбранные
+                </button>
+              </>
+            ) : (
+              <div className="text-cyan-300">
+                Нажмите на первое сообщение для начала выделения
+              </div>
+            )}
+            
+            <button
+              onClick={onCancelSelection}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition"
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-
-/**
- * Виртуализированный список сообщений
- * Рендерит только видимые сообщения
- */
-const VirtualizedList = memo(({
-  messages,
-  containerHeight: _containerHeight,
-  itemHeight,
-  lastAssistantMessageIndex,
-  onRegenerate,
-  onEdit,
-  onDelete,
-  showThinking,
-  onToggleThinking,
-  translatingMessageId,
-  onTranslate,
-}: {
-  messages: Message[];
-  containerHeight: number;
-  itemHeight: number;
-  lastAssistantMessageIndex: number;
-  onRegenerate?: (messageId: number) => void;
-  onEdit?: (messageId: number, content: string) => void;
-  onDelete?: (messageId: number) => void;
-  showThinking: Record<number, boolean>;
-  onToggleThinking?: (messageId: number) => void;
-  translatingMessageId?: number | null;
-  onTranslate?: (messageId: number) => void;
-}) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
-  
-  // Отслеживаем скролл
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    
-    const handleScroll = () => {
-      setScrollTop(container.scrollTop);
-    };
-    
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, []);
-  
-  // Вычисляем видимые элементы
-  const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - 2);
-  const endIndex = Math.min(messages.length - 1, Math.ceil((scrollTop + _containerHeight) / itemHeight) + 2);
-  const visibleMessages = messages.slice(startIndex, endIndex + 1);
-  
-  return (
-    <div
-      ref={containerRef}
-      className="h-full overflow-auto relative"
-    >
-      {/* Пустое пространство для скролла */}
-      <div style={{ height: messages.length * itemHeight, position: 'relative' }}>
-        {/* Рендерим только видимые сообщения */}
-        {visibleMessages.map((message, idx) => {
-          const actualIndex = startIndex + idx;
-          const isLastAssistantMessage = actualIndex === lastAssistantMessageIndex && message.role === 'assistant';
-          
-          return (
-            <div
-              key={message.id}
-              style={{
-                position: 'absolute',
-                top: actualIndex * itemHeight,
-                left: 0,
-                right: 0,
-                height: itemHeight
-              }}
-            >
-              <MessageItem
-                message={message}
-                onRegenerate={onRegenerate}
-                onEdit={onEdit}
-                onDelete={onDelete}
-                showThinking={showThinking}
-                onToggleThinking={onToggleThinking}
-                translatingMessageId={translatingMessageId}
-                onTranslate={onTranslate}
-                isLastAssistantMessage={isLastAssistantMessage}
-                messageIndex={actualIndex}
-              />
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-});
-
-VirtualizedList.displayName = 'VirtualizedList';
 
 export default MessageList;

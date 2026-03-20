@@ -19,6 +19,7 @@ import chatRoutes from './routes/chats';
 import messageRoutes from './routes/messages';
 import heroRoutes from './routes/hero';
 import contextRoutes from './routes/context';
+import compressionRoutes from './routes/compression';
 
 const app: Application = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -58,6 +59,9 @@ app.use('/api/hero', heroRoutes);
 
 // Context routes (token usage tracking)
 app.use('/api/context', contextRoutes);
+
+// Compression routes (smart history compression)
+app.use('/api/compression', compressionRoutes);
 
 // Автоматическое создание администратора при первом запуске
 const initializeAdminUser = async () => {
