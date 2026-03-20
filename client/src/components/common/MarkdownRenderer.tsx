@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -28,20 +28,19 @@ function processQuotedText(text: string): string {
  * - Статус-бара (автоматическое обнаружение и форматирование)
  * - Подсветки текста в кавычках оранжевым цветом
  * - Полной поддержки Markdown (таблицы, списки, код, заголовки и т.д.)
+ * Оптимизирован для мобильных устройств с memo и useMemo
  */
-export const MarkdownRenderer: React.FC<{ children: string; streaming?: boolean }> = ({ 
+const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean }> = ({ 
   children, 
   // streaming используется для будущих улучшений потоковой генерации
 }) => {
-  const [statusBar, setStatusBar] = useState<any>(null);
-  const [processedContent, setProcessedContent] = useState(children);
-  
-  useEffect(() => {
+  // useMemo для кэширования обработанного контента - предотвращает повторную обработку при каждом ре-рендере
+  const { statusBar, processedContent } = useMemo(() => {
     // Парсим статус-бар при изменении контента
     const { statusBar: parsedStatusBar, content: extractedContent } = extractStatusBar(children);
-    setStatusBar(parsedStatusBar);
     // Обрабатываем кавычки на уровне строки
-    setProcessedContent(processQuotedText(extractedContent));
+    const processed = processQuotedText(extractedContent);
+    return { statusBar: parsedStatusBar, processedContent: processed };
   }, [children]);
   
   return (
@@ -121,3 +120,11 @@ export const MarkdownRenderer: React.FC<{ children: string; streaming?: boolean 
     </div>
   );
 };
+
+// Обертка с memo для предотвращения лишних ре-рендеров при неизменных props
+export const MarkdownRenderer = memo(
+  MarkdownRendererInternal,
+  (prevProps, nextProps) => prevProps.children === nextProps.children && prevProps.streaming === nextProps.streaming
+);
+
+MarkdownRenderer.displayName = 'MarkdownRenderer';

@@ -4,6 +4,7 @@ import { chatsApi, charactersApi } from '../services/api';
 import { Chat, Message, Character } from '../types';
 import MessageList from '../components/chat/MessageList';
 import StreamingResponse from '../components/chat/StreamingResponse';
+import MessageInput from '../components/chat/MessageInput';
 
 /**
  * Форматирование даты последнего сообщения
@@ -78,12 +79,11 @@ const ChatPage: React.FC = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showHeaderFooter, setShowHeaderFooter] = useState(true);
   const [translatingMessageId, setTranslatingMessageId] = useState<number | null>(null);
-  // Для оптимизации: используем ref для хранения значения input чтобы избежать лишних ре-рендеров
-  const messageInputValueRef = useRef<string>('');
   const [messageInput, setMessageInput] = useState('');
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messageInputRef = useRef<HTMLTextAreaElement>(null);
+  // Ref для хранения ID requestAnimationFrame для отмены при размонтировании
+  const scrollRafRef = useRef<number | null>(null);
 
   const fetchChats = useCallback(async () => {
     try {
@@ -183,40 +183,34 @@ const ChatPage: React.FC = () => {
     }
   }, [chatId, fetchMessages]);
 
-  // Функция скролла к концу (используется в onTokenUpdate)
+  // Функция скролла к концу с requestAnimationFrame для оптимизации на мобильных
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    // Отменяем предыдущий requestAnimationFrame если есть
+    if (scrollRafRef.current !== null) {
+      cancelAnimationFrame(scrollRafRef.current);
+    }
+    
+    // Используем requestAnimationFrame для плавного скролла
+    scrollRafRef.current = requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    });
   }, []);
 
   useEffect(() => {
     // Scroll to bottom when messages change or streaming starts
-    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-  }, [messages, isStreaming]);
-
-  // Авто-ресайз textarea в зависимости от количества строк
-  const autoResizeInput = useCallback((_value: string) => {
-    const textarea = messageInputRef.current;
-    if (!textarea) return;
-    
-    // Сбросить высоту чтобы пересчитать
-    textarea.style.height = 'auto';
-    
-    // Установить новую высоту на основе scrollHeight
-    // Ограничиваем максимум 6 строками (примерно 200px при line-height ~33px)
-    const maxHeight = 200;
-    const newHeight = textarea.scrollHeight;
-    
-    // Установить высоту с ограничением
-    textarea.style.height = `${Math.min(newHeight, maxHeight)}px`;
-  }, []);
-  
-  // Автофокус на поле ввода после окончания стриминга
-  useEffect(() => {
-    if (!isStreaming && isSending) {
-      messageInputRef.current?.focus();
-      setIsSending(false);
+    if (scrollRafRef.current !== null) {
+      cancelAnimationFrame(scrollRafRef.current);
     }
-  }, [isStreaming, isSending]);
+    scrollRafRef.current = requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    });
+    
+    return () => {
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+      }
+    };
+  }, [messages, isStreaming]);
 
   const handleSendMessage = async () => {
     const messageToSend = messageInput.trim();
@@ -225,7 +219,6 @@ const ChatPage: React.FC = () => {
     setIsSending(true);
     const userMessage = messageToSend;
     setMessageInput('');
-    messageInputValueRef.current = '';
 
     try {
       // Optimistically add user message
@@ -615,41 +608,17 @@ const ChatPage: React.FC = () => {
           )}
         </div>
 
-        {/* Message input */}
+        {/* Message input - используем оптимизированный компонент */}
         <div className={`shrink-0 border-t border-gray-700 p-4 chat-footer ${
           showHeaderFooter ? 'flex' : 'hidden'
         }`}>
-          <div className="flex items-end gap-3 w-full">
-            <textarea
-              ref={messageInputRef}
-              value={messageInput}
-              onChange={(e) => {
-                const value = e.target.value;
-                messageInputValueRef.current = value;
-                setMessageInput(value);
-                autoResizeInput(value);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendMessage();
-                }
-              }}
-              placeholder="Введите сообщение..."
-              className="w-full bg-gray-700/30 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 resize-none"
-              style={{ minHeight: '40px', maxHeight: '200px' }}
-              disabled={isSending || isStreaming || !currentChat}
-            />
-            <button
-              onClick={handleSendMessage}
-              disabled={isSending || isStreaming || !messageInput.trim() || !currentChat}
-              className="p-3 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg transition shrink-0"
-            >
-              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
-            </button>
-          </div>
+          <MessageInput
+            value={messageInput}
+            onChange={setMessageInput}
+            onSend={handleSendMessage}
+            disabled={isSending || isStreaming || !currentChat}
+            placeholder="Введите сообщение..."
+          />
         </div>
       </div>
 
