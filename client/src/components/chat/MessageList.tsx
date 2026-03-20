@@ -1,6 +1,7 @@
 import React, { memo, useMemo, useState, useRef, useEffect } from 'react';
 import { Message } from '../../types';
 import { MarkdownRenderer } from '../common/MarkdownRenderer';
+import { MessageStatsPanel } from './MessageStatsPanel';
 
 interface MessageListProps {
   messages: Message[];
@@ -39,6 +40,7 @@ const MessageItem = memo(({
   translatingMessageId,
   onTranslate,
   isLastAssistantMessage,
+  messageIndex,
 }: {
   message: Message;
   onRegenerate?: (messageId: number) => void;
@@ -49,6 +51,7 @@ const MessageItem = memo(({
   translatingMessageId?: number | null;
   onTranslate?: (messageId: number) => void;
   isLastAssistantMessage: boolean;
+  messageIndex: number;
 }) => {
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState('');
@@ -198,6 +201,14 @@ const MessageItem = memo(({
             </div>
           )}
         </div>
+
+        {/* Message stats panel - отображается под сообщением assistant */}
+        {message.role === 'assistant' && (
+          <MessageStatsPanel
+            message={message}
+            messageIndex={messageIndex}
+          />
+        )}
 
         {/* Message metadata and actions */}
         <div
@@ -364,6 +375,7 @@ const MessageList: React.FC<MessageListProps> = ({
               translatingMessageId={translatingMessageId}
               onTranslate={onTranslate}
               isLastAssistantMessage={isLastAssistantMessage}
+              messageIndex={index}
             />
           );
         })}
@@ -455,6 +467,7 @@ const VirtualizedList = memo(({
                 translatingMessageId={translatingMessageId}
                 onTranslate={onTranslate}
                 isLastAssistantMessage={isLastAssistantMessage}
+                messageIndex={actualIndex}
               />
             </div>
           );

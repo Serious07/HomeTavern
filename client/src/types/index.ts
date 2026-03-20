@@ -35,6 +35,11 @@ export interface Message {
   reasoning_content?: string;
   translated_content?: string | null;
   created_at: string;
+  // Поля для статистики генерации (только для assistant сообщений)
+  generated_at?: string | null;
+  tokens_per_sec?: number | null;
+  total_tokens?: number | null;
+  generation_duration?: number | null;  // Время генерации в секундах (с сервера)
 }
 
 export interface Hero {

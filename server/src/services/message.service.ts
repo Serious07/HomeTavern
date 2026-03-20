@@ -2,18 +2,48 @@ import { messageRepository, Message, UpdateMessageParams } from '../repositories
 import { chatRepository } from '../repositories/chat.repository';
 import { translationService } from './translation.service';
 
+// Расширенный интерфейс Message с метриками генерации
+export interface MessageWithStats extends Message {
+  generation_duration?: number | null;
+}
+
 export class MessageService {
   /**
-   * Получение сообщений чата
+   * Получение сообщений чата с вычислением generation_duration
    */
-  getMessagesByChatId(chatId: number, userId: number): Message[] {
+  getMessagesByChatId(chatId: number, userId: number): MessageWithStats[] {
     // Проверка доступа к чату
     const chat = chatRepository.getChatById(chatId);
     if (!chat || chat.user_id !== userId) {
       throw new Error('Chat not found or access denied');
     }
 
-    return messageRepository.getMessagesByChatId(chatId);
+    const messages = messageRepository.getMessagesByChatId(chatId);
+    
+    // Вычисляем generation_duration для каждого сообщения assistant
+    const messagesWithDuration = messages.map(msg => {
+      if (msg.role === 'assistant') {
+        // Проверяем, есть ли метрики генерации
+        if (msg.generated_at && msg.created_at) {
+          try {
+            const created = new Date(msg.created_at).getTime();
+            const generated = new Date(msg.generated_at).getTime();
+            const duration = (generated - created) / 1000;  // В секундах
+            console.log(`[MessageService] Message ${msg.id}: created_at=${msg.created_at}, generated_at=${msg.generated_at}, duration=${duration}s`);
+            return {
+              ...msg,
+              generation_duration: duration > 0 ? duration : null
+            };
+          } catch (e) {
+            console.error(`[MessageService] Error calculating duration for message ${msg.id}:`, e);
+            return msg;
+          }
+        }
+      }
+      return msg;
+    });
+    
+    return messagesWithDuration;
   }
 
   /**

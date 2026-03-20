@@ -9,6 +9,9 @@ export interface Message {
   message_id: string | null;
   hidden: number;
   created_at: string;
+  generated_at?: string | null;
+  tokens_per_sec?: number | null;
+  total_tokens?: number | null;
 }
 
 export interface CreateMessageParams {
@@ -17,6 +20,7 @@ export interface CreateMessageParams {
   content: string;
   translated_content?: string;
   message_id?: string;
+  created_at?: string;  // ISO 8601 UTC формат
 }
 
 export interface UpdateMessageParams {
@@ -25,6 +29,9 @@ export interface UpdateMessageParams {
   translated_content?: string;
   message_id?: string;
   hidden?: number;
+  generated_at?: string;
+  tokens_per_sec?: number;
+  total_tokens?: number;
 }
 
 export class MessageRepository {
@@ -59,21 +66,23 @@ export class MessageRepository {
     role: string,
     content: string,
     translatedContent?: string,
-    messageId?: string
+    messageId?: string,
+    createdAt?: string  // Явно передаем created_at в формате ISO 8601 UTC
   ): Message {
     const stmt = db.prepare(`
-      INSERT INTO messages (chat_id, role, content, translated_content, message_id)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO messages (chat_id, role, content, translated_content, message_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
-    const result = stmt.run(chatId, role, content, translatedContent || null, messageId || null);
+    const createdAtUTC = createdAt || new Date().toISOString();
+    const result = stmt.run(chatId, role, content, translatedContent || null, messageId || null, createdAtUTC);
     return this.getMessageById(result.lastInsertRowid as number)!;
   }
 
   /**
-   * Обновление сообщения
-   */
+ * Обновление сообщения
+ */
   updateMessage(id: number, updates: UpdateMessageParams): Message | undefined {
-    const { role, content, translated_content, message_id, hidden } = updates;
+    const { role, content, translated_content, message_id, hidden, generated_at, tokens_per_sec, total_tokens } = updates;
 
     const stmt = db.prepare(`
       UPDATE messages
@@ -81,7 +90,10 @@ export class MessageRepository {
           content = COALESCE(?, content),
           translated_content = COALESCE(?, translated_content),
           message_id = COALESCE(?, message_id),
-          hidden = COALESCE(?, hidden)
+          hidden = COALESCE(?, hidden),
+          generated_at = COALESCE(?, generated_at),
+          tokens_per_sec = COALESCE(?, tokens_per_sec),
+          total_tokens = COALESCE(?, total_tokens)
       WHERE id = ?
     `);
     stmt.run(
@@ -90,6 +102,9 @@ export class MessageRepository {
       translated_content !== undefined ? translated_content : null,
       message_id || null,
       hidden !== undefined ? hidden : null,
+      generated_at !== undefined ? generated_at : null,
+      tokens_per_sec !== undefined ? tokens_per_sec : null,
+      total_tokens !== undefined ? total_tokens : null,
       id
     );
 

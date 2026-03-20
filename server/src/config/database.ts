@@ -85,4 +85,22 @@ db.exec(`
   );
 `);
 
+// Миграция: Добавление колонок для статистики сообщений
+try {
+  db.exec(`
+    ALTER TABLE messages ADD COLUMN generated_at TEXT;
+    ALTER TABLE messages ADD COLUMN tokens_per_sec REAL;
+    ALTER TABLE messages ADD COLUMN total_tokens INTEGER;
+  `);
+  console.log('[Database] Migrations completed successfully');
+} catch (error) {
+  // Если колонки уже существуют, игнорируем ошибку
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate column') || errorMessage.includes('already exists')) {
+    console.log('[Database] Columns already exist, skipping migration');
+  } else {
+    console.error('[Database] Migration error:', error);
+  }
+}
+
 export default db;

@@ -76,6 +76,8 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
 
   let fullContent = '';
   let translatedText = '';
+  let startTime = 0;
+  let contentTokenCount = 0;
 
   try {
     // 1. Проверяем доступ к чату
@@ -116,7 +118,11 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
       console.log('[ChatsRoute] Message is already in English, no translation needed');
     }
 
-    // 4. Генерируем поток ответа от LLM
+    // 4. Записываем время начала генерации
+    startTime = Date.now();
+    const createdAt = new Date().toISOString();  // Сохраняем время создания в UTC ISO 8601
+    
+    // 5. Генерируем поток ответа от LLM
     console.log('[ChatsRoute] Sending to LLM:', messageInEnglish);
     const stream = llmService.generateStream(userId, chatId, messageInEnglish);
 
@@ -125,7 +131,9 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
       chatId,
       'assistant',
       '',
-      undefined
+      undefined,
+      undefined,
+      createdAt
     );
     const newMessageId = String(tempMessage.id);
     
@@ -139,10 +147,17 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
       } else if (chunk.type === 'content_token') {
         sendSSEEvent(res, 'content_token', { token: chunk.token });
         fullContent += chunk.token;
+        contentTokenCount++;
       }
     }
 
-    // 7. Переводим ответ на русский (если оригинал на английском)
+    // 7. Вычисляем метрики генерации
+    const endTime = Date.now();
+    const durationSecs = startTime > 0 ? (endTime - startTime) / 1000 : 0;
+    const tokensPerSec = durationSecs > 0 ? contentTokenCount / durationSecs : 0;
+    console.log(`[ChatsRoute] Generation stats: ${contentTokenCount} tokens, ${durationSecs.toFixed(2)}s, ${tokensPerSec.toFixed(2)} tokens/sec`);
+
+    // 8. Переводим ответ на русский (если оригинал на английском)
     const responseLang = await translationService.detectLanguage(fullContent);
     if (responseLang === 'en') {
       sendSSEEvent(res, 'translation', {
@@ -156,17 +171,20 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
       translatedText = fullContent;
     }
 
-    // 8. Обновляем сообщение ассистента в БД с полным контентом и переводом
+    // 9. Обновляем сообщение ассистента в БД с полным контентом, переводом и метриками
     messageRepository.updateMessage(tempMessage.id, {
       content: fullContent,
-      translated_content: translatedText !== fullContent ? translatedText : undefined
+      translated_content: translatedText !== fullContent ? translatedText : undefined,
+      generated_at: new Date().toISOString(),
+      tokens_per_sec: tokensPerSec,
+      total_tokens: contentTokenCount
     });
 
-    // 9. Обновляем updated_at чата
+    // 10. Обновляем updated_at чата
     chatRepository.updateChatUpdatedAt(chatId);
     console.log('[ChatsRoute] Updated updated_at for chat', chatId);
 
-    // 10. Отправляем финальное событие
+    // 11. Отправляем финальное событие
     sendSSEEvent(res, 'done', { 
       messageId: newMessageId,
       translatedText
@@ -312,6 +330,8 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
   let messageId: string | null = null;
   let fullContent = '';
   let translatedText = '';
+  let genStartTime = 0;
+  let genContentTokenCount = 0;
 
   try {
     // 1. Проверяем доступ к чату
@@ -343,27 +363,40 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
     // 3. Сохраняем сообщение пользователя в БД
     const shouldSaveTranslation = messageInEnglish !== message && messageInEnglish.trim() !== '';
     console.log('[ChatsRoute] Should save translation:', shouldSaveTranslation, '- messageInEnglish:', messageInEnglish);
+    const createdAt = new Date().toISOString();  // Сохраняем время создания в UTC ISO 8601
     const userMessage = messageRepository.createMessage(
       chatIdNum,
       'user',
       message,
-      shouldSaveTranslation ? messageInEnglish : undefined
+      shouldSaveTranslation ? messageInEnglish : undefined,
+      undefined,
+      createdAt
     );
 
-    // 4. Генерируем поток ответа от LLM
+    // 4. Записываем время начала генерации
+    genStartTime = Date.now();
+    
+    // 5. Генерируем поток ответа от LLM
     const stream = llmService.generateStream(userId, chatIdNum, messageInEnglish);
 
-    // 5. Обрабатываем поток
+    // 6. Обрабатываем поток
     for await (const chunk of stream) {
       if (chunk.type === 'reasoning_token') {
         sendSSEEvent(res, 'reasoning_token', { token: chunk.token });
       } else if (chunk.type === 'content_token') {
         sendSSEEvent(res, 'content_token', { token: chunk.token });
         fullContent += chunk.token;
+        genContentTokenCount++;
       }
     }
 
-    // 6. Переводим ответ на русский (если оригинал на английском)
+    // 7. Вычисляем метрики генерации
+    const genEndTime = Date.now();
+    const genDurationSecs = genStartTime > 0 ? (genEndTime - genStartTime) / 1000 : 0;
+    const genTokensPerSec = genDurationSecs > 0 ? genContentTokenCount / genDurationSecs : 0;
+    console.log(`[ChatsRoute] Generation stats: ${genContentTokenCount} tokens, ${genDurationSecs.toFixed(2)}s, ${genTokensPerSec.toFixed(2)} tokens/sec`);
+
+    // 8. Переводим ответ на русский (если оригинал на английском)
     const responseLang = await translationService.detectLanguage(fullContent);
     if (responseLang === 'en') {
       sendSSEEvent(res, 'translation', {
@@ -377,20 +410,30 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
       translatedText = fullContent;
     }
 
-    // 7. Сохраняем сообщение ассистента в БД
+    // 9. Сохраняем сообщение ассистента в БД с метриками
+    const assistantMessageCreatedAt = new Date().toISOString();  // Время создания в UTC ISO 8601
     const assistantMessage = messageRepository.createMessage(
       chatIdNum,
       'assistant',
       fullContent,
-      translatedText !== fullContent ? translatedText : undefined
+      translatedText !== fullContent ? translatedText : undefined,
+      undefined,
+      assistantMessageCreatedAt
     );
     messageId = String(assistantMessage.id);
+    
+    // Обновляем сообщение с метриками
+    messageRepository.updateMessage(assistantMessage.id, {
+      generated_at: new Date().toISOString(),
+      tokens_per_sec: genTokensPerSec,
+      total_tokens: genContentTokenCount
+    });
 
-    // 8. Обновляем updated_at чата
+    // 10. Обновляем updated_at чата
     chatRepository.updateChatUpdatedAt(chatIdNum);
     console.log('[ChatsRoute] Updated updated_at for chat', chatIdNum);
 
-    // 9. Отправляем финальное событие
+    // 11. Отправляем финальное событие
     sendSSEEvent(res, 'done', { 
       messageId,
       translatedText

@@ -26,6 +26,14 @@ export interface StreamChunk {
   token: string;
 }
 
+export interface GenerationStats {
+  startTime: number;
+  endTime: number;
+  durationSecs: number;
+  contentTokenCount: number;
+  tokensPerSec: number;
+}
+
 export interface ChatContext {
   chat: any;
   character: any;
@@ -207,12 +215,12 @@ export class LLMService {
   }
 
   /**
-   * Генерация потока ответа от LLM
-   * @param userId - ID пользователя
-   * @param chatId - ID чата
-   * @param userMessage - Сообщение пользователя
-   * @returns Асинхронный итератор с чанками (reasoning_token и content_token)
-   */
+ * Генерация потока ответа от LLM
+ * @param userId - ID пользователя
+ * @param chatId - ID чата
+ * @param userMessage - Сообщение пользователя
+ * @returns Асинхронный итератор с чанками (reasoning_token и content_token)
+ */
   async *generateStream(
     userId: number,
     chatId: number,
@@ -220,6 +228,7 @@ export class LLMService {
   ): AsyncGenerator<StreamChunk> {
     const timeoutMs = 60000; // 60 секунд таймаут
     const startTime = Date.now();
+    let contentTokenCount = 0;
 
     try {
       // Получаем контекст чата
@@ -280,12 +289,19 @@ export class LLMService {
 
         // Отправляем content_token если есть content
         if (content) {
+          contentTokenCount++;
           yield {
             type: 'content_token',
             token: content
           };
         }
       }
+
+      // Логирование метрик генерации
+      const endTime = Date.now();
+      const durationSecs = (endTime - startTime) / 1000;
+      const tokensPerSec = durationSecs > 0 ? contentTokenCount / durationSecs : 0;
+      console.log(`[LLMService] Generation stats: ${contentTokenCount} tokens, ${durationSecs.toFixed(2)}s, ${tokensPerSec.toFixed(2)} tokens/sec`);
     } catch (error) {
       const elapsed = Date.now() - startTime;
       console.error(`LLM Stream Error after ${elapsed}ms:`, error);
