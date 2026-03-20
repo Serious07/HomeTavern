@@ -24,7 +24,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const lastHeightRef = useRef<number>(0);
 
   // Debounced авто-ресайз textarea
-  const autoResize = useCallback((textarea: HTMLTextAreaElement, newValue: string) => {
+  const autoResize = useCallback((textarea: HTMLTextAreaElement, _newValue: string) => {
     // Очищаем предыдущий таймаут
     if (resizeTimeoutRef.current) {
       clearTimeout(resizeTimeoutRef.current);

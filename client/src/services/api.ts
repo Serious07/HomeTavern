@@ -2,6 +2,16 @@ import axios from 'axios';
 import { Character, Chat, Message, Hero } from '../types';
 import { STORAGE_KEYS } from '../constants/storage';
 
+// Context API types
+export interface ContextStats {
+  tokensUsed: number;
+  contextLimit: number;
+  percentage: number;
+  lastSynced: string | null;
+  cached: boolean;
+  slotId: number | null;
+}
+
 // Create axios instance with default config
 export const api = axios.create({
   baseURL: '/api',
@@ -90,6 +100,18 @@ export const chatsApi = {
 export const heroApi = {
   get: () => api.get<Hero>('/hero'),
   update: (data: Partial<Hero>) => api.put<Hero>('/hero', data),
+};
+
+// Context API (token usage tracking)
+export const contextApi = {
+  getStats: (chatId: number, force = false) =>
+    api.get<ContextStats>(`/context/stats/${chatId}`, {
+      params: { force },
+    }),
+  sync: (chatId: number) =>
+    api.post<ContextStats>(`/context/sync/${chatId}`),
+  getSlots: () => api.get<{ slots: any[] }>('/context/slots'),
+  getProps: () => api.get<{ n_ctx: number }>('/context/props'),
 };
 
 export default api;

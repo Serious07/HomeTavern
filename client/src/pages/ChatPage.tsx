@@ -5,6 +5,8 @@ import { Chat, Message, Character } from '../types';
 import MessageList from '../components/chat/MessageList';
 import StreamingResponse from '../components/chat/StreamingResponse';
 import MessageInput from '../components/chat/MessageInput';
+import ContextStatsDisplay from '../components/chat/ContextStatsDisplay';
+import { useContextStats, useContextStatsDuringGeneration } from '../hooks/useContextStats';
 
 /**
  * Форматирование даты последнего сообщения
@@ -81,6 +83,17 @@ const ChatPage: React.FC = () => {
   const [translatingMessageId, setTranslatingMessageId] = useState<number | null>(null);
   const [messageInput, setMessageInput] = useState('');
   
+  // Context stats for token usage tracking
+  const currentChatId = chatId ? parseInt(chatId) : null;
+  const { stats: contextStats, isLoading: isContextLoading, sync: syncContextStats } = useContextStats(
+    currentChatId,
+    { enabled: !!currentChatId, intervalMs: 30000 }
+  );
+  const { sync: syncDuringGeneration } = useContextStatsDuringGeneration(
+    currentChatId,
+    isStreaming
+  );
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Ref для хранения ID requestAnimationFrame для отмены при размонтировании
   const scrollRafRef = useRef<number | null>(null);
@@ -142,9 +155,13 @@ const ChatPage: React.FC = () => {
   const handleStreamingComplete = useCallback(async (_message: Message) => {
     // Сначала обновляем сообщения, потом устанавливаем isStreaming и isSending в false
     await fetchMessages();
+    // Синхронизация токенов после окончания генерации
+    syncDuringGeneration();
+    // Принудительная синхронизация контекста после завершения генерации
+    syncContextStats();
     setIsStreaming(false);
     setIsSending(false);
-  }, [fetchMessages]);
+  }, [fetchMessages, syncDuringGeneration, syncContextStats]);
 
   const handleStreamingError = useCallback(async (error: string) => {
     console.error('[ChatPage] Streaming error:', error);
@@ -242,6 +259,9 @@ const ChatPage: React.FC = () => {
       // Fetch updated messages
       await fetchMessages();
       
+      // Обновляем статистику токенов после отправки сообщения
+      await syncContextStats();
+      
       // Start streaming response
       setIsStreaming(true);
     } catch (err: any) {
@@ -260,6 +280,9 @@ const ChatPage: React.FC = () => {
       // Fetch updated messages
       await fetchMessages();
       
+      // Обновляем статистику токенов после удаления сообщения
+      await syncContextStats();
+      
       // Start streaming response - server will find the last user message from DB
       setIsStreaming(true);
     } catch (err: any) {
@@ -273,6 +296,8 @@ const ChatPage: React.FC = () => {
     try {
       await chatsApi.deleteMessage(parseInt(chatId), messageId);
       await fetchMessages();
+      // Обновляем статистику токенов после удаления сообщения
+      await syncContextStats();
     } catch (err: any) {
       console.error('Error deleting message:', err);
     }
@@ -300,6 +325,8 @@ const ChatPage: React.FC = () => {
               m.id === messageId ? { ...m, translated_content: response.data.translated_content } : m
             )
           );
+          // После перевода сообщения обновляем статистику токенов
+          await syncContextStats();
         } catch (translateErr: any) {
           console.error('Error translating message:', translateErr);
         } finally {
@@ -333,6 +360,8 @@ const ChatPage: React.FC = () => {
           m.id === messageId ? { ...m, translated_content: response.data.translated_content } : m
         )
       );
+      // После перевода сообщения обновляем статистику токенов
+      await syncContextStats();
     } catch (err: any) {
       console.error('Error translating message:', err);
     } finally {
@@ -501,6 +530,12 @@ const ChatPage: React.FC = () => {
               <h1 className="text-xl font-bold text-white">{getCurrentChatTitle()}</h1>
             </div>
           </div>
+          {/* Статистика токенов */}
+          {currentChat && (
+            <div className="w-full px-4 py-2 border-b border-gray-700/30 context-stats-container">
+              <ContextStatsDisplay stats={contextStats} isLoading={isContextLoading} />
+            </div>
+          )}
           {/* Нижняя строка - кнопки управления */}
           <div className="w-full flex items-center justify-between p-3 border-b border-gray-700/30">
             <div className="flex items-center gap-2">

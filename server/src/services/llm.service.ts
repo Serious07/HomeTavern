@@ -7,6 +7,7 @@ import { characterRepository } from '../repositories/character.repository';
 import { chatRepository } from '../repositories/chat.repository';
 import { userRepository } from '../repositories/user.repository';
 import { heroVariationRepository } from '../repositories/hero.variation.repository';
+import { contextRepository } from '../repositories/context.repository';
 
 // Типы для LLM
 export interface LLMMessage {
@@ -34,6 +35,17 @@ export interface GenerationStats {
   tokensPerSec: number;
 }
 
+// Типы для usage из LLM ответа
+export interface Usage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+export interface StreamChunkWithUsage extends StreamChunk {
+  usage?: Usage;
+}
+
 export interface ChatContext {
   chat: any;
   character: any;
@@ -45,7 +57,7 @@ export interface ChatContext {
 /**
  * Заменяет плейсхолдеры {{user}}, {user}, {{USER}}, {USER} и т.д. на имя героя
  */
-function replaceUserPlaceholders(text: string, heroName: string | null): string {
+export function replaceUserPlaceholders(text: string, heroName: string | null): string {
   if (!heroName) {
     return text;
   }
@@ -72,7 +84,7 @@ function replaceUserPlaceholders(text: string, heroName: string | null): string 
  * Форматирование истории сообщений для Qwen 3.5
  * Системный промпт в САМОМ НАЧАЛЕ, затем профиль героя, история, текущее сообщение
  */
-function formatMessagesForQwen(
+export function formatMessagesForQwen(
   character: any,
   heroProfile: string | null,
   heroName: string | null,
@@ -229,6 +241,7 @@ export class LLMService {
     const timeoutMs = 60000; // 60 секунд таймаут
     const startTime = Date.now();
     let contentTokenCount = 0;
+    let lastUsage: Usage | undefined;
 
     try {
       // Получаем контекст чата
@@ -275,6 +288,12 @@ export class LLMService {
 
       // Обрабатываем поток
       for await (const chunk of stream) {
+        // Проверяем наличие usage в чанке (приходит в последнем чанке)
+        if (chunk.usage) {
+          lastUsage = chunk.usage;
+          console.log('[LLMService] Usage from stream:', lastUsage);
+        }
+
         const delta = chunk.choices[0]?.delta || {};
         const content = delta.content || '';
         const reasoningContent = delta.reasoning_content || '';
@@ -295,6 +314,13 @@ export class LLMService {
             token: content
           };
         }
+      }
+
+      // Сохраняем информацию о токенах в БД после завершения генерации
+      if (lastUsage) {
+        const totalTokens = lastUsage.total_tokens;
+        console.log(`[LLMService] Saving token usage for chat ${chatId}: ${totalTokens} total tokens`);
+        contextRepository.updateCachedStats(chatId, totalTokens, new Date().toISOString());
       }
 
       // Логирование метрик генерации

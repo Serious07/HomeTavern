@@ -66,7 +66,7 @@ hometavern-v5/
 
 - **Node.js** 18+ (рекомендуется 20+)
 - **npm** 9+
-- **llama.cpp** с поддержкой OpenAI-compatible API (порт 1234)
+- **llama.cpp** с поддержкой OpenAI-compatible API (порт 8080)
 
 ## Installation
 
@@ -119,7 +119,7 @@ cp .env.example .env
 | `JWT_SECRET` | (сгенерировать) | Секретный ключ для JWT |
 | `JWT_EXPIRES_IN` | 7d | Срок действия токена |
 | `CORS_ORIGIN` | http://localhost:5173 | Разрешённый origin для CORS |
-| `LLM_BASE_URL` | http://localhost:1234/v1 | URL llama.cpp сервера |
+| `LLM_BASE_URL` | http://localhost:8080/v1 | URL llama.cpp сервера |
 | `LLM_MODEL` | qwen-3.5 | Название модели LLM |
 
 **Генерация JWT_SECRET:**
@@ -139,18 +139,17 @@ openssl rand -hex 32
 ```bash
 # Пример запуска с моделью Qwen
 ./llama-server --model ./models/qwen-3.5.gguf \
-  --port 1234 \
+  --port 8080 \
   --host 127.0.0.1 \
   --n-ctx 8192 \
-  --n-thread 8 \
-  --api-key local-model-key
+  --n-thread 8
 ```
 
 **Важно:** Для Qwen 3.5 с включенным Reasoning необходимо установить `--n-ctx` не менее 8192 токенов. Для ещё более длинных диалогов можно увеличить до 16384 или 32768.
 
 **Параметры:**
 - `--model`: Путь к файлу модели в формате GGUF
-- `--port`: Порт для API (должен быть 1234)
+- `--port`: Порт для API (должен быть 8080)
 - `--host`: Хост для прослушивания (127.0.0.1 для локального доступа)
 - `--n-ctx`: Размер контекстного окна (8192+ для Qwen 3.5 с Reasoning)
 - `--n-thread`: Количество потоков CPU
@@ -159,18 +158,22 @@ openssl rand -hex 32
 
 ```bash
 # Проверка здоровья сервера
-curl http://localhost:1234/v1/health
+curl http://localhost:8080/health
 
 # Получение списка моделей
-curl http://localhost:1234/v1/models
+curl http://localhost:8080/models
 
 # Тестовый запрос
-curl http://localhost:1234/v1/chat/completions \
+curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen-3.5",
     "messages": [{"role": "user", "content": "Привет!"}]
   }'
+
+# Получение информации о контексте (для мониторинга токенов)
+curl http://localhost:8080/props
+curl http://localhost:8080/slots
 ```
 
 ## Запуск проекта
@@ -271,6 +274,73 @@ npm start
 - **Профиль героя** автоматически подставляется в системный промпт персонажей
 - Плейсхолдеры `{{user}}`, `{user}` и их варианты в промптах автоматически заменяются на имя активного героя
 
+### Token Usage Tracking (Context Monitoring)
+
+HomeTavern V5 включает встроенный мониторинг использования токенов контекста llama.cpp.
+
+**Возможности:**
+- Отображение текущего использования контекста в реальном времени
+- Прогресс-бар с цветовой индикацией уровня заполнения
+- Автоматическое обновление каждые 30 секунд
+- Интенсивное обновление (каждые 2 секунды) во время генерации ответа
+- Кэширование значений в базе данных для оптимизации запросов
+- **Точный подсчёт токенов** через поле `usage.total_tokens` из ответа LLM
+
+**Как это работает:**
+Модуль получает информацию о токенах из поля `usage` в последнем чанке потока ответа LLM (OpenAI-совместимый API `/v1/chat/completions`):
+```json
+{
+  "choices": [...],
+  "usage": {
+    "prompt_tokens": 25,    // Токены промпта
+    "completion_tokens": 50, // Токены ответа
+    "total_tokens": 75       // Общее количество
+  }
+}
+```
+
+**API Endpoints:**
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| GET | `/api/context/stats/:chatId` | Получить статистику токенов для чата |
+| POST | `/api/context/sync/:chatId` | Принудительная синхронизация с llama.cpp |
+| GET | `/api/context/slots` | Получить список активных слотов |
+| GET | `/api/context/props` | Получить настройки контекста сервера |
+
+**llama.cpp Эндпоинты:**
+Модуль использует следующие эндпоинты llama.cpp сервера:
+- `GET /props` - Получение максимального контекста (`n_ctx`)
+- `GET /slots` - Получение информации о слотах (для мониторинга в реальном времени)
+
+**База данных:**
+Таблица `chats` имеет дополнительные поля для кэширования:
+- `context_tokens_used` (INTEGER) - количество использованных токенов (накопленное значение из `usage.total_tokens`)
+- `context_last_synced` (DATETIME) - время последней синхронизации
+
+**Компоненты:**
+- [`ContextStatsDisplay`](client/src/components/chat/ContextStatsDisplay.tsx) - компонент отображения в шапке чата
+- [`useContextStats`](client/src/hooks/useContextStats.ts) - React hook для получения данных
+- [`context.service.ts`](server/src/services/context.service.ts) - сервис взаимодействия с llama.cpp
+- [`llm.service.ts`](server/src/services/llm.service.ts) - извлечение `usage` из потока и сохранение в БД
+
+**Цветовая индикация:**
+- **Зелёный** (< 50%) - контекст заполнен менее чем наполовину
+- **Жёлтый** (50-75%) - умеренное использование
+- **Оранжевый** (75-90%) - высокое использование
+- **Красный** (> 90%) - критическое заполнение контекста
+
+**Пример отображения:**
+```
+56890 t / 131072 t (43.40%)
+[████████████░░░░░░░░░░]
+```
+
+**Будущее использование:**
+Данные о токенах могут использоваться для:
+- Суммаризации диалогов (когда контекст приближается к лимиту)
+- Автоматической очистки истории
+- Оптимизации стоимости запросов
+
 ### Settings
 
 | Метод | Endpoint | Описание |
@@ -352,9 +422,9 @@ npm start
 
 ### LLM не отвечает
 
-- Убедитесь, что llama.cpp запущен на порту 1234
-- Проверьте `LLM_BASE_URL` в `.env`
-- Выполните тестовый запрос через curl
+- Убедитесь, что llama.cpp запущен на порту 8080
+- Проверьте `LLM_BASE_URL` в `.env` (должно быть `http://localhost:8080/v1`)
+- Выполните тестовый запрос через curl: `curl http://localhost:8080/props`
 
 ### Ответ обрывается досрочно (Qwen 3.5 с Reasoning)
 

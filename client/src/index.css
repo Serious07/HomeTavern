@@ -325,4 +325,24 @@ body.eco-mode .will-change-all {
   will-change: auto !important;
 }
 
-/* Chat header/footer styles - removed to restore default appearance */
+/* Chat header/footer styles */
+.chat-header {
+  @apply flex flex-col;
+}
+
+.chat-footer {
+  @apply flex;
+}
+
+/* Context stats container styles */
+.context-stats-container {
+  @apply w-full;
+}
+
+.context-stats-display {
+  @apply w-full;
+}
+
+.context-stats-loading {
+  @apply w-full;
+}

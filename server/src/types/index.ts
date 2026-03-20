@@ -95,6 +95,9 @@ export interface Chat {
   user_id: number | null;
   created_at: string;
   updated_at: string;
+  character_id: number;
+  context_tokens_used?: number | null;
+  context_last_synced?: string | null;
 }
 
 export interface CreateChatInput {

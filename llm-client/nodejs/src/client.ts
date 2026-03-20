@@ -114,8 +114,8 @@ export class LLMClient {
     }
 
     /**
-     * Обработка SSE потока
-     */
+ * Обработка SSE потока
+ */
     private async *processStream(
         body: ReadableStream<Uint8Array>
     ): AsyncIterable<ChatCompletionChunk> {
@@ -149,6 +149,10 @@ export class LLMClient {
                         if (jsonStr.trim()) {
                             try {
                                 const chunk = JSON.parse(jsonStr) as ChatCompletionChunk;
+                                // Проверяем наличие usage в чанке (приходит в последнем чанке)
+                                if (chunk.usage) {
+                                    console.log('[LLMClient] Usage from stream:', chunk.usage);
+                                }
                                 yield chunk;
                             } catch (error) {
                                 // Игнорируем ошибки парсинга (например, [DONE])

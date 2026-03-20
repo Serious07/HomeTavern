@@ -141,6 +141,7 @@ export interface ChatCompletionChunk {
     system_fingerprint?: string;
     object: 'chat.completion.chunk';
     choices: Choice[];
+    usage?: Usage;  // Добавлено для получения usage в последнем чанке
     timings?: {
         cache_n: number;
         prompt_n: number;

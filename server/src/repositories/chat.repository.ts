@@ -107,6 +107,32 @@ export class ChatRepository {
   }
 
   /**
+   * Обновление информации о использованных токенах контекста
+   */
+  updateCachedStats(chatId: number, tokensUsed: number, lastSynced: string): boolean {
+    const stmt = db.prepare(`
+      UPDATE chats
+      SET context_tokens_used = ?,
+          context_last_synced = ?
+      WHERE id = ?
+    `);
+    const result = stmt.run(tokensUsed, lastSynced, chatId);
+    return result.changes > 0;
+  }
+
+  /**
+   * Получение информации о использованных токенах контекста
+   */
+  getContextStats(chatId: number): { context_tokens_used: number; context_last_synced: string | null } | undefined {
+    const stmt = db.prepare(`
+      SELECT context_tokens_used, context_last_synced
+      FROM chats
+      WHERE id = ?
+    `);
+    return stmt.get(chatId) as { context_tokens_used: number; context_last_synced: string | null } | undefined;
+  }
+
+  /**
    * Удаление чата
    */
   deleteChat(id: number): boolean {
