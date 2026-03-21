@@ -438,13 +438,18 @@ const MessageList: React.FC<MessageListProps> = ({
   
   // Эффект для автоматического скролла к концу при изменении сообщений
   useEffect(() => {
-    // Скроллим всегда, чтобы поддерживать скролл вниз во время стриминга
-    // Используем setTimeout чтобы дать браузеру время на рендеринг
-    setTimeout(() => {
+    // Функция скролла к концу с учетом динамического изменения контента
+    const scrollToBottom = () => {
       if (messagesEndRef.current) {
-        messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
+        // Используем scrollIntoView с block: 'end' чтобы скроллить к концу видимой области
+        // behavior: 'auto' для мгновенного скролла (важно для стриминга)
+        messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
       }
-    }, 0);
+    };
+    
+    // Вызываем скролл с задержкой чтобы дать браузеру время на рендеринг
+    const timeoutId = setTimeout(scrollToBottom, 0);
+    return () => clearTimeout(timeoutId);
   }, [messages, blocks, expandedBlockMessages]);
 
   // Обработчик развертывания блока

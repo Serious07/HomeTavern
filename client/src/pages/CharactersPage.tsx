@@ -139,7 +139,7 @@ const CharactersPage: React.FC = () => {
       <AppHeader title="Персонажи" />
 
       {/* Main content */}
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 pb-24 md:pb-8">
         {/* Error message */}
         {error && (
           <div className="mb-6 p-4 bg-red-900/30 border border-red-700 rounded-lg">

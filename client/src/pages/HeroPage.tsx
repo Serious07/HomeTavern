@@ -201,7 +201,7 @@ const HeroPage: React.FC = () => {
       <AppHeader title="Профиль героя" />
 
       {/* Main content */}
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 pb-24 md:pb-8">
         <div className="max-w-4xl mx-auto">
           {/* Info card */}
           <div className="bg-gray-700/30 border border-gray-600 rounded-lg p-4 mb-6">

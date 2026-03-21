@@ -68,7 +68,7 @@ const SettingsPage: React.FC = () => {
       <AppHeader title="Настройки" />
 
       {/* Main content */}
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 pb-24 md:pb-8">
         <div className="max-w-2xl mx-auto space-y-6">
           {/* User info card */}
           <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">

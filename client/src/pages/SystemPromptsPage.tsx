@@ -110,7 +110,7 @@ const SystemPromptsPage: React.FC = () => {
     <div className="min-h-screen bg-gray-900">
       <AppHeader title="Системные промпты" />
       
-      <main className="pt-6 pb-8 px-4">
+      <main className="pt-6 pb-24 md:pb-8 px-4">
         <div className="max-w-7xl mx-auto">
           {/* Page header */}
           <div className="flex items-center justify-between mb-6">

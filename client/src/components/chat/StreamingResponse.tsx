@@ -35,8 +35,9 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   // Ref для отслеживания того, что reasoningContent был получен (чтобы показывать кнопку если есть мысли)
   const hasReasoningContentRef = useRef(false);
   
-  // Ref для скролла к стриминговому сообщению
+  // Ref для скролла к стриминговому сообщению и к концу контента
   const streamingMessageRef = useRef<HTMLDivElement>(null);
+  const contentEndRef = useRef<HTMLDivElement>(null);
   
   const eventSourceRef = useRef<EventSource | null>(null);
   const messageIdRef = useRef<number>(0);
@@ -46,12 +47,22 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   
   // Эффект для автоматического скролла к стриминговому сообщению при изменении контента
   useEffect(() => {
-    // Скроллим к стриминговому сообщению при каждом изменении контента
-    setTimeout(() => {
-      if (streamingMessageRef.current) {
-        streamingMessageRef.current.scrollIntoView({ behavior: 'auto' });
+    // Скроллим к концу контента при каждом изменении content или reasoningContent
+    // Используем contentEndRef чтобы скроллить точно к концу контента, а не к началу сообщения
+    const scrollToContentEnd = () => {
+      if (contentEndRef.current) {
+        // Используем scrollMarginBottom чтобы скролл останавливался чуть выше кнопок внизу
+        contentEndRef.current.style.scrollMarginBottom = '80px';
+        contentEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
+      } else if (streamingMessageRef.current) {
+        // Fallback к старому поведению если contentEndRef не доступен
+        streamingMessageRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
       }
-    }, 0);
+    };
+    
+    // Вызываем скролл с небольшим задержкой чтобы дать браузеру время на рендеринг нового контента
+    const timeoutId = setTimeout(scrollToContentEnd, 0);
+    return () => clearTimeout(timeoutId);
   }, [content, reasoningContent]);
 
   useEffect(() => {
@@ -243,6 +254,8 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       <div className="text-white">
         <MarkdownRenderer streaming>{content}</MarkdownRenderer>
       </div>
+      {/* Ref для скролла к концу контента */}
+      <div ref={contentEndRef} className="scroll-mb-20" />
 
       {/* Error message */}
       {error && (
@@ -251,9 +264,9 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
         </div>
       )}
 
-      {/* Stop button - внизу сообщения для всегда доступного доступа */}
+      {/* Stop button и кнопка сворачивания размышлений - внизу сообщения */}
       {isStreaming && (
-        <div className="mt-4 flex justify-start">
+        <div className="mt-4 flex justify-start gap-2">
           <button
             onClick={handleStop}
             className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm text-white transition flex items-center gap-2"
@@ -263,6 +276,27 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
             </svg>
             Прервать генерацию
           </button>
+          {reasoningContent && hasReasoningContentRef.current && (
+            <button
+              onClick={onToggleThinking || (() => setInternalShowThinking(!actualShowThinking))}
+              className="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-sm text-white transition flex items-center gap-2"
+            >
+              <svg
+                className={`w-4 h-4 transition-transform ${actualShowThinking ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+              {actualShowThinking ? 'Свернуть размышления' : 'Развернуть размышления'}
+            </button>
+          )}
         </div>
       )}
     </div>
