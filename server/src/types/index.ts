@@ -24,6 +24,7 @@ export interface Character {
   user_id: number;
   name: string;
   description: string | null;
+  short_description: string | null;
   personality: string | null;
   first_message: string | null;
   system_prompt: string | null;
@@ -36,6 +37,7 @@ export interface CreateCharacterInput {
   user_id: number;
   name: string;
   description?: string;
+  short_description?: string;
   personality?: string;
   first_message?: string;
   system_prompt?: string;
@@ -45,6 +47,7 @@ export interface CreateCharacterInput {
 export interface UpdateCharacterInput {
   name?: string;
   description?: string;
+  short_description?: string;
   personality?: string;
   first_message?: string;
   system_prompt?: string;
@@ -55,6 +58,7 @@ export interface UpdateCharacterInput {
 export interface SillyTavernCharacter {
   name: string;
   description?: string;
+  short_description?: string;
   personality?: string;
   first_mes?: string;  // SillyTavern uses "first_mes" not "first_message"
   mes_example?: string;
@@ -72,6 +76,7 @@ export interface SillyTavernCharacter {
   data?: {  // Nested data object for chara_card_v3 format
     name?: string;
     description?: string;
+    short_description?: string;
     personality?: string;
     first_mes?: string;
     mes_example?: string;

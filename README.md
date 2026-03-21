@@ -54,7 +54,7 @@ hometavern-v5/
 │   │   │   ├── auth/      # Authentication components
 │   │   │   ├── characters/ # Character editor
 │   │   │   ├── chat/      # Chat components (MessageList, MessageInput, StreamingResponse, ContextStatsDisplay, ChatBlock, EditBlockModal, SelectionToolbar)
-│   │   │   ├── common/    # Reusable UI components
+│   │   │   ├── common/    # Reusable UI components (AppHeader)
 │   │   │   └── hero/      # Hero profile components
 │   │   ├── constants/     # Application constants
 │   │   ├── contexts/      # React contexts (AuthContext, EcoModeContext)
@@ -573,6 +573,48 @@ In the chat interface, compressed blocks appear as styled "chapters" that can be
 - **Expanded** to view original messages
 - **Edited** to modify the summary
 - **Toggled** to use original messages instead of summary in LLM prompts
+
+## Recent Improvements (2026-03-21)
+
+### Chat Interface Enhancements
+
+1. **Message Scrolling with Animation**
+   - When a user sends a message or receives a response from AI, the chat automatically scrolls to the **start** of the new message (not just the end)
+   - Smooth scroll animation with fade-in effect for new messages
+   - Implemented in [`MessageList.tsx`](client/src/components/chat/MessageList.tsx) and [`ChatPage.tsx`](client/src/pages/ChatPage.tsx)
+
+2. **Mobile Input Modal**
+   - On mobile devices, a large modal window opens for message input
+   - Textarea with scrolling when content exceeds visible area
+   - Smooth transition animation between small input field and modal
+   - Implemented in [`MobileMessageInputModal.tsx`](client/src/components/chat/MobileMessageInputModal.tsx)
+
+3. **Fixed Token/sec Calculation for Thinking Mode**
+   - When LLM has Thinking/Reasoning mode enabled, tokens generated during reasoning are now included in the calculation
+   - Formula: `tokensPerSec = (contentTokens + reasoningTokens) / duration`
+   - Fixed in [`server/src/routes/chats.ts`](server/src/routes/chats.ts:161)
+
+4. **Fixed Thinking Toggle During Generation**
+   - The "Show/Hide Thinking" button now works correctly during streaming
+   - Added `isStreaming` check to prevent state conflicts
+   - Implemented in [`StreamingResponse.tsx`](client/src/components/chat/StreamingResponse.tsx:206)
+
+5. **Bidirectional Translation for Messages**
+   - Editing a message in Russian automatically updates the English version (and vice versa)
+   - User messages: RU = `content` (original), EN = `translated_content` (translation)
+   - Assistant messages: EN = `content` (original), RU = `translated_content` (translation)
+   - Implemented in [`server/src/routes/messages.ts`](server/src/routes/messages.ts:243) endpoint `PUT /api/chats/:chatId/messages/:id/translate-bidirectional`
+
+6. **Bidirectional Translation for Compression Blocks**
+   - Added language switch button to view compression block summaries in English/Russian
+   - Editing summary in one language automatically updates the other language
+   - Same translation rules apply as for messages
+
+### Bug Fixes
+
+- **Fixed 500 error on `/translate-bidirectional` endpoint** - Added try-catch blocks for translation service calls to gracefully handle translation failures
+- **Fixed message not saving after generation** - Now uses real message ID from database after `fetchMessages()` instead of temporary ID
+- **Fixed mobile modal not closing after send** - Modal now closes immediately before sending message
 
 ## License
 

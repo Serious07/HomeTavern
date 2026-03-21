@@ -38,8 +38,11 @@ export const MobileMessageInputModal: React.FC<MobileMessageInputModalProps> = (
   
   const handleSend = () => {
     if (localValue.trim()) {
-      onSend();
+      // Сначала закрываем модальное окно
       onClose();
+      // Затем отправляем сообщение (не ждем завершения)
+      // onSend() в ChatPage является асинхронной функцией handleSendMessage
+      onSend();
     }
   };
   

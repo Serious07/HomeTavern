@@ -17,6 +17,7 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    short_description: '',
     personality: '',
     first_message: '',
     system_prompt: '',
@@ -32,6 +33,7 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
       setFormData({
         name: character.name || '',
         description: character.description || '',
+        short_description: character.short_description || '',
         personality: character.personality || '',
         first_message: character.first_message || '',
         system_prompt: character.system_prompt || '',
@@ -82,6 +84,64 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
         setAvatarPreview(result);
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleGenerateShortDescription = async () => {
+    if (!formData.description.trim()) {
+      setErrors((prev) => ({ ...prev, short_description: 'Сначала заполните основное описание' }));
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch('/api/characters/generate-short-description', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({ description: formData.description }),
+      });
+
+      if (!response.ok) throw new Error('Ошибка при генерации');
+
+      const data = await response.json();
+      setFormData((prev) => ({ ...prev, short_description: data.short_description }));
+    } catch (error) {
+      setErrors((prev) => ({ ...prev, short_description: 'Не удалось сгенерировать описание' }));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleTranslateShortDescription = async () => {
+    if (!formData.short_description.trim()) {
+      setErrors((prev) => ({ ...prev, short_description: 'Нет текста для перевода' }));
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch('/api/translate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({ text: formData.short_description, targetLang: 'ru' }),
+      });
+
+      if (!response.ok) throw new Error('Ошибка при переводе');
+
+      const data = await response.json();
+      setFormData((prev) => ({ ...prev, short_description: data.translatedText }));
+    } catch (error) {
+      setErrors((prev) => ({ ...prev, short_description: 'Не удалось перевести текст' }));
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -189,6 +249,52 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
               disabled={isLoading}
             />
             {errors.description && <p className="mt-1 text-sm text-red-400">{errors.description}</p>}
+          </div>
+
+          {/* Short description field */}
+          <div>
+            <label htmlFor="short_description" className="block text-sm font-medium text-gray-300 mb-2">
+              Краткое описание
+            </label>
+            <div className="flex gap-2 mb-2">
+              <button
+                type="button"
+                onClick={handleGenerateShortDescription}
+                disabled={isLoading || !formData.description.trim()}
+                className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg text-sm font-medium text-white transition flex items-center gap-2"
+                title="Сгенерировать краткое описание"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Сгенерировать
+              </button>
+              <button
+                type="button"
+                onClick={handleTranslateShortDescription}
+                disabled={isLoading || !formData.short_description.trim()}
+                className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg text-sm font-medium text-white transition flex items-center gap-2"
+                title="Перевести на русский"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+                </svg>
+                Перевести
+              </button>
+            </div>
+            <textarea
+              id="short_description"
+              name="short_description"
+              value={formData.short_description}
+              onChange={handleInputChange}
+              rows={2}
+              className={`w-full px-4 py-3 bg-gray-700/50 border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 transition resize-none ${
+                errors.short_description ? 'border-red-500' : 'border-gray-600'
+              } text-white placeholder-gray-500`}
+              placeholder="Краткое описание персонажа (для карточки)..."
+              disabled={isLoading}
+            />
+            {errors.short_description && <p className="mt-1 text-sm text-red-400">{errors.short_description}</p>}
           </div>
 
           {/* Personality field */}

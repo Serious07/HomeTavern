@@ -24,6 +24,7 @@ db.exec(`
     user_id INTEGER NOT NULL,
     name TEXT NOT NULL,
     description TEXT,
+    short_description TEXT,
     personality TEXT,
     first_message TEXT,
     system_prompt TEXT,
@@ -105,29 +106,44 @@ db.exec(`
 `);
 
 // Миграция: Добавление колонок для статистики сообщений
+// Проверяем существование колонок перед добавлением
 try {
-  db.exec(`
-    ALTER TABLE messages ADD COLUMN generated_at TEXT;
-    ALTER TABLE messages ADD COLUMN tokens_per_sec REAL;
-    ALTER TABLE messages ADD COLUMN total_tokens INTEGER;
-    ALTER TABLE messages ADD COLUMN reasoning_tokens INTEGER;
-  `);
+  const tableInfo = db.prepare("PRAGMA table_info(messages)").all() as any[];
+  const columnNames = tableInfo.map((col: any) => col.name);
+  
+  if (!columnNames.includes('generated_at')) {
+    db.exec("ALTER TABLE messages ADD COLUMN generated_at TEXT;");
+    console.log('[Database] Added column: generated_at');
+  }
+  if (!columnNames.includes('tokens_per_sec')) {
+    db.exec("ALTER TABLE messages ADD COLUMN tokens_per_sec REAL;");
+    console.log('[Database] Added column: tokens_per_sec');
+  }
+  if (!columnNames.includes('total_tokens')) {
+    db.exec("ALTER TABLE messages ADD COLUMN total_tokens INTEGER;");
+    console.log('[Database] Added column: total_tokens');
+  }
+  if (!columnNames.includes('reasoning_tokens')) {
+    db.exec("ALTER TABLE messages ADD COLUMN reasoning_tokens INTEGER;");
+    console.log('[Database] Added column: reasoning_tokens');
+  }
   
   // Добавление колонок для контекста в таблице chats
-  db.exec(`
-    ALTER TABLE chats ADD COLUMN context_tokens_used INTEGER;
-    ALTER TABLE chats ADD COLUMN context_last_synced TEXT;
-  `);
+  const chatsTableInfo = db.prepare("PRAGMA table_info(chats)").all() as any[];
+  const chatsColumnNames = chatsTableInfo.map((col: any) => col.name);
+  
+  if (!chatsColumnNames.includes('context_tokens_used')) {
+    db.exec("ALTER TABLE chats ADD COLUMN context_tokens_used INTEGER;");
+    console.log('[Database] Added column: context_tokens_used');
+  }
+  if (!chatsColumnNames.includes('context_last_synced')) {
+    db.exec("ALTER TABLE chats ADD COLUMN context_last_synced TEXT;");
+    console.log('[Database] Added column: context_last_synced');
+  }
   
   console.log('[Database] Migrations completed successfully');
 } catch (error) {
-  // Если колонки уже существуют, игнорируем ошибку
-  const errorMessage = (error as Error).message;
-  if (errorMessage.includes('duplicate column') || errorMessage.includes('already exists')) {
-    console.log('[Database] Columns already exist, skipping migration');
-  } else {
-    console.error('[Database] Migration error:', error);
-  }
+  console.error('[Database] Migration error:', error);
 }
 
 // Миграция: Добавление колонок для перевода краткого пересказа
@@ -160,6 +176,22 @@ try {
     console.log('[Database] Translation columns already exist');
   } else {
     console.error('[Database] Translation columns migration error:', error);
+  }
+}
+
+// Миграция: Добавление колонки short_description в таблицу characters
+try {
+  db.exec(`
+    ALTER TABLE characters ADD COLUMN short_description TEXT;
+  `);
+  
+  console.log('[Database] Added column: short_description');
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate column')) {
+    console.log('[Database] Column short_description already exists');
+  } else {
+    console.error('[Database] short_description migration error:', error);
   }
 }
 

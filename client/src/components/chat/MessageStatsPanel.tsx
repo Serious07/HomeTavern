@@ -17,17 +17,6 @@ export const MessageStatsPanel: React.FC<MessageStatsPanelProps> = ({
   // Проверяем, что сообщение имеет метрики (только assistant сообщения сгенерированные ИИ)
   const hasStats = message.tokens_per_sec !== undefined && message.tokens_per_sec !== null;
   
-  // Логирование для отладки
-  console.log('[MessageStatsPanel] Message:', {
-    id: message.id,
-    role: message.role,
-    tokens_per_sec: message.tokens_per_sec,
-    total_tokens: message.total_tokens,
-    generation_duration: message.generation_duration,
-    created_at: message.created_at,
-    generated_at: message.generated_at,
-  });
-  
   if (!hasStats) {
     return null;
   }

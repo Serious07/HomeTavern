@@ -71,8 +71,6 @@ export function useContextStats(
 
     const effectiveInterval = customIntervalMs || intervalMs;
     
-    console.log(`[useContextStats] Starting auto-sync every ${effectiveInterval}ms for chat ${chatId}`);
-    
     intervalRef.current = window.setInterval(() => {
       sync().catch((err) => {
         console.error('[useContextStats] Auto-sync error:', err);
@@ -85,7 +83,6 @@ export function useContextStats(
     if (intervalRef.current !== null) {
       window.clearInterval(intervalRef.current);
       intervalRef.current = null;
-      console.log('[useContextStats] Auto-sync stopped');
     }
   }, []);
 
@@ -101,22 +98,6 @@ export function useContextStats(
       stopAutoSync();
     };
   }, [chatId, enabled, syncOnMount, sync, stopAutoSync]);
-
-  // Автоматическая синхронизация при переключении чата
-  useEffect(() => {
-    if (chatId && enabled) {
-      // Запускаем авто-синхронизацию через 2 секунды после переключения
-      // чтобы не перегружать сервер при быстрой навигации
-      const timeoutId = window.setTimeout(() => {
-        startAutoSync();
-      }, 2000);
-
-      return () => {
-        window.clearTimeout(timeoutId);
-        stopAutoSync();
-      };
-    }
-  }, [chatId, enabled, startAutoSync, stopAutoSync]);
 
   return {
     stats,

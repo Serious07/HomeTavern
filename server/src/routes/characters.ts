@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { characterService } from '../services/character.service';
 import { CreateCharacterInput, UpdateCharacterInput, SillyTavernCharacter } from '../types';
+import { llmService } from '../services/llm.service';
 
 const router = Router();
 
@@ -162,6 +163,38 @@ router.post('/import', (req: AuthenticatedRequest, res: Response) => {
     console.log('[characters.import] Error caught:', error_);
     const statusCode = error_.statusCode || 400;
     res.status(statusCode).json({ error: error_.message });
+  }
+});
+
+/**
+ * POST /api/characters/generate-short-description
+ * Генерация краткого описания персонажа через LLM
+ * Body: { description: string }
+ */
+router.post('/generate-short-description', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { description } = req.body;
+
+    if (!description || typeof description !== 'string') {
+      return res.status(400).json({ error: 'Description field is required and must be a string' });
+    }
+
+    const prompt = `Create a short description (1-2 sentences) based on the following text.
+Respond only in English.
+
+If the text describes a character - describe its main features.
+If the text describes a world, system, or game rules - describe the world as if the user is entering it (for example: "The user enters a world inhabited by...").
+
+Text: ${description}`;
+
+    const shortDescription = await llmService.generateFromPrompt(prompt);
+
+    res.status(200).json({ short_description: shortDescription });
+  } catch (error) {
+    const error_ = error as Error & { statusCode?: number };
+    console.error('[characters.generate-short-description] Error:', error_);
+    const statusCode = (error_ as Error & { statusCode?: number }).statusCode || 500;
+    res.status(statusCode).json({ error: error_.message || 'Internal server error' });
   }
 });
 

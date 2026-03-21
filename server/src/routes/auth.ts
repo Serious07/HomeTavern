@@ -101,4 +101,37 @@ router.post('/logout', authenticate, (req: AuthenticatedRequest, res: Response) 
   res.status(200).json({ message: 'Logout successful' });
 });
 
+/**
+ * POST /api/auth/change-password
+ * Смена пароля пользователем
+ * Body: { old_password: string, new_password: string }
+ */
+router.post('/change-password', authenticate, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { old_password, new_password } = req.body;
+    const userId = req.user!.userId;
+
+    if (!old_password || !new_password) {
+      return res.status(400).json({ error: 'Old password and new password are required' });
+    }
+
+    if (new_password.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    }
+
+    authService.changePassword(userId, old_password, new_password)
+      .then((result) => {
+        res.status(200).json({
+          message: result.message,
+        });
+      })
+      .catch((error: Error & { statusCode?: number }) => {
+        const statusCode = error.statusCode || 500;
+        res.status(statusCode).json({ error: error.message });
+      });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

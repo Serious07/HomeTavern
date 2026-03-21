@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState, useCallback } from 'react';
+import React, { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { Message } from '../../types';
 import { MarkdownRenderer } from '../common/MarkdownRenderer';
 import { MessageStatsPanel } from './MessageStatsPanel';
@@ -432,6 +432,20 @@ const MessageList: React.FC<MessageListProps> = ({
 }) => {
   // State для развернутых блоков
   const [expandedBlockMessages, setExpandedBlockMessages] = useState<ExpandedBlockMessages | null>(null);
+  
+  // Ref для скролла к концу
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Эффект для автоматического скролла к концу при изменении сообщений
+  useEffect(() => {
+    // Скроллим всегда, чтобы поддерживать скролл вниз во время стриминга
+    // Используем setTimeout чтобы дать браузеру время на рендеринг
+    setTimeout(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
+      }
+    }, 0);
+  }, [messages, blocks, expandedBlockMessages]);
 
   // Обработчик развертывания блока
   const handleExpandBlock = useCallback((block: ChatBlockWithParsedIds) => {
@@ -508,7 +522,7 @@ const MessageList: React.FC<MessageListProps> = ({
 
   return (
     <div className="flex-1 flex flex-col h-full">
-      {/* Список сообщений и блоков */}
+      {/* Список сообщений и блоков - скроллируемая область */}
       <div className="flex-1 overflow-y-auto px-4 pt-4 pb-4">
         <div className="space-y-2">
           {renderItems.map((item, index) => {
@@ -558,39 +572,46 @@ const MessageList: React.FC<MessageListProps> = ({
                   )}
                 </React.Fragment>
                );
-            } else {
-              const isLastAssistantMessage = 
-                item.message.role === 'assistant' && 
-                index === renderItems.findIndex(i => i.type === 'message' && i.message.role === 'assistant');
-              
-              // Проверяем, выделено ли сообщение
-              const isSelected = isSelectionMode && 
-                selectionStart !== null && 
-                selectionEnd !== null &&
-                item.message.id >= Math.min(selectionStart, selectionEnd) &&
-                item.message.id <= Math.max(selectionStart, selectionEnd);
+           } else {
+               // Находим последнее сообщение assistant в renderItems
+               const lastAssistantIndex = renderItems.map((i, idx) =>
+                 i.type === 'message' && i.message.role === 'assistant' ? idx : -1
+               ).filter(idx => idx !== -1).pop();
+               
+               const isLastAssistantMessage =
+                 item.message.role === 'assistant' &&
+                 index === lastAssistantIndex;
+               
+               // Проверяем, выделено ли сообщение
+               const isSelected = isSelectionMode &&
+                 selectionStart !== null &&
+                 selectionEnd !== null &&
+                 item.message.id >= Math.min(selectionStart, selectionEnd) &&
+                 item.message.id <= Math.max(selectionStart, selectionEnd);
 
-              return (
-                <MessageItem
-                  key={item.message.id}
-                  message={item.message}
-                  onRegenerate={onRegenerate}
-                  onEdit={onEdit}
-                  onDelete={onDelete}
-                  showThinking={showThinking}
-                  onToggleThinking={onToggleThinking}
-                  translatingMessageId={translatingMessageId}
-                  onTranslate={onTranslate}
-                  isLastAssistantMessage={isLastAssistantMessage}
-                  messageIndex={index}
-                  isSelectionMode={isSelectionMode}
-                  isSelected={isSelected}
-                  onSelectionClick={handleSelectionClick}
-                />
-              );
-            }
-          })}
+               return (
+                 <MessageItem
+                   key={item.message.id}
+                   message={item.message}
+                   onRegenerate={onRegenerate}
+                   onEdit={onEdit}
+                   onDelete={onDelete}
+                   showThinking={showThinking}
+                   onToggleThinking={onToggleThinking}
+                   translatingMessageId={translatingMessageId}
+                   onTranslate={onTranslate}
+                   isLastAssistantMessage={isLastAssistantMessage}
+                   messageIndex={index}
+                   isSelectionMode={isSelectionMode}
+                   isSelected={isSelected}
+                   onSelectionClick={handleSelectionClick}
+                 />
+               );
+             }
+           })}
         </div>
+        {/* Ref для скролла к концу - внутри скроллируемой области */}
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Тулбар выделения */}

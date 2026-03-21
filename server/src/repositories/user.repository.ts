@@ -73,6 +73,15 @@ export const userRepository = {
   },
 
   /**
+   * Обновить пароль пользователя
+   */
+  updateUserPassword: (id: number, passwordHash: string): boolean => {
+    const stmt = db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+    const result = stmt.run(passwordHash, id);
+    return result.changes > 0;
+  },
+
+  /**
    * Удалить пользователя
    */
   deleteUser: (id: number): boolean => {

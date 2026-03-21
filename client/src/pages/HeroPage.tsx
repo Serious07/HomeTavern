@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { HeroVariation } from '../types';
+import AppHeader from '../components/common/AppHeader';
 
 const HeroPage: React.FC = () => {
-  const navigate = useNavigate();
   
   const [heroVariations, setHeroVariations] = useState<HeroVariation[]>([]);
   const [currentVariation, setCurrentVariation] = useState<HeroVariation | null>(null);
@@ -16,6 +15,8 @@ const HeroPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const fetchHeroVariations = useCallback(async () => {
     try {
@@ -81,6 +82,7 @@ const HeroPage: React.FC = () => {
         description,
       });
       setSuccess('Профиль успешно сохранен!');
+      setIsEditing(false);
       await fetchHeroVariations();
     } catch (err: any) {
       setError(err.response?.data?.message || 'Ошибка при сохранении профиля');
@@ -126,18 +128,25 @@ const HeroPage: React.FC = () => {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!window.confirm('Вы уверены, что хотите удалить этот профиль героя?')) {
-      return;
-    }
+  const handleDeleteClick = (id: number) => {
+    setDeleteConfirmId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (deleteConfirmId === null) return;
 
     try {
-      await api.delete(`/hero/${id}`);
+      await api.delete(`/hero/${deleteConfirmId}`);
       setSuccess('Профиль удален');
+      setDeleteConfirmId(null);
       await fetchHeroVariations();
     } catch (err: any) {
       setError(err.response?.data?.message || 'Ошибка при удалении профиля');
     }
+  };
+
+  const cancelDelete = () => {
+    setDeleteConfirmId(null);
   };
 
   const handleClear = () => {
@@ -159,6 +168,7 @@ const HeroPage: React.FC = () => {
 
   const handleCancelCreate = () => {
     setShowCreateForm(false);
+    setIsEditing(false);
     if (currentVariation) {
       setName(currentVariation.name);
       setDescription(currentVariation.description || '');
@@ -168,38 +178,27 @@ const HeroPage: React.FC = () => {
     }
   };
 
+  const handleStartEdit = (variation: HeroVariation) => {
+    setCurrentVariation(variation);
+    setName(variation.name);
+    setDescription(variation.description || '');
+    setIsEditing(true);
+    setError(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    if (currentVariation) {
+      setName(currentVariation.name);
+      setDescription(currentVariation.description || '');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
       {/* Header */}
-      <div className="bg-gray-800/50 border-b border-gray-700 sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl md:text-3xl font-bold text-white">
-              Профиль героя
-            </h1>
-            <nav className="flex items-center gap-2 md:gap-4">
-              <button
-                onClick={() => navigate('/characters')}
-                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-                title="Персонажи"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-              </button>
-              <button
-                onClick={() => navigate('/chats')}
-                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-                title="Чаты"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
-                </svg>
-              </button>
-            </nav>
-          </div>
-        </div>
-      </div>
+      <AppHeader title="Профиль героя" />
 
       {/* Main content */}
       <div className="container mx-auto px-4 py-8">
@@ -296,19 +295,14 @@ const HeroPage: React.FC = () => {
                             </button>
                           )}
                           <button
-                            onClick={() => {
-                              setCurrentVariation(variation);
-                              setName(variation.name);
-                              setDescription(variation.description || '');
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
-                            }}
+                            onClick={() => handleStartEdit(variation)}
                             className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300 transition"
                           >
                             Редактировать
                           </button>
                           {heroVariations.length > 1 && (
                             <button
-                              onClick={() => handleDelete(variation.id)}
+                              onClick={() => handleDeleteClick(variation.id)}
                               className="px-3 py-1 text-sm bg-red-900/50 hover:bg-red-800/50 rounded-lg text-red-400 transition"
                             >
                               Удалить
@@ -324,7 +318,7 @@ const HeroPage: React.FC = () => {
           )}
 
           {/* Create/Edit form */}
-          {(showCreateForm || currentVariation) && (
+          {(showCreateForm || (currentVariation && isEditing)) && (
             <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
               {/* Form header */}
               <div className="mb-6">
@@ -378,7 +372,7 @@ const HeroPage: React.FC = () => {
               {/* Action buttons */}
               <div className="flex gap-4">
                 <button
-                  onClick={handleCancelCreate}
+                  onClick={showCreateForm ? handleCancelCreate : handleCancelEdit}
                   disabled={isSaving || isCreating}
                   className="flex-1 py-3 px-4 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded-lg font-semibold text-white transition"
                 >
@@ -409,6 +403,32 @@ const HeroPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Модальное окно подтверждения удаления */}
+      {deleteConfirmId !== null && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full border border-gray-700 shadow-xl">
+            <h3 className="text-xl font-semibold text-white mb-4">Подтверждение удаления</h3>
+            <p className="text-gray-300 mb-6">
+              Вы уверены, что хотите удалить этот профиль героя? Это действие нельзя будет отменить.
+            </p>
+            <div className="flex gap-4 justify-end">
+              <button
+                onClick={cancelDelete}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300 transition"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg text-white transition"
+              >
+                Удалить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

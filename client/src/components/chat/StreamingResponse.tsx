@@ -8,7 +8,6 @@ interface StreamingResponseProps {
   onStop?: () => void;
   onComplete?: (message: Message) => void;
   onError?: (error: string) => void;
-  onTokenUpdate?: () => void;  // Колбэк для уведомления о каждом новом токене
   showThinking?: boolean;  // Внешнее состояние showThinking (опционально для обратной совместимости)
   onToggleThinking?: () => void;  // Callback для переключения состояния
 }
@@ -18,7 +17,6 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   onStop,
   onComplete,
   onError,
-  onTokenUpdate,
   showThinking: externalShowThinking,
   onToggleThinking,
 }) => {
@@ -37,11 +35,24 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   // Ref для отслеживания того, что reasoningContent был получен (чтобы показывать кнопку если есть мысли)
   const hasReasoningContentRef = useRef(false);
   
+  // Ref для скролла к стриминговому сообщению
+  const streamingMessageRef = useRef<HTMLDivElement>(null);
+  
   const eventSourceRef = useRef<EventSource | null>(null);
   const messageIdRef = useRef<number>(0);
   const translatedTextRef = useRef<string | null>(null);
   const contentRef = useRef<string>('');
   const reasoningContentRef = useRef<string>('');
+  
+  // Эффект для автоматического скролла к стриминговому сообщению при изменении контента
+  useEffect(() => {
+    // Скроллим к стриминговому сообщению при каждом изменении контента
+    setTimeout(() => {
+      if (streamingMessageRef.current) {
+        streamingMessageRef.current.scrollIntoView({ behavior: 'auto' });
+      }
+    }, 0);
+  }, [content, reasoningContent]);
 
   useEffect(() => {
     const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
@@ -62,8 +73,6 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
           hasReasoningContentRef.current = true;
           return newValue;
         });
-        // Вызываем колбэк для скролла
-        onTokenUpdate?.();
       } catch (err) {
         // Ignore parse errors
       }
@@ -77,8 +86,6 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
           contentRef.current = newValue;
           return newValue;
         });
-        // Вызываем колбэк для скролла
-        onTokenUpdate?.();
       } catch (err) {
         // Ignore parse errors
       }
@@ -156,7 +163,7 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
         eventSourceRef.current = null;
       }
     };
-  }, [chatId]);
+  }, [chatId, onComplete, onError]);
 
   // Функция остановки генерации
   const handleStop = () => {
@@ -189,7 +196,7 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   };
 
   return (
-    <div className="bg-gray-700/50 rounded-2xl p-4 animate-fadeIn">
+    <div ref={streamingMessageRef} className="bg-gray-700/50 rounded-2xl p-4 animate-fadeIn">
       {/* Typing indicator */}
       {isStreaming && (
         <div className="flex items-center gap-2 mb-3">

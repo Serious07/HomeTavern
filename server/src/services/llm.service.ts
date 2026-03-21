@@ -531,6 +531,37 @@ export class LLMService {
 
     return fullContent;
   }
+
+  /**
+   * Генерация текста на основе простого промпта (без привязки к чату)
+   * @param prompt - Промпт для генерации
+   * @returns Сгенерированный текст
+   */
+  async generateFromPrompt(prompt: string): Promise<string> {
+    const messages: LLMMessage[] = [
+      {
+        role: 'user',
+        content: prompt
+      }
+    ];
+
+    // Проверяем наличие клиента
+    if (!this.client) {
+      throw new Error('LLM client not available');
+    }
+
+    // Отправляем запрос к LLM без потока
+    const response = await this.client.chatCompletionsCreate({
+      model: this.model,
+      messages: messages,
+      stream: false,
+      temperature: 0.7,
+      max_tokens: 500,
+    });
+
+    const content = response.choices?.[0]?.message?.content || '';
+    return content;
+  }
 }
 
 export const llmService = new LLMService();

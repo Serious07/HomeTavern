@@ -20,6 +20,7 @@ import messageRoutes from './routes/messages';
 import heroRoutes from './routes/hero';
 import contextRoutes from './routes/context';
 import compressionRoutes from './routes/compression';
+import translateRoutes from './routes/translate';
 
 const app: Application = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -62,6 +63,9 @@ app.use('/api/context', contextRoutes);
 
 // Compression routes (smart history compression)
 app.use('/api/compression', compressionRoutes);
+
+// Translation routes
+app.use('/api/translate', translateRoutes);
 
 // Автоматическое создание администратора при первом запуске
 const initializeAdminUser = async () => {

@@ -167,23 +167,14 @@ export class ChatRepository {
             const created = new Date(msg.created_at).getTime();
             const generated = new Date(msg.generated_at).getTime();
             const duration = (generated - created) / 1000;  // В секундах
-            console.log(`[ChatRepository] Message ${msg.id}: created_at=${msg.created_at}, generated_at=${msg.generated_at}, duration=${duration}s, tokens_per_sec=${msg.tokens_per_sec}`);
             const result = {
               ...msg,
               generation_duration: duration > 0 ? duration : null
             };
-            console.log(`[ChatRepository] Message ${msg.id} result:`, { generation_duration: result.generation_duration });
             return result;
           } catch (e) {
-            console.error(`[ChatRepository] Error calculating duration for message ${msg.id}:`, e);
             // Если ошибка парсинга даты, возвращаем сообщение без duration
             return msg;
-          }
-        } else {
-          // Если generated_at или created_at нет, но есть tokens_per_sec, значит это сообщение с метриками
-          // Но без generated_at - вычисляем duration как 0 или null
-          if (msg.tokens_per_sec !== null && msg.tokens_per_sec !== undefined) {
-            console.log(`[ChatRepository] Message ${msg.id}: has metrics but missing dates - generated_at=${msg.generated_at}, created_at=${msg.created_at}`);
           }
         }
       }

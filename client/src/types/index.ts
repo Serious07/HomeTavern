@@ -2,6 +2,7 @@ export interface Character {
   id?: number;
   name: string;
   description: string;
+  short_description?: string;
   personality?: string;
   first_message: string;
   system_prompt?: string;

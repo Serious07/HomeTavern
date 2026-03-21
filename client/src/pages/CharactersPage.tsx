@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { charactersApi, chatsApi } from '../services/api';
 import { Character } from '../types';
 import CharacterEditor from '../components/characters/CharacterEditor';
+import AppHeader from '../components/common/AppHeader';
 
 const CharactersPage: React.FC = () => {
   const navigate = useNavigate();
@@ -135,35 +136,7 @@ const CharactersPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
       {/* Header */}
-      <div className="bg-gray-800/50 border-b border-gray-700 sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl md:text-3xl font-bold text-white">
-              Персонажи
-            </h1>
-            <nav className="flex items-center gap-2 md:gap-4">
-              <button
-                onClick={() => navigate('/hero')}
-                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-                title="Профиль героя"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a5 5 0 00-5 5h10a5 5 0 00-5-5z" />
-                </svg>
-              </button>
-              <button
-                onClick={() => navigate('/chats')}
-                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-                title="Чаты"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
-                </svg>
-              </button>
-            </nav>
-          </div>
-        </div>
-      </div>
+      <AppHeader title="Персонажи" />
 
       {/* Main content */}
       <div className="container mx-auto px-4 py-8">
@@ -229,7 +202,7 @@ const CharactersPage: React.FC = () => {
           {characters.map((character) => (
             <div
               key={character.id}
-              className="bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden hover:border-gray-500/50 transition group"
+              className="bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden hover:border-gray-500/50 transition group flex flex-col h-full"
             >
               {/* Card header with avatar */}
               <div className="p-4 flex items-start gap-4">
@@ -252,14 +225,14 @@ const CharactersPage: React.FC = () => {
                   <h3 className="text-lg font-semibold text-white truncate">
                     {character.name}
                   </h3>
-                  <p className="text-gray-400 text-sm line-clamp-2 mt-1">
-                    {character.description}
+                  <p className="text-gray-400 text-sm mt-1">
+                    {character.short_description}
                   </p>
                 </div>
               </div>
 
               {/* Card actions */}
-              <div className="px-4 py-3 bg-gray-800/80 border-t border-gray-700 flex items-center justify-between">
+              <div className="mt-auto px-4 py-3 bg-gray-800/80 border-t border-gray-700 flex items-center justify-between">
                 <button
                   onClick={async () => {
                     if (!character.id) return;

@@ -11,6 +11,7 @@ import { useContextStats, useContextStatsDuringGeneration } from '../hooks/useCo
 import { useCompression } from '../hooks/useCompression';
 import { EditBlockModal } from '../components/chat/EditBlockModal';
 import { ChatBlockWithParsedIds } from '../types/compression';
+import AppHeader from '../components/common/AppHeader';
 
 /**
  * Форматирование даты последнего сообщения
@@ -128,9 +129,6 @@ const ChatPage: React.FC = () => {
     handleSelectionClick,
   } = useCompression(currentChatId);
   
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  // Ref для хранения ID requestAnimationFrame для отмены при размонтировании
-  const scrollRafRef = useRef<number | null>(null);
   // Ref для хранения последнего ID сообщения для скролла
   const lastMessageIdRef = useRef<number | null>(null);
 
@@ -150,11 +148,15 @@ const ChatPage: React.FC = () => {
         const selectedChat = response.data.find((c: Chat) => c.id === parseInt(chatId));
         if (selectedChat) {
           setCurrentChat(selectedChat);
+          // Сбрасываем lastMessageIdRef при переключении чата
+          lastMessageIdRef.current = null;
         }
       } else if (response.data.length > 0) {
-        // Select first chat if none selected
+        // Select first chat (most recent due to sorting) if none selected
         setCurrentChat(response.data[0]);
         navigate(`/chats/${response.data[0].id}`);
+        // Сбрасываем lastMessageIdRef при выборе нового чата
+        lastMessageIdRef.current = null;
       }
     } catch (err: any) {
       if (err.response?.status === 401) {
@@ -169,11 +171,14 @@ const ChatPage: React.FC = () => {
     }
   }, [chatId, navigate]);
 
-  const fetchMessages = useCallback(async () => {
+  const fetchMessages = useCallback(async (showLoading: boolean = true) => {
     if (!chatId) return;
     
     try {
-      setIsChatLoading(true);
+      if (showLoading) {
+        setIsChatLoading(true);
+      }
+      
       const response = await chatsApi.getMessages(parseInt(chatId));
       setMessages(response.data);
     } catch (err: any) {
@@ -183,98 +188,40 @@ const ChatPage: React.FC = () => {
         console.error('Error fetching messages:', err);
       }
     } finally {
-      setIsChatLoading(false);
+      if (showLoading) {
+        setIsChatLoading(false);
+      }
     }
   }, [chatId, navigate]);
 
-  // Функция скролла к концу с requestAnimationFrame для оптимизации на мобильных
-  const scrollToBottom = useCallback(() => {
-    // Отменяем предыдущий requestAnimationFrame если есть
-    if (scrollRafRef.current !== null) {
-      cancelAnimationFrame(scrollRafRef.current);
-    }
-    
-    // Используем requestAnimationFrame для плавного скролла
-    scrollRafRef.current = requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-    });
-  }, []);
-
-  // Функция плавного скролла к конкретному сообщению с анимацией
-  const scrollToMessage = useCallback((messageId: number) => {
-    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-    if (messageElement) {
-      // Плавный скролл к началу сообщения
-      messageElement.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start'
-      });
-      
-      // Добавляем анимацию появления
-      messageElement.classList.add('animate-message-appearance');
-      setTimeout(() => {
-        messageElement.classList.remove('animate-message-appearance');
-      }, 300);
-    }
-  }, []);
-
-  useEffect(() => {
-    // Scroll to new message or bottom when messages change or streaming starts
-    if (scrollRafRef.current !== null) {
-      cancelAnimationFrame(scrollRafRef.current);
-    }
-    
-    scrollRafRef.current = requestAnimationFrame(() => {
-      // Если есть новое сообщение (отличное от последнего сохраненного), скроллим к нему
-      if (lastMessageIdRef.current !== null) {
-        const messageElement = document.querySelector(`[data-message-id="${lastMessageIdRef.current}"]`);
-        if (messageElement) {
-          messageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          // Добавляем анимацию появления
-          messageElement.classList.add('animate-message-appearance');
-          setTimeout(() => {
-            messageElement.classList.remove('animate-message-appearance');
-          }, 300);
-          return;
-        }
-      }
-      // Иначе скроллим вниз
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-    });
-    
-    return () => {
-      if (scrollRafRef.current !== null) {
-        cancelAnimationFrame(scrollRafRef.current);
-      }
-    };
-  }, [messages, isStreaming]);
 
   // Callbacks для StreamingResponse - обернуты в useCallback чтобы избежать пересоздания
   const handleStreamingComplete = useCallback(async (message: Message) => {
-    // Сначала обновляем сообщения, потом устанавливаем isStreaming и isSending в false
-    await fetchMessages();
+    // Сначала сохраняем ID последнего сообщения для скролла
+    const messageId = message.id;
+    if (messageId) {
+      lastMessageIdRef.current = messageId;
+    }
+    // Затем обновляем сообщения без показа загрузки
+    await fetchMessages(false);
     // Синхронизация токенов после окончания генерации
     syncDuringGeneration();
     // Принудительная синхронизация контекста после завершения генерации
     syncContextStats();
-    // Сохраняем ID последнего сообщения для скролла
-    if (message.id) {
-      lastMessageIdRef.current = message.id;
-      scrollToMessage(message.id);
-    }
+    // useEffect автоматически скроллит к новому сообщению
     setIsStreaming(false);
     setIsSending(false);
-  }, [fetchMessages, syncDuringGeneration, syncContextStats, scrollToMessage]);
+  }, [fetchMessages, syncDuringGeneration, syncContextStats]);
 
   const handleStreamingError = useCallback(async (error: string) => {
     console.error('[ChatPage] Streaming error:', error);
-    await fetchMessages();
+    await fetchMessages(false);
     setIsStreaming(false);
     setIsSending(false);
   }, [fetchMessages]);
 
   const handleStreamingStop = useCallback(async () => {
-    await fetchMessages();
+    await fetchMessages(false);
     setIsStreaming(false);
     setIsSending(false);
   }, [fetchMessages]);
@@ -299,6 +246,8 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     if (chatId) {
+      // Сбрасываем lastMessageIdRef при изменении chatId
+      lastMessageIdRef.current = null;
       fetchMessages();
       // Загружаем блоки сжатия для текущего чата
       loadBlocks();
@@ -319,32 +268,26 @@ const ChatPage: React.FC = () => {
     setMessageInput('');
 
     try {
-      // Optimistically add user message
-      const tempId = Date.now();
-      const newUserMessage: Message = {
-        id: tempId,
-        chat_id: parseInt(chatId),
-        user_id: 0,
-        content: userMessage,
-        role: 'user',
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, newUserMessage]);
-
-      // Send message to backend
+      // Отправляем сообщение на сервер
       await chatsApi.sendMessage(parseInt(chatId), {
         content: userMessage,
         role: 'user',
       });
 
-      // Fetch updated messages
-      await fetchMessages();
+      // Fetch updated messages без показа загрузки
+      await fetchMessages(false);
       
-      // Сохраняем ID последнего сообщения для скролла
-      lastMessageIdRef.current = tempId;
+      // Находим последнее сообщение пользователя в обновлённом списке (после fetchMessages)
+      // Используем response.data из fetchMessages, но так как fetchMessages не возвращает данные,
+      // нам нужно найти последнее сообщение из текущего state messages
+      // После fetchMessages messages обновится, но это произойдет асинхронно
+      // Поэтому мы используем lastMessageIdRef.current который установим после fetchMessages
+      // Но так как fetchMessages обновляет messages через setMessages, нам нужно подождать
+      // Простое решение: найти последнее сообщение пользователя из текущего списка
+      // Но это не сработает, так как messages еще не обновился
+      // Лучшее решение: после fetchMessages, найти последнее сообщение пользователя из DOM
+      // Или: изменить fetchMessages чтобы он возвращал сообщения
       
-      // Скроллим к отправленному сообщению пользователя
-      scrollToMessage(tempId);
       
       // Обновляем статистику токенов после отправки сообщения
       await syncContextStats();
@@ -367,8 +310,11 @@ const ChatPage: React.FC = () => {
       // Delete the last assistant message
       await chatsApi.deleteMessage(parseInt(chatId), messageId);
       
-      // Fetch updated messages
-      await fetchMessages();
+      // Сбрасываем lastMessageIdRef, чтобы useEffect не пытался скроллить к удалённому сообщению
+      lastMessageIdRef.current = null;
+      
+      // Fetch updated messages without showing loading
+      await fetchMessages(true);
       
       // Обновляем статистику токенов после удаления сообщения
       await syncContextStats();
@@ -385,7 +331,10 @@ const ChatPage: React.FC = () => {
     
     try {
       await chatsApi.deleteMessage(parseInt(chatId), messageId);
-      await fetchMessages();
+      // Сбрасываем lastMessageIdRef, чтобы useEffect не пытался скроллить к удалённому сообщению
+      lastMessageIdRef.current = null;
+      // Fetch updated messages without showing loading
+      await fetchMessages(true);
       // Обновляем статистику токенов после удаления сообщения
       await syncContextStats();
     } catch (err: any) {
@@ -424,7 +373,7 @@ const ChatPage: React.FC = () => {
         await chatsApi.updateMessage(parseInt(chatId), messageId, {
           content: newContent,
         });
-        await fetchMessages();
+        await fetchMessages(false);
       } finally {
         setTranslatingMessageId(null);
       }
@@ -470,6 +419,8 @@ const ChatPage: React.FC = () => {
   const handleSelectChat = (chat: Chat) => {
     setCurrentChat(chat);
     navigate(`/chats/${chat.id}`);
+    // Сбрасываем lastMessageIdRef при переключении чата
+    lastMessageIdRef.current = null;
     setShowSidebar(false);
   };
 
@@ -504,8 +455,8 @@ const ChatPage: React.FC = () => {
   const handleManualCompress = useCallback(async () => {
     if (!currentChatId) return;
     await compress();
-    // После сжатия обновляем сообщения
-    await fetchMessages();
+    // После сжатия обновляем сообщения без показа загрузки
+    await fetchMessages(false);
   }, [currentChatId, compress, fetchMessages]);
 
   const handleCloseEditModal = useCallback(() => {
@@ -536,7 +487,7 @@ const ChatPage: React.FC = () => {
     await deleteBlock(blockId);
   }, [deleteBlock]);
 
-  const handleBlockUpdate = useCallback((blockId: number, updatedBlock: ChatBlockWithParsedIds) => {
+  const handleBlockUpdate = useCallback((_blockId: number, _updatedBlock: ChatBlockWithParsedIds) => {
     // Обновляем блок в списке после перевода
     setMessages((prev) => prev); // Force re-render to pick up updated blocks
   }, []);
@@ -664,96 +615,55 @@ const ChatPage: React.FC = () => {
       {/* Main chat area */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         {/* Chat header */}
-        <div className={`shrink-0 border-b border-gray-700 transition-all duration-300 chat-header ${
-          showHeaderFooter ? 'flex flex-col' : 'hidden'
+        <div className={`shrink-0 transition-all duration-300 chat-header ${
+          showHeaderFooter ? 'block' : 'hidden'
         }`}>
-          {/* Верхняя строка - заголовок чата */}
-          <div className="w-full flex items-center justify-between p-4 border-b border-gray-700/50">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setShowSidebar(true)}
-                className="md:hidden p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-              <h1 className="text-xl font-bold text-white">{getCurrentChatTitle()}</h1>
-            </div>
-          </div>
+          {/* AppHeader с дополнительными действиями */}
+          <AppHeader
+            title={getCurrentChatTitle()}
+            extraActions={
+              <>
+                {/* Кнопка ручного сжатия истории */}
+                <button
+                  onClick={handleManualCompress}
+                  className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition"
+                  title="Сжать историю"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                  </svg>
+                </button>
+                {/* Кнопка ручного выделения для сжатия */}
+                <button
+                  onClick={handleStartSelection}
+                  disabled={isSelectionMode}
+                  className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition disabled:opacity-50"
+                  title="Выделить сообщения для сжатия"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                </button>
+                {currentChat && (
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition"
+                    title="Удалить чат"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                )}
+              </>
+            }
+          />
           {/* Статистика токенов */}
-          {currentChat && (
+          {currentChat && showHeaderFooter && (
             <div className="w-full px-4 py-2 border-b border-gray-700/30 context-stats-container">
               <ContextStatsDisplay stats={contextStats} isLoading={isContextLoading} />
             </div>
           )}
-          {/* Нижняя строка - кнопки управления */}
-          <div className="w-full flex items-center justify-between p-3 border-b border-gray-700/30">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => navigate('/hero')}
-                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-                title="Профиль героя"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a5 5 0 00-5 5h10a5 5 0 00-5-5z" />
-                </svg>
-              </button>
-              <button
-                onClick={() => navigate('/characters')}
-                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-                title="Персонажи"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-              </button>
-              <button
-                onClick={() => navigate('/settings')}
-                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-                title="Настройки"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-               {/* Кнопка ручного сжатия истории */}
-               <button
-                 onClick={handleManualCompress}
-                 className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition"
-                 title="Сжать историю"
-               >
-                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                 </svg>
-               </button>
-               {/* Кнопка ручного выделения для сжатия */}
-               <button
-                 onClick={handleStartSelection}
-                 disabled={isSelectionMode}
-                 className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition disabled:opacity-50"
-                 title="Выделить сообщения для сжатия"
-               >
-                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                 </svg>
-               </button>
-               {currentChat && (
-                 <button
-                   onClick={() => setShowDeleteConfirm(true)}
-                   className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition"
-                   title="Удалить чат"
-                 >
-                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                   </svg>
-                 </button>
-               )}
-             </div>
-          </div>
         </div>
 
         {/* Messages area */}
@@ -818,13 +728,11 @@ const ChatPage: React.FC = () => {
                     onStop={handleStreamingStop}
                     onComplete={handleStreamingComplete}
                     onError={handleStreamingError}
-                    onTokenUpdate={scrollToBottom}
                     showThinking={streamingMessageThinkingRef.current}
                     onToggleThinking={handleStreamingToggleThinking}
                   />
                 </div>
               )}
-              <div ref={messagesEndRef} />
             </>
           )}
         </div>

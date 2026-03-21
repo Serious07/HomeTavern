@@ -141,6 +141,46 @@ export class AuthService {
     const { password_hash, ...userWithoutPassword } = user;
     return userWithoutPassword;
   }
+
+  /**
+   * Смена пароля пользователем
+   * @param userId - ID пользователя
+   * @param oldPassword - Старый пароль
+   * @param newPassword - Новый пароль
+   * @returns Promise с результатом операции
+   */
+  async changePassword(userId: number, oldPassword: string, newPassword: string): Promise<{ message: string }> {
+    // Поиск пользователя
+    const user = userRepository.findUserById(userId);
+    if (!user) {
+      const error = new Error('Пользователь не найден') as AuthError;
+      error.statusCode = 404;
+      throw error;
+    }
+
+    // Проверка старого пароля
+    const isValidPassword = await bcrypt.compare(oldPassword, user.password_hash);
+    if (!isValidPassword) {
+      const error = new Error('Неверный старый пароль') as AuthError;
+      error.statusCode = 401;
+      throw error;
+    }
+
+    // Проверка длины нового пароля
+    if (newPassword.length < 6) {
+      const error = new Error('Новый пароль должен быть не менее 6 символов') as AuthError;
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // Хеширование нового пароля
+    const newPasswordHash = await bcrypt.hash(newPassword, this.SALT_ROUNDS);
+
+    // Обновление пароля в базе данных
+    userRepository.updateUserPassword(userId, newPasswordHash);
+
+    return { message: 'Пароль успешно изменен' };
+  }
 }
 
 export const authService = new AuthService();
