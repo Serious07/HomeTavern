@@ -51,7 +51,7 @@ router.get('/:id', (req: AuthenticatedRequest, res: Response) => {
 /**
  * POST /api/characters
  * Создание персонажа
- * Body: { name: string, description?: string, personality?: string, first_message?: string, system_prompt?: string, avatar?: string }
+ * Body: { name: string, description?: string, personality?: string, first_message?: string, avatar?: string }
  */
 router.post('/', (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -81,7 +81,7 @@ router.post('/', (req: AuthenticatedRequest, res: Response) => {
 /**
  * PUT /api/characters/:id
  * Обновление персонажа
- * Body: { name?: string, description?: string, personality?: string, first_message?: string, system_prompt?: string, avatar?: string }
+ * Body: { name?: string, description?: string, personality?: string, first_message?: string, avatar?: string }
  */
 router.put('/:id', (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -133,7 +133,7 @@ router.delete('/:id', (req: AuthenticatedRequest, res: Response) => {
 /**
  * POST /api/characters/import
  * Импорт персонажа из SillyTavern формата
- * Body: { name: string, description?: string, personality?: string, first_message?: string, system_prompt?: string }
+ * Body: { name: string, description?: string, personality?: string, first_message?: string }
  */
 router.post('/import', (req: AuthenticatedRequest, res: Response) => {
   console.log('[characters.import] ENTER - POST /api/characters/import');

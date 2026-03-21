@@ -85,6 +85,22 @@ db.exec(`
     UNIQUE(user_id, key)
   );
 
+  -- System Prompts table - stores user's custom system prompts
+  CREATE TABLE IF NOT EXISTS system_prompts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    prompt_text TEXT NOT NULL,
+    is_active INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  -- Index for fast queries on user_id and is_active
+  CREATE INDEX IF NOT EXISTS idx_system_prompts_user_active ON system_prompts(user_id, is_active);
+
   -- Chat Blocks table - stores compressed history blocks (chapters)
   CREATE TABLE IF NOT EXISTS chat_blocks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

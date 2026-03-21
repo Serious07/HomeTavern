@@ -5,7 +5,6 @@ export interface Character {
   short_description?: string;
   personality?: string;
   first_message: string;
-  system_prompt?: string;
   avatar?: string;
   created_at?: string;
   updated_at?: string;
@@ -60,6 +59,17 @@ export interface HeroVariation {
   description: string | null;
   avatar: string | null;
   is_active: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SystemPrompt {
+  id: number;
+  user_id: number;
+  name: string;
+  description: string | null;
+  prompt_text: string;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }

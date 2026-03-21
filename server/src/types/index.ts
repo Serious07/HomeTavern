@@ -27,7 +27,6 @@ export interface Character {
   short_description: string | null;
   personality: string | null;
   first_message: string | null;
-  system_prompt: string | null;
   avatar: string | null;
   created_at: string;
   updated_at: string;
@@ -40,7 +39,6 @@ export interface CreateCharacterInput {
   short_description?: string;
   personality?: string;
   first_message?: string;
-  system_prompt?: string;
   avatar?: string;
 }
 
@@ -50,7 +48,6 @@ export interface UpdateCharacterInput {
   short_description?: string;
   personality?: string;
   first_message?: string;
-  system_prompt?: string;
   avatar?: string;
 }
 

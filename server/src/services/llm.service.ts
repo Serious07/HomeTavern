@@ -10,6 +10,7 @@ import { heroVariationRepository } from '../repositories/hero.variation.reposito
 import { contextRepository } from '../repositories/context.repository';
 import { chatBlockRepository, ChatBlock } from '../repositories/chat-block.repository';
 import { compressionService } from './compression.service';
+import { systemPromptService } from './system-prompt.service';
 
 // Типы для LLM
 export interface LLMMessage {
@@ -87,6 +88,7 @@ export function replaceUserPlaceholders(text: string, heroName: string | null): 
  * Системный промпт в САМОМ НАЧАЛЕ, затем профиль героя, история, текущее сообщение
  */
 export function formatMessagesForQwen(
+  userId: number,
   character: any,
   heroProfile: string | null,
   heroName: string | null,
@@ -95,11 +97,12 @@ export function formatMessagesForQwen(
 ): LLMMessage[] {
   const messages: LLMMessage[] = [];
 
-  // 1. Системный промпт персонажа
+  // 1. Получаем активный системный промпт пользователя
   const systemParts: string[] = [];
   
-  if (character.system_prompt) {
-    const processedSystemPrompt = replaceUserPlaceholders(character.system_prompt, heroName);
+  const activePrompt = systemPromptService.getActiveSystemPrompt(userId);
+  if (activePrompt?.prompt_text) {
+    const processedSystemPrompt = replaceUserPlaceholders(activePrompt.prompt_text, heroName);
     systemParts.push(processedSystemPrompt);
   }
 
@@ -162,6 +165,7 @@ export function formatMessagesForQwen(
  * Внутренняя функция форматирования с поддержкой сжатых блоков
  */
 function formatMessagesForQwenInternal(
+  userId: number,
   character: any,
   heroProfile: string | null,
   heroName: string | null,
@@ -171,11 +175,12 @@ function formatMessagesForQwenInternal(
 ): LLMMessage[] {
   const messages: LLMMessage[] = [];
 
-  // 1. Системный промпт персонажа
+  // 1. Получаем активный системный промпт пользователя
   const systemParts: string[] = [];
   
-  if (character.system_prompt) {
-    const processedSystemPrompt = replaceUserPlaceholders(character.system_prompt, heroName);
+  const activePrompt = systemPromptService.getActiveSystemPrompt(userId);
+  if (activePrompt?.prompt_text) {
+    const processedSystemPrompt = replaceUserPlaceholders(activePrompt.prompt_text, heroName);
     systemParts.push(processedSystemPrompt);
   }
 
@@ -266,6 +271,7 @@ function formatMessagesForQwenInternal(
  * ВАЖНО: summary добавляется ОДИН РАЗ для каждого блока
  */
 export function formatMessagesForQwenWithCompression(
+  userId: number,
   character: any,
   heroProfile: string | null,
   heroName: string | null,
@@ -274,6 +280,7 @@ export function formatMessagesForQwenWithCompression(
   compressedBlocks: ChatBlock[]
 ): LLMMessage[] {
   return formatMessagesForQwenInternal(
+    userId,
     character,
     heroProfile,
     heroName,
@@ -391,6 +398,7 @@ export class LLMService {
       // Формируем историю сообщений для Qwen 3.5 с учётом сжатых блоков
       const messages = compressedBlocks.length > 0
         ? formatMessagesForQwenWithCompression(
+            userId,
             character,
             heroProfile,
             heroName,
@@ -399,6 +407,7 @@ export class LLMService {
             compressedBlocks
           )
         : formatMessagesForQwen(
+            userId,
             character,
             heroProfile,
             heroName,

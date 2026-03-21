@@ -20,7 +20,6 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
     short_description: '',
     personality: '',
     first_message: '',
-    system_prompt: '',
     avatar: '',
   });
   
@@ -36,7 +35,6 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
         short_description: character.short_description || '',
         personality: character.personality || '',
         first_message: character.first_message || '',
-        system_prompt: character.system_prompt || '',
         avatar: character.avatar || '',
       });
       if (character.avatar) {
@@ -152,14 +150,7 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
     
     setIsLoading(true);
     
-    // Remove empty system_prompt
-    const { system_prompt, ...data } = formData;
-    const payload = {
-      ...data,
-      system_prompt: system_prompt.trim() || undefined,
-    };
-    
-    onSave(payload);
+    onSave(formData);
   };
 
   return (
@@ -332,23 +323,6 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
               disabled={isLoading}
             />
             {errors.first_message && <p className="mt-1 text-sm text-red-400">{errors.first_message}</p>}
-          </div>
-
-          {/* System prompt field */}
-          <div>
-            <label htmlFor="system_prompt" className="block text-sm font-medium text-gray-300 mb-2">
-              Системный промпт
-            </label>
-            <textarea
-              id="system_prompt"
-              name="system_prompt"
-              value={formData.system_prompt}
-              onChange={handleInputChange}
-              rows={3}
-              className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 transition resize-none text-white placeholder-gray-500"
-              placeholder="Инструкции для ИИ (как вести себя, ограничения...)"
-              disabled={isLoading}
-            />
           </div>
 
           {/* Action buttons */}

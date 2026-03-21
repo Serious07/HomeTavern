@@ -5,6 +5,7 @@ import CharactersPage from './pages/CharactersPage';
 import ChatPage from './pages/ChatPage';
 import HeroPage from './pages/HeroPage';
 import SettingsPage from './pages/SettingsPage';
+import SystemPromptsPage from './pages/SystemPromptsPage';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import { EcoModeProvider } from './contexts/EcoModeContext';
 
@@ -62,6 +63,14 @@ function App() {
         element={
           <ProtectedRoute>
             <SettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/system-prompts"
+        element={
+          <ProtectedRoute>
+            <SystemPromptsPage />
           </ProtectedRoute>
         }
       />

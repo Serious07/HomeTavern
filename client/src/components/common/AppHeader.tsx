@@ -17,6 +17,7 @@ const AppHeader: React.FC<{
   const isCharactersActive = location.pathname === '/characters';
   const isChatsActive = location.pathname.startsWith('/chats');
   const isSettingsActive = location.pathname === '/settings';
+  const isSystemPromptsActive = location.pathname === '/system-prompts';
 
   return (
     <div className="bg-gray-800/50 border-b border-gray-700 sticky top-0 z-10">
@@ -68,6 +69,21 @@ const AppHeader: React.FC<{
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
+              </svg>
+            </button>
+
+            {/* Кнопка Системные промпты */}
+            <button
+              onClick={() => navigate('/system-prompts')}
+              className={`p-2 rounded-lg transition ${
+                isSystemPromptsActive
+                  ? 'text-white bg-gray-700'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-700'
+              }`}
+              title="Системные промпты"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
             </button>
 

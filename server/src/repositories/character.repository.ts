@@ -23,8 +23,8 @@ export const characterRepository = {
    */
   createCharacter: (userId: number, data: Omit<CreateCharacterInput, 'user_id'>): Character => {
     const stmt = db.prepare(
-      `INSERT INTO characters (user_id, name, description, short_description, personality, first_message, system_prompt, avatar)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO characters (user_id, name, description, short_description, personality, first_message, avatar)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
     const result = stmt.run(
       userId,
@@ -33,7 +33,6 @@ export const characterRepository = {
       data.short_description || null,
       data.personality || null,
       data.first_message || null,
-      data.system_prompt || null,
       data.avatar || null
     );
     
@@ -60,7 +59,6 @@ export const characterRepository = {
            short_description = COALESCE(?, short_description),
            personality = COALESCE(?, personality),
            first_message = COALESCE(?, first_message),
-           system_prompt = COALESCE(?, system_prompt),
            avatar = COALESCE(?, avatar),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
@@ -71,7 +69,6 @@ export const characterRepository = {
       data.short_description,
       data.personality,
       data.first_message,
-      data.system_prompt,
       data.avatar,
       id
     );
@@ -138,8 +135,8 @@ export const characterRepository = {
     }
 
     const stmt = db.prepare(
-      `INSERT INTO characters (user_id, name, description, short_description, personality, first_message, system_prompt, avatar)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO characters (user_id, name, description, short_description, personality, first_message, avatar)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
     const result = stmt.run(
       userId,
@@ -148,7 +145,6 @@ export const characterRepository = {
       source.short_description || null,
       source.personality || null,
       firstMessage,
-      source.system_prompt || null,
       source.avatar || null
     );
     

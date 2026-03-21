@@ -274,6 +274,7 @@ export class ContextService {
       // Используем ту же логику форматирования, что и в llm.service.ts
       const messages = compressedBlocks.length > 0
         ? formatMessagesForQwenWithCompression(
+            userId,
             character,
             heroProfile,
             heroName,
@@ -282,6 +283,7 @@ export class ContextService {
             compressedBlocks
           )
         : formatMessagesForQwen(
+            userId,
             character,
             heroProfile,
             heroName,

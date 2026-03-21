@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Character, Chat, Message, Hero } from '../types';
+import { Character, Chat, Message, Hero, SystemPrompt } from '../types';
 import { STORAGE_KEYS } from '../constants/storage';
 
 // Context API types
@@ -102,6 +102,20 @@ export const chatsApi = {
 export const heroApi = {
   get: () => api.get<Hero>('/hero'),
   update: (data: Partial<Hero>) => api.put<Hero>('/hero', data),
+};
+
+// System Prompts API
+export const systemPromptsApi = {
+  getAll: () => api.get<{ systemPrompts: SystemPrompt[] }>('/system-prompts'),
+  getActive: () => api.get<{ systemPrompt: SystemPrompt }>('/system-prompts/active'),
+  getById: (id: number) => api.get<{ systemPrompt: SystemPrompt }>(`/system-prompts/${id}`),
+  create: (data: Omit<SystemPrompt, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'is_active'>) =>
+    api.post<{ systemPrompt: SystemPrompt }>('/system-prompts', data),
+  update: (id: number, data: Partial<SystemPrompt>) =>
+    api.put<{ systemPrompt: SystemPrompt }>(`/system-prompts/${id}`, data),
+  delete: (id: number) => api.delete(`/system-prompts/${id}`),
+  activate: (id: number) => api.put<{ systemPrompt: SystemPrompt }>(`/system-prompts/${id}/activate`),
+  migrate: () => api.post<{ migratedCount: number }>('/system-prompts/migrate'),
 };
 
 // Context API (token usage tracking)
