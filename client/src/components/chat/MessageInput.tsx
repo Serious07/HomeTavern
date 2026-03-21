@@ -6,6 +6,9 @@ interface MessageInputProps {
   onSend: () => void;
   disabled: boolean;
   placeholder?: string;
+  // Пропсы для мобильного модального окна
+  showMobileModal?: boolean;
+  onOpenMobileModal?: () => void;
 }
 
 /**
@@ -18,6 +21,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
   onSend,
   disabled,
   placeholder = 'Введите сообщение...',
+  showMobileModal,
+  onOpenMobileModal,
 }) => {
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const resizeTimeoutRef = useRef<number | null>(null);
@@ -109,6 +114,19 @@ const MessageInput: React.FC<MessageInputProps> = ({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
         </svg>
       </button>
+      {/* Кнопка для открытия мобильного модального окна */}
+      {showMobileModal && onOpenMobileModal && (
+        <button
+          onClick={onOpenMobileModal}
+          className="md:hidden p-3 bg-gray-600 hover:bg-gray-500 rounded-lg transition shrink-0 flex items-center justify-center"
+          title="Открыть в полном окне"
+          aria-label="Открыть расширенное вводное окно"
+        >
+          <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-5V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 };

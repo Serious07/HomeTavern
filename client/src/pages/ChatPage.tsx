@@ -5,6 +5,7 @@ import { Chat, Message, Character } from '../types';
 import MessageList from '../components/chat/MessageList';
 import StreamingResponse from '../components/chat/StreamingResponse';
 import MessageInput from '../components/chat/MessageInput';
+import MobileMessageInputModal from '../components/chat/MobileMessageInputModal';
 import ContextStatsDisplay from '../components/chat/ContextStatsDisplay';
 import { useContextStats, useContextStatsDuringGeneration } from '../hooks/useContextStats';
 import { useCompression } from '../hooks/useCompression';
@@ -86,6 +87,15 @@ const ChatPage: React.FC = () => {
   const [translatingMessageId, setTranslatingMessageId] = useState<number | null>(null);
   const [messageInput, setMessageInput] = useState('');
   
+  // Ref для хранения состояния showThinking для стримингового сообщения
+  const streamingMessageThinkingRef = useRef<boolean>(false);
+  
+  // State для мобильного модального окна ввода
+  const [showMobileInputModal, setShowMobileInputModal] = useState(false);
+  
+  // Принудительный ре-рендер для обновления StreamingResponse при переключении showThinking
+  const [, forceUpdate] = useState(0);
+  
   // State для модального окна редактирования блока
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState<ChatBlockWithParsedIds | null>(null);
@@ -121,6 +131,8 @@ const ChatPage: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Ref для хранения ID requestAnimationFrame для отмены при размонтировании
   const scrollRafRef = useRef<number | null>(null);
+  // Ref для хранения последнего ID сообщения для скролла
+  const lastMessageIdRef = useRef<number | null>(null);
 
   const fetchChats = useCallback(async () => {
     try {
@@ -175,17 +187,84 @@ const ChatPage: React.FC = () => {
     }
   }, [chatId, navigate]);
 
+  // Функция скролла к концу с requestAnimationFrame для оптимизации на мобильных
+  const scrollToBottom = useCallback(() => {
+    // Отменяем предыдущий requestAnimationFrame если есть
+    if (scrollRafRef.current !== null) {
+      cancelAnimationFrame(scrollRafRef.current);
+    }
+    
+    // Используем requestAnimationFrame для плавного скролла
+    scrollRafRef.current = requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    });
+  }, []);
+
+  // Функция плавного скролла к конкретному сообщению с анимацией
+  const scrollToMessage = useCallback((messageId: number) => {
+    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (messageElement) {
+      // Плавный скролл к началу сообщения
+      messageElement.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
+      
+      // Добавляем анимацию появления
+      messageElement.classList.add('animate-message-appearance');
+      setTimeout(() => {
+        messageElement.classList.remove('animate-message-appearance');
+      }, 300);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Scroll to new message or bottom when messages change or streaming starts
+    if (scrollRafRef.current !== null) {
+      cancelAnimationFrame(scrollRafRef.current);
+    }
+    
+    scrollRafRef.current = requestAnimationFrame(() => {
+      // Если есть новое сообщение (отличное от последнего сохраненного), скроллим к нему
+      if (lastMessageIdRef.current !== null) {
+        const messageElement = document.querySelector(`[data-message-id="${lastMessageIdRef.current}"]`);
+        if (messageElement) {
+          messageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          // Добавляем анимацию появления
+          messageElement.classList.add('animate-message-appearance');
+          setTimeout(() => {
+            messageElement.classList.remove('animate-message-appearance');
+          }, 300);
+          return;
+        }
+      }
+      // Иначе скроллим вниз
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    });
+    
+    return () => {
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+      }
+    };
+  }, [messages, isStreaming]);
+
   // Callbacks для StreamingResponse - обернуты в useCallback чтобы избежать пересоздания
-  const handleStreamingComplete = useCallback(async (_message: Message) => {
+  const handleStreamingComplete = useCallback(async (message: Message) => {
     // Сначала обновляем сообщения, потом устанавливаем isStreaming и isSending в false
     await fetchMessages();
     // Синхронизация токенов после окончания генерации
     syncDuringGeneration();
     // Принудительная синхронизация контекста после завершения генерации
     syncContextStats();
+    // Сохраняем ID последнего сообщения для скролла
+    if (message.id) {
+      lastMessageIdRef.current = message.id;
+      scrollToMessage(message.id);
+    }
     setIsStreaming(false);
     setIsSending(false);
-  }, [fetchMessages, syncDuringGeneration, syncContextStats]);
+  }, [fetchMessages, syncDuringGeneration, syncContextStats, scrollToMessage]);
 
   const handleStreamingError = useCallback(async (error: string) => {
     console.error('[ChatPage] Streaming error:', error);
@@ -228,39 +307,12 @@ const ChatPage: React.FC = () => {
     }
   }, [chatId, fetchMessages, loadBlocks, checkNeedsCompression]);
 
-
-  // Функция скролла к концу с requestAnimationFrame для оптимизации на мобильных
-  const scrollToBottom = useCallback(() => {
-    // Отменяем предыдущий requestAnimationFrame если есть
-    if (scrollRafRef.current !== null) {
-      cancelAnimationFrame(scrollRafRef.current);
-    }
-    
-    // Используем requestAnimationFrame для плавного скролла
-    scrollRafRef.current = requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-    });
-  }, []);
-
-  useEffect(() => {
-    // Scroll to bottom when messages change or streaming starts
-    if (scrollRafRef.current !== null) {
-      cancelAnimationFrame(scrollRafRef.current);
-    }
-    scrollRafRef.current = requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-    });
-    
-    return () => {
-      if (scrollRafRef.current !== null) {
-        cancelAnimationFrame(scrollRafRef.current);
-      }
-    };
-  }, [messages, isStreaming]);
-
   const handleSendMessage = async () => {
     const messageToSend = messageInput.trim();
     if (!messageToSend || !chatId || isSending || isStreaming) return;
+    
+    // Сбрасываем состояние showThinking для нового стримингового сообщения
+    streamingMessageThinkingRef.current = false;
     
     setIsSending(true);
     const userMessage = messageToSend;
@@ -288,6 +340,12 @@ const ChatPage: React.FC = () => {
       // Fetch updated messages
       await fetchMessages();
       
+      // Сохраняем ID последнего сообщения для скролла
+      lastMessageIdRef.current = tempId;
+      
+      // Скроллим к отправленному сообщению пользователя
+      scrollToMessage(tempId);
+      
       // Обновляем статистику токенов после отправки сообщения
       await syncContextStats();
       
@@ -301,6 +359,9 @@ const ChatPage: React.FC = () => {
 
   const handleRegenerate = async (messageId: number) => {
     if (!chatId || isStreaming) return;
+    
+    // Сбрасываем состояние showThinking для нового стримингового сообщения
+    streamingMessageThinkingRef.current = false;
     
     try {
       // Delete the last assistant message
@@ -332,38 +393,40 @@ const ChatPage: React.FC = () => {
     }
   };
 
-  const handleEditMessage = async (messageId: number, newContent: string) => {
+  const handleEditMessage = async (messageId: number, newContent: string, translatedContent?: string) => {
     if (!chatId) return;
 
     try {
-      // Сохраняем отредактированное сообщение
-      await chatsApi.updateMessage(parseInt(chatId), messageId, {
-        content: newContent,
-      });
-
-      // Проверяем, является ли сообщение от assistant - для них делаем перевод
+      // Находим редактируемое сообщение
       const message = messages.find((m) => m.id === messageId);
-      if (message?.role === 'assistant') {
-        setTranslatingMessageId(messageId);
-        try {
-          // Запрашаем перевод нового текста
-          const response = await chatsApi.translateMessage(parseInt(chatId), messageId);
-          // Обновляем сообщение в списке локально
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === messageId ? { ...m, translated_content: response.data.translated_content } : m
-            )
-          );
-          // После перевода сообщения обновляем статистику токенов
-          await syncContextStats();
-        } catch (translateErr: any) {
-          console.error('Error translating message:', translateErr);
-        } finally {
-          setTranslatingMessageId(null);
-        }
-      } else {
-        // Для user сообщений просто обновляем список
+      if (!message) return;
+
+      // Используем новый endpoint для двунаправленного перевода
+      setTranslatingMessageId(messageId);
+      try {
+        const response = await chatsApi.translateMessageBidirectional(parseInt(chatId), messageId, {
+          content: newContent,
+          translated_content: translatedContent,
+        });
+
+        // Обновляем сообщение в списке локально
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === messageId ? { ...m, ...response.data } : m
+          )
+        );
+
+        // После перевода сообщения обновляем статистику токенов
+        await syncContextStats();
+      } catch (translateErr: any) {
+        console.error('Error translating message:', translateErr);
+        // Если ошибка перевода, пробуем просто обновить сообщение
+        await chatsApi.updateMessage(parseInt(chatId), messageId, {
+          content: newContent,
+        });
         await fetchMessages();
+      } finally {
+        setTranslatingMessageId(null);
       }
     } catch (err: any) {
       console.error('Error editing message:', err);
@@ -375,6 +438,12 @@ const ChatPage: React.FC = () => {
       ...prev,
       [messageId]: !prev[messageId],
     }));
+  };
+
+  const handleStreamingToggleThinking = () => {
+    streamingMessageThinkingRef.current = !streamingMessageThinkingRef.current;
+    // Триггерим ре-рендер ChatPage чтобы обновить prop showThinking в StreamingResponse
+    forceUpdate((prev) => prev + 1);
   };
 
   const handleTranslateMessage = async (messageId: number) => {
@@ -466,6 +535,11 @@ const ChatPage: React.FC = () => {
   const handleDeleteBlock = useCallback(async (blockId: number) => {
     await deleteBlock(blockId);
   }, [deleteBlock]);
+
+  const handleBlockUpdate = useCallback((blockId: number, updatedBlock: ChatBlockWithParsedIds) => {
+    // Обновляем блок в списке после перевода
+    setMessages((prev) => prev); // Force re-render to pick up updated blocks
+  }, []);
 
   const handleStartSelection = useCallback(() => {
     startSelection();
@@ -729,6 +803,7 @@ const ChatPage: React.FC = () => {
                   onToggleBlockCompression={handleToggleBlockCompression}
                   onDeleteBlock={handleDeleteBlock}
                   onExpandBlock={handleExpandBlock}
+                  onBlockUpdate={handleBlockUpdate}
                   isSelectionMode={isSelectionMode}
                   selectionStart={selectionStart}
                   selectionEnd={selectionEnd}
@@ -744,6 +819,8 @@ const ChatPage: React.FC = () => {
                     onComplete={handleStreamingComplete}
                     onError={handleStreamingError}
                     onTokenUpdate={scrollToBottom}
+                    showThinking={streamingMessageThinkingRef.current}
+                    onToggleThinking={handleStreamingToggleThinking}
                   />
                 </div>
               )}
@@ -762,6 +839,8 @@ const ChatPage: React.FC = () => {
             onSend={handleSendMessage}
             disabled={isSending || isStreaming || !currentChat}
             placeholder="Введите сообщение..."
+            showMobileModal={true}
+            onOpenMobileModal={() => setShowMobileInputModal(true)}
           />
         </div>
       </div>
@@ -788,18 +867,28 @@ const ChatPage: React.FC = () => {
         </button>
 
      {/* Edit block modal */}
-     {isEditModalOpen && editingBlock && (
-       <EditBlockModal
-         block={editingBlock}
-         onSave={async (blockId, updates) => {
-           await editBlock(blockId, updates);
-           handleCloseEditModal();
-           // После успешного сохранения обновляем блоки
-           await loadBlocks();
-         }}
-         onCancel={handleCloseEditModal}
-       />
-     )}
+      {isEditModalOpen && editingBlock && (
+        <EditBlockModal
+          block={editingBlock}
+          onSave={async (blockId, updates) => {
+            await editBlock(blockId, updates);
+            handleCloseEditModal();
+            // После успешного сохранения обновляем блоки
+            await loadBlocks();
+          }}
+          onCancel={handleCloseEditModal}
+        />
+      )}
+
+      {/* Mobile message input modal */}
+      <MobileMessageInputModal
+        isOpen={showMobileInputModal}
+        value={messageInput}
+        onChange={setMessageInput}
+        onSend={handleSendMessage}
+        onClose={() => setShowMobileInputModal(false)}
+        placeholder="Введите сообщение..."
+      />
 
       {/* Delete confirmation modal */}
         {showDeleteConfirm && (

@@ -368,6 +368,7 @@ export class LLMService {
     const timeoutMs = 60000; // 60 секунд таймаут
     const startTime = Date.now();
     let contentTokenCount = 0;
+    let reasoningTokenCount = 0;
     let lastUsage: Usage | undefined;
 
     try {
@@ -439,6 +440,7 @@ export class LLMService {
 
         // Отправляем reasoning_token если есть reasoning_content
         if (reasoningContent) {
+          reasoningTokenCount++;
           yield {
             type: 'reasoning_token',
             token: reasoningContent
@@ -462,11 +464,24 @@ export class LLMService {
         contextRepository.updateCachedStats(chatId, totalTokens, new Date().toISOString());
       }
 
-      // Логирование метрик генерации
+      // Логирование метрик генерации с учетом reasoning
       const endTime = Date.now();
       const durationSecs = (endTime - startTime) / 1000;
-      const tokensPerSec = durationSecs > 0 ? contentTokenCount / durationSecs : 0;
-      console.log(`[LLMService] Generation stats: ${contentTokenCount} tokens, ${durationSecs.toFixed(2)}s, ${tokensPerSec.toFixed(2)} tokens/sec`);
+      
+      // Рассчитываем скорость для content токенов
+      const contentTokensPerSec = durationSecs > 0 ? contentTokenCount / durationSecs : 0;
+      
+      // Рассчитываем общую скорость (content + reasoning)
+      const totalTokenCount = contentTokenCount + reasoningTokenCount;
+      const totalTokensPerSec = durationSecs > 0 ? totalTokenCount / durationSecs : 0;
+      
+      console.log(`[LLMService] Generation stats:`);
+      console.log(`  Content tokens: ${contentTokenCount}`);
+      console.log(`  Reasoning tokens: ${reasoningTokenCount}`);
+      console.log(`  Total tokens: ${totalTokenCount}`);
+      console.log(`  Duration: ${durationSecs.toFixed(2)}s`);
+      console.log(`  Content tokens/sec: ${contentTokensPerSec.toFixed(2)}`);
+      console.log(`  Total tokens/sec: ${totalTokensPerSec.toFixed(2)}`);
     } catch (error) {
       const elapsed = Date.now() - startTime;
       console.error(`LLM Stream Error after ${elapsed}ms:`, error);

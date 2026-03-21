@@ -13,7 +13,7 @@ interface ExpandedBlockMessages {
 interface MessageListProps {
   messages: Message[];
   onRegenerate?: (messageId: number) => void;
-  onEdit?: (messageId: number, content: string) => void;
+  onEdit?: (messageId: number, content: string, translatedContent?: string) => void;
   onDelete?: (messageId: number) => void;
   showThinking?: Record<number, boolean>;
   onToggleThinking?: (messageId: number) => void;
@@ -25,6 +25,7 @@ interface MessageListProps {
   onToggleBlockCompression?: (blockId: number, isCompressed: boolean) => void;
   onDeleteBlock?: (blockId: number) => void;
   onExpandBlock?: (block: ChatBlockWithParsedIds) => void;
+  onBlockUpdate?: (blockId: number, updatedBlock: ChatBlockWithParsedIds) => void;
   // Для ручного выделения сообщений
   isSelectionMode?: boolean;
   selectionStart?: number | null;
@@ -66,7 +67,7 @@ const MessageItem = memo(({
 }: {
   message: Message;
   onRegenerate?: (messageId: number) => void;
-  onEdit?: (messageId: number, content: string) => void;
+  onEdit?: (messageId: number, content: string, translatedContent?: string) => void;
   onDelete?: (messageId: number) => void;
   showThinking: Record<number, boolean>;
   onToggleThinking?: (messageId: number) => void;
@@ -111,7 +112,10 @@ const MessageItem = memo(({
 
   const handleEditSave = () => {
     if (editingMessageId && onEdit) {
-      onEdit(editingMessageId, editContent);
+      // Передаем и content, и translated_content для двунаправленного перевода
+      // Проверяем, что translated_content не null
+      const translatedContent = message.translated_content !== null ? message.translated_content : undefined;
+      onEdit(editingMessageId, editContent, translatedContent);
       setEditingMessageId(null);
       setEditContent('');
     }
@@ -157,6 +161,7 @@ const MessageItem = memo(({
 
   return (
     <div
+      data-message-id={message.id}
       className={`flex ${isUser ? 'justify-end' : 'justify-start'} py-2 ${
         isSelectionMode ? 'cursor-pointer' : ''
       } ${isSelected ? 'bg-cyan-900/30 -mx-4 px-4' : ''}`}
@@ -417,6 +422,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onToggleBlockCompression,
   onDeleteBlock,
   onExpandBlock,
+  onBlockUpdate,
   // Для ручного выделения
   isSelectionMode = false,
   selectionStart = null,
@@ -511,13 +517,14 @@ const MessageList: React.FC<MessageListProps> = ({
               return (
                 <React.Fragment key={`block-fragment-${item.block.id}`}>
                   <ChatBlock
-                     block={item.block}
-                     onEdit={(blockId, updates) => onEditBlock?.(blockId, updates)}
-                     onToggleCompression={(blockId, isCompressed) => onToggleBlockCompression?.(blockId, isCompressed)}
-                     onDelete={(blockId) => onDeleteBlock?.(blockId)}
-                     onExpand={handleExpandBlock}
-                     isExpanded={!!isExpanded}
-                   />
+                      block={item.block}
+                      onEdit={(blockId, updates) => onEditBlock?.(blockId, updates)}
+                      onToggleCompression={(blockId, isCompressed) => onToggleBlockCompression?.(blockId, isCompressed)}
+                      onDelete={(blockId) => onDeleteBlock?.(blockId)}
+                      onExpand={handleExpandBlock}
+                      isExpanded={!!isExpanded}
+                      onBlockUpdate={onBlockUpdate}
+                    />
                   {/* Отображение развернутых сообщений блока */}
                   {isExpanded && (
                     <div className="ml-4 border-l-2 border-cyan-700 pl-4 py-2 mb-4">

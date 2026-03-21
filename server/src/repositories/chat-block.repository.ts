@@ -5,6 +5,8 @@ export interface ChatBlock {
   chat_id: number;
   title: string;
   summary: string;
+  summary_translation: string | null;  // Перевод summary на другой язык
+  title_translation: string | null;    // Перевод заголовка
   summary_translation_hash: string | null;  // Хэш для кэширования перевода
   original_message_ids: string;  // JSON string: "[1, 2, 3]"
   start_message_id: number | null;
@@ -19,6 +21,8 @@ export interface CreateChatBlockParams {
   chat_id: number;
   title: string;
   summary: string;
+  summary_translation?: string | null;  // Перевод summary на другой язык
+  title_translation?: string | null;    // Перевод заголовка
   summary_translation_hash?: string | null;  // Хэш для кэширования перевода
   original_message_ids: number[];  // Array of message IDs
   start_message_id?: number | null;
@@ -29,6 +33,8 @@ export interface CreateChatBlockParams {
 export interface UpdateChatBlockParams {
   title?: string;
   summary?: string;
+  summary_translation?: string | null;  // Перевод summary на другой язык
+  title_translation?: string | null;    // Перевод заголовка
   summary_translation_hash?: string | null;
   is_compressed?: number;
   sort_order?: number;
@@ -62,17 +68,19 @@ export class ChatBlockRepository {
    * Создание блока
    */
   createBlock(params: CreateChatBlockParams): ChatBlock {
-    const { chat_id, title, summary, summary_translation_hash, original_message_ids, start_message_id, end_message_id, sort_order } = params;
+    const { chat_id, title, summary, summary_translation, title_translation, summary_translation_hash, original_message_ids, start_message_id, end_message_id, sort_order } = params;
     
     const stmt = db.prepare(`
-      INSERT INTO chat_blocks (chat_id, title, summary, summary_translation_hash, original_message_ids, start_message_id, end_message_id, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO chat_blocks (chat_id, title, summary, summary_translation, title_translation, summary_translation_hash, original_message_ids, start_message_id, end_message_id, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
     
     const result = stmt.run(
       chat_id,
       title,
       summary,
+      summary_translation || null,
+      title_translation || null,
       summary_translation_hash || null,
       JSON.stringify(original_message_ids),
       start_message_id || null,
@@ -87,12 +95,14 @@ export class ChatBlockRepository {
    * Обновление блока
    */
   updateBlock(id: number, params: UpdateChatBlockParams): ChatBlock | undefined {
-    const { title, summary, summary_translation_hash, is_compressed, sort_order } = params;
+    const { title, summary, summary_translation, title_translation, summary_translation_hash, is_compressed, sort_order } = params;
     
     const stmt = db.prepare(`
       UPDATE chat_blocks
       SET title = COALESCE(?, title),
           summary = COALESCE(?, summary),
+          summary_translation = COALESCE(?, summary_translation),
+          title_translation = COALESCE(?, title_translation),
           summary_translation_hash = COALESCE(?, summary_translation_hash),
           is_compressed = COALESCE(?, is_compressed),
           sort_order = COALESCE(?, sort_order),
@@ -103,6 +113,8 @@ export class ChatBlockRepository {
     stmt.run(
       title || null,
       summary || null,
+      summary_translation !== undefined ? summary_translation : null,
+      title_translation !== undefined ? title_translation : null,
       summary_translation_hash !== undefined ? summary_translation_hash : null,
       is_compressed !== undefined ? is_compressed : null,
       sort_order !== undefined ? sort_order : null,

@@ -39,6 +39,7 @@ export interface Message {
   generated_at?: string | null;
   tokens_per_sec?: number | null;
   total_tokens?: number | null;
+  reasoning_tokens?: number | null;  // Количество reasoning токенов
   generation_duration?: number | null;  // Время генерации в секундах (с сервера)
 }
 

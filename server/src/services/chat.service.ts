@@ -28,6 +28,13 @@ export class ChatService {
   }
 
   /**
+   * Получение чата по ID без проверки доступа (для внутренних операций)
+   */
+  getChatById(id: number): Chat | undefined {
+    return chatRepository.getChatById(id);
+  }
+
+  /**
    * Создание чата
    */
   async createChat(userId: number, characterId: number, title?: string): Promise<Chat> {

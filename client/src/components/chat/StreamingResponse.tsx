@@ -9,6 +9,8 @@ interface StreamingResponseProps {
   onComplete?: (message: Message) => void;
   onError?: (error: string) => void;
   onTokenUpdate?: () => void;  // Колбэк для уведомления о каждом новом токене
+  showThinking?: boolean;  // Внешнее состояние showThinking (опционально для обратной совместимости)
+  onToggleThinking?: () => void;  // Callback для переключения состояния
 }
 
 const StreamingResponse: React.FC<StreamingResponseProps> = ({
@@ -17,12 +19,23 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   onComplete,
   onError,
   onTokenUpdate,
+  showThinking: externalShowThinking,
+  onToggleThinking,
 }) => {
   const [isStreaming, setIsStreaming] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [reasoningContent, setReasoningContent] = useState('');
-  const [showThinking, setShowThinking] = useState(false);
+  // Локальное состояние только если не передано внешнее
+  const [internalShowThinking, setInternalShowThinking] = useState(false);
+  
+  // Используем внешнее или внутреннее состояние
+  const actualShowThinking = externalShowThinking !== undefined 
+    ? externalShowThinking 
+    : internalShowThinking;
+  
+  // Ref для отслеживания того, что reasoningContent был получен (чтобы показывать кнопку если есть мысли)
+  const hasReasoningContentRef = useRef(false);
   
   const eventSourceRef = useRef<EventSource | null>(null);
   const messageIdRef = useRef<number>(0);
@@ -46,9 +59,9 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
         setReasoningContent((prev) => {
           const newValue = prev + data.token;
           reasoningContentRef.current = newValue;
+          hasReasoningContentRef.current = true;
           return newValue;
         });
-        setShowThinking(true);
         // Вызываем колбэк для скролла
         onTokenUpdate?.();
       } catch (err) {
@@ -190,14 +203,14 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       )}
 
       {/* Reasoning content */}
-      {showThinking && (
+      {reasoningContent && hasReasoningContentRef.current && (
         <div className="mb-3 pb-3 border-b border-gray-600">
           <button
-            onClick={() => setShowThinking(!showThinking)}
+            onClick={onToggleThinking || (() => setInternalShowThinking(!actualShowThinking))}
             className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-300 transition"
           >
             <svg
-              className={`w-4 h-4 transition-transform ${showThinking ? 'rotate-180' : ''}`}
+              className={`w-4 h-4 transition-transform ${actualShowThinking ? 'rotate-180' : ''}`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -209,9 +222,9 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
                 d="M19 9l-7 7-7-7"
               />
             </svg>
-            {showThinking ? 'Скрыть мышление' : 'Показать мышление'}
+            {actualShowThinking ? 'Скрыть мышление' : 'Показать мышление'}
           </button>
-          {showThinking && (
+          {actualShowThinking && (
             <div className="mt-2 p-3 bg-gray-800/50 rounded-lg text-sm text-gray-400 whitespace-pre-wrap">
               {reasoningContent}
             </div>

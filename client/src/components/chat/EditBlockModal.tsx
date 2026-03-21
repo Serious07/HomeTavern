@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ChatBlockWithParsedIds } from '../../types/compression';
+import { compressionApi } from '../../services/api';
 
 interface EditBlockModalProps {
   block: ChatBlockWithParsedIds;
@@ -15,6 +16,12 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
   const [title, setTitle] = useState(block.title);
   const [summary, setSummary] = useState(block.summary);
   const [error, setError] = useState<string | null>(null);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  // Для отображения значений на выбранном языке
+  const displayTitle = showOriginal ? block.title : (block.title_translation || block.title);
+  const displaySummary = showOriginal ? block.summary : (block.summary_translation || block.summary);
 
   // Обновляем состояние при изменении блока
   useEffect(() => {
@@ -22,6 +29,28 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
     setSummary(block.summary);
     setError(null);
   }, [block]);
+
+  const handleToggleLanguage = async () => {
+    const newShowOriginal = !showOriginal;
+    setShowOriginal(newShowOriginal);
+
+    // Если перевод еще не загружен, запрашиваем его
+    if (!newShowOriginal && !block.summary_translation) {
+      setIsTranslating(true);
+      try {
+        const response = await compressionApi.translateBlock(block.id);
+        const updatedBlock = response.data;
+        
+        // Обновляем локальное состояние для отображения
+        setTitle(updatedBlock.title);
+        setSummary(updatedBlock.summary);
+      } catch (error) {
+        console.error('Error translating block:', error);
+      } finally {
+        setIsTranslating(false);
+      }
+    }
+  };
 
   const handleSave = async () => {
     // Валидация
@@ -51,12 +80,25 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
         {/* Заголовок модального окна */}
         <div className="flex items-center justify-between p-4 border-b border-gray-700">
           <h2 className="text-lg font-semibold text-cyan-400">✏️ Редактирование блока</h2>
-          <button
-            onClick={onCancel}
-            className="text-gray-400 hover:text-gray-300 transition"
-          >
-            ✕
-          </button>
+          
+          <div className="flex items-center gap-2">
+            {/* Кнопка переключения языка */}
+            <button
+              onClick={handleToggleLanguage}
+              disabled={isTranslating}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-sm"
+              title={showOriginal ? 'Показать перевод' : 'Показать оригинал'}
+            >
+              {isTranslating ? '...' : (showOriginal ? 'EN' : 'RU')}
+            </button>
+
+            <button
+              onClick={onCancel}
+              className="text-gray-400 hover:text-gray-300 transition"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Содержимое */}
@@ -68,7 +110,7 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
             </label>
             <input
               type="text"
-              value={title}
+              value={displayTitle}
               onChange={(e) => {
                 setTitle(e.target.value);
                 setError(null);
@@ -78,7 +120,7 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
               maxLength={100}
             />
             <div className="text-xs text-gray-500 mt-1 text-right">
-              {title.length}/100
+              {displayTitle.length}/100
             </div>
           </div>
 
@@ -88,7 +130,7 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
               Краткий пересказ:
             </label>
             <textarea
-              value={summary}
+              value={displaySummary}
               onChange={(e) => {
                 setSummary(e.target.value);
                 setError(null);
@@ -99,7 +141,7 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
               maxLength={2000}
             />
             <div className="text-xs text-gray-500 mt-1 text-right">
-              {summary.length}/2000
+              {displaySummary.length}/2000
             </div>
           </div>
 

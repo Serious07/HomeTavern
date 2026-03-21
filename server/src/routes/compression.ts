@@ -7,6 +7,7 @@ import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { compressionService } from '../services/compression.service';
 import { chatBlockRepository, ChatBlock } from '../repositories/chat-block.repository';
 import { contextService } from '../services/context.service';
+import { translationService } from '../services/translation.service';
 
 const router = Router();
 
@@ -221,6 +222,57 @@ router.get('/needs/:chatId', async (req: AuthenticatedRequest, res: Response) =>
     res.status(200).json(result);
   } catch (error) {
     console.error('[CompressionRoute] Error checking compression needs:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * PUT /api/compression/block/:id/translate
+ * Перевести блок на другой язык (русский)
+ * Response: ChatBlock с обновленными полями summary_translation и title_translation
+ */
+router.put('/block/:id/translate', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const blockId = parseInt(req.params.id, 10);
+
+    if (isNaN(blockId)) {
+      return res.status(400).json({ error: 'Invalid blockId' });
+    }
+
+    const block = chatBlockRepository.getBlockById(blockId);
+    if (!block) {
+      return res.status(404).json({ error: 'Block not found' });
+    }
+
+    // Переводим summary и title на русский язык
+    let summaryTranslation: string | null = null;
+    let titleTranslation: string | null = null;
+
+    try {
+      const summaryTranslationResult = await translationService.translate(block.summary, { targetLang: 'ru' });
+      summaryTranslation = summaryTranslationResult.translatedText || block.summary;
+    } catch (error) {
+      console.error('[CompressionRoute] Error translating summary:', error);
+      summaryTranslation = block.summary; // Fallback to original
+    }
+
+    try {
+      const titleTranslationResult = await translationService.translate(block.title, { targetLang: 'ru' });
+      titleTranslation = titleTranslationResult.translatedText || block.title;
+    } catch (error) {
+      console.error('[CompressionRoute] Error translating title:', error);
+      titleTranslation = block.title; // Fallback to original
+    }
+
+    // Обновляем блок в БД
+    const updatedBlock = chatBlockRepository.updateBlock(blockId, {
+      summary_translation: summaryTranslation,
+      title_translation: titleTranslation,
+    });
+
+    res.status(200).json(updatedBlock);
+  } catch (error) {
+    console.error('[CompressionRoute] Error translating block:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

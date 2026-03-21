@@ -12,6 +12,7 @@ export interface Message {
   generated_at?: string | null;
   tokens_per_sec?: number | null;
   total_tokens?: number | null;
+  reasoning_tokens?: number | null;
 }
 
 export interface CreateMessageParams {
@@ -32,6 +33,7 @@ export interface UpdateMessageParams {
   generated_at?: string;
   tokens_per_sec?: number;
   total_tokens?: number;
+  reasoning_tokens?: number;
 }
 
 export class MessageRepository {
@@ -82,7 +84,7 @@ export class MessageRepository {
  * Обновление сообщения
  */
   updateMessage(id: number, updates: UpdateMessageParams): Message | undefined {
-    const { role, content, translated_content, message_id, hidden, generated_at, tokens_per_sec, total_tokens } = updates;
+    const { role, content, translated_content, message_id, hidden, generated_at, tokens_per_sec, total_tokens, reasoning_tokens } = updates;
 
     const stmt = db.prepare(`
       UPDATE messages
@@ -93,7 +95,8 @@ export class MessageRepository {
           hidden = COALESCE(?, hidden),
           generated_at = COALESCE(?, generated_at),
           tokens_per_sec = COALESCE(?, tokens_per_sec),
-          total_tokens = COALESCE(?, total_tokens)
+          total_tokens = COALESCE(?, total_tokens),
+          reasoning_tokens = COALESCE(?, reasoning_tokens)
       WHERE id = ?
     `);
     stmt.run(
@@ -105,6 +108,7 @@ export class MessageRepository {
       generated_at !== undefined ? generated_at : null,
       tokens_per_sec !== undefined ? tokens_per_sec : null,
       total_tokens !== undefined ? total_tokens : null,
+      reasoning_tokens !== undefined ? reasoning_tokens : null,
       id
     );
 

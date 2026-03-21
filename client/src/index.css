@@ -176,6 +176,76 @@ body {
   animation: fadeIn 0.3s ease-out;
 }
 
+/* Message appearance animation for scroll-to-message feature */
+@keyframes message-appearance {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-message-appearance {
+  animation: message-appearance 0.3s ease-out;
+}
+
+/* Mobile modal animations */
+@keyframes modal-slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes modal-slide-down {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Utility classes for modal animations */
+.modal-slide-up {
+  animation: modal-slide-up 0.3s ease-out;
+}
+
+.modal-slide-down {
+  animation: modal-slide-down 0.3s ease-out;
+}
+
+.modal-fade-in {
+  animation: modal-fade-in 0.3s ease-out;
+}
+
+.modal-fade-out {
+  animation: modal-fade-out 0.3s ease-out;
+}
+
 /* ========================================
    Markdown content styles
    ======================================== */
@@ -289,7 +359,8 @@ body.eco-mode * {
 body.eco-mode .animate-spin,
 body.eco-mode .animate-bounce,
 body.eco-mode .animate-pulse,
-body.eco-mode .animate-fadeIn {
+body.eco-mode .animate-fadeIn,
+body.eco-mode .animate-message-appearance {
   animation: none !important;
 }
 
@@ -300,6 +371,14 @@ body.eco-mode .backdrop-blur-md,
 body.eco-mode .backdrop-blur-lg {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+}
+
+/* Отключаем анимации модального окна в экономичном режиме */
+body.eco-mode .modal-slide-up,
+body.eco-mode .modal-slide-down,
+body.eco-mode .modal-fade-in,
+body.eco-mode .modal-fade-out {
+  animation: none !important;
 }
 
 /* Упрощаем тени */

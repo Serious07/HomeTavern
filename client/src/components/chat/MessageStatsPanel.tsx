@@ -45,6 +45,11 @@ export const MessageStatsPanel: React.FC<MessageStatsPanelProps> = ({
   const hasGenerationTime = message.generation_duration !== undefined && message.generation_duration !== null;
   const generationTime = hasGenerationTime ? message.generation_duration!.toFixed(2) : null;
   
+  // Количество токенов - разделяем content и reasoning
+  const contentTokens = message.total_tokens || 0;
+  const reasoningTokens = message.reasoning_tokens || 0;
+  const totalTokens = contentTokens + reasoningTokens;
+  
   return (
     <div className="mt-2 pt-2 border-t border-gray-600/50">
       <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
@@ -54,9 +59,14 @@ export const MessageStatsPanel: React.FC<MessageStatsPanelProps> = ({
         {/* Время отправки */}
         <span>🕐 {sendTime}</span>
         
-        {/* Количество токенов */}
-        {message.total_tokens !== undefined && message.total_tokens !== null && (
-          <span>📝 {message.total_tokens} ток.</span>
+        {/* Количество токенов - показываем отдельно reasoning если есть */}
+        {reasoningTokens > 0 && (
+          <span title={`Reasoning: ${reasoningTokens}, Content: ${contentTokens}`}>
+            📝 {totalTokens} ток. ({reasoningTokens} reasoning)
+          </span>
+        )}
+        {reasoningTokens === 0 && contentTokens > 0 && (
+          <span>📝 {contentTokens} ток.</span>
         )}
         
         {/* Скорость генерации */}

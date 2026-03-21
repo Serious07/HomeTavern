@@ -7,6 +7,8 @@ export interface ChatBlock {
   chat_id: number;
   title: string;
   summary: string;
+  summary_translation?: string | null;  // Перевод summary на другой язык
+  title_translation?: string | null;    // Перевод заголовка
   original_message_ids: string;  // JSON string: "[1, 2, 3]"
   start_message_id: number | null;
   end_message_id: number | null;

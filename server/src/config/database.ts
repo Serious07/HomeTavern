@@ -110,6 +110,7 @@ try {
     ALTER TABLE messages ADD COLUMN generated_at TEXT;
     ALTER TABLE messages ADD COLUMN tokens_per_sec REAL;
     ALTER TABLE messages ADD COLUMN total_tokens INTEGER;
+    ALTER TABLE messages ADD COLUMN reasoning_tokens INTEGER;
   `);
   
   // Добавление колонок для контекста в таблице chats
@@ -142,6 +143,23 @@ try {
     console.log('[Database] Translation hash column already exists');
   } else {
     console.error('[Database] Translation hash migration error:', error);
+  }
+}
+
+// Миграция: Добавление колонок для перевода summary и title
+try {
+  db.exec(`
+    ALTER TABLE chat_blocks ADD COLUMN summary_translation TEXT;
+    ALTER TABLE chat_blocks ADD COLUMN title_translation TEXT;
+  `);
+  
+  console.log('[Database] Translation columns migration completed successfully');
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate column')) {
+    console.log('[Database] Translation columns already exist');
+  } else {
+    console.error('[Database] Translation columns migration error:', error);
   }
 }
 

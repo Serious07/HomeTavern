@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ChatBlockWithParsedIds } from '../../types/compression';
+import { compressionApi } from '../../services/api';
 
 interface ChatBlockProps {
   block: ChatBlockWithParsedIds;
@@ -8,6 +9,7 @@ interface ChatBlockProps {
   onDelete: (blockId: number) => void;
   onExpand?: (block: ChatBlockWithParsedIds) => void;
   isExpanded?: boolean;
+  onBlockUpdate?: (blockId: number, updatedBlock: ChatBlockWithParsedIds) => void;
 }
 
 export const ChatBlock: React.FC<ChatBlockProps> = ({
@@ -17,9 +19,17 @@ export const ChatBlock: React.FC<ChatBlockProps> = ({
   onDelete,
   onExpand,
   isExpanded = false,
+  onBlockUpdate,
 }) => {
+  const [showOriginal, setShowOriginal] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  // Для отображения summary и title на выбранном языке
+  const displayTitle = showOriginal ? block.title : (block.title_translation || block.title);
+  const displaySummary = showOriginal ? block.summary : (block.summary_translation || block.summary);
+
   const handleEditClick = () => {
-    onEdit(block.id, { title: block.title, summary: block.summary });
+    onEdit(block.id, { title: displayTitle, summary: displaySummary });
   };
 
   const handleToggleCompression = () => {
@@ -39,6 +49,33 @@ export const ChatBlock: React.FC<ChatBlockProps> = ({
     }
   };
 
+  const handleToggleLanguage = async () => {
+    const newShowOriginal = !showOriginal;
+    setShowOriginal(newShowOriginal);
+
+    // Если перевод еще не загружен, запрашиваем его
+    if (!newShowOriginal && !block.summary_translation) {
+      setIsTranslating(true);
+      try {
+        const response = await compressionApi.translateBlock(block.id);
+        const updatedBlock = response.data;
+        
+        // Обновляем локальное состояние блока
+        if (onBlockUpdate) {
+          onBlockUpdate(block.id, {
+            ...block,
+            title_translation: updatedBlock.title_translation,
+            summary_translation: updatedBlock.summary_translation,
+          });
+        }
+      } catch (error) {
+        console.error('Error translating block:', error);
+      } finally {
+        setIsTranslating(false);
+      }
+    }
+  };
+
   const messageCount = block.original_message_ids.length;
 
   return (
@@ -46,12 +83,22 @@ export const ChatBlock: React.FC<ChatBlockProps> = ({
       {/* Заголовок блока */}
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-2">
-          <span className="text-cyan-400 font-semibold">📚 {block.title}</span>
+          <span className="text-cyan-400 font-semibold">📚 {displayTitle}</span>
           <span className="text-xs text-cyan-600">({messageCount} сообщений)</span>
         </div>
         
         {/* Кнопки управления */}
         <div className="flex items-center gap-1">
+          {/* Кнопка переключения языка */}
+          <button
+            onClick={handleToggleLanguage}
+            disabled={isTranslating}
+            className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs"
+            title={showOriginal ? 'Показать перевод' : 'Показать оригинал'}
+          >
+            {isTranslating ? '...' : (showOriginal ? 'EN' : 'RU')}
+          </button>
+
           <button
             onClick={handleEditClick}
             className="p-1 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-800/50 rounded transition"
@@ -62,8 +109,8 @@ export const ChatBlock: React.FC<ChatBlockProps> = ({
           <button
             onClick={handleToggleCompression}
             className={`p-1 rounded transition ${
-              block.is_compressed 
-                ? 'text-green-400 hover:text-green-300 hover:bg-green-900/50' 
+              block.is_compressed
+                ? 'text-green-400 hover:text-green-300 hover:bg-green-900/50'
                 : 'text-yellow-400 hover:text-yellow-300 hover:bg-yellow-900/50'
             }`}
             title={block.is_compressed ? 'Сжатие ВКЛ' : 'Сжатие ВЫКЛ'}
@@ -83,7 +130,7 @@ export const ChatBlock: React.FC<ChatBlockProps> = ({
       {/* Краткий пересказ */}
       <div className="text-sm text-cyan-100/80 mb-3">
         <div className="font-medium text-cyan-300 mb-1">Краткий пересказ:</div>
-        <p className="whitespace-pre-wrap">{block.summary}</p>
+        <p className="whitespace-pre-wrap">{displaySummary}</p>
       </div>
 
       {/* Кнопка развернуть */}

@@ -94,6 +94,8 @@ export const chatsApi = {
     api.put<Message>(`/chats/${chatId}/messages/${messageId}`, data),
   translateMessage: (chatId: number, messageId: number) =>
     api.post<Message>(`/chats/${chatId}/messages/${messageId}/translate`),
+  translateMessageBidirectional: (chatId: number, messageId: number, data: { content?: string; translated_content?: string }) =>
+    api.put<Message>(`/chats/${chatId}/messages/${messageId}/translate-bidirectional`, data),
 };
 
 // Hero API
@@ -112,6 +114,21 @@ export const contextApi = {
     api.post<ContextStats>(`/context/sync/${chatId}`),
   getSlots: () => api.get<{ slots: any[] }>('/context/slots'),
   getProps: () => api.get<{ n_ctx: number }>('/context/props'),
+};
+
+// Compression API
+export const compressionApi = {
+  getBlocks: (chatId: number) => api.get<any[]>(`/compression/blocks/${chatId}`),
+  compress: (chatId: number) => api.post<any>(`/compression/compress/${chatId}`),
+  compressSelected: (chatId: number, data: { startMessageId: number; endMessageId: number }) =>
+    api.post<any>(`/compression/compress-selected/${chatId}`, data),
+  updateBlock: (blockId: number, data: { title?: string; summary?: string; is_compressed?: boolean }) =>
+    api.put<any>(`/compression/block/${blockId}`, data),
+  deleteBlock: (blockId: number) => api.delete(`/compression/block/${blockId}`),
+  undoCompression: (chatId: number) => api.post<any>(`/compression/undo/${chatId}`),
+  resetCompression: (chatId: number) => api.delete(`/compression/reset/${chatId}`),
+  checkNeedsCompression: (chatId: number) => api.get<any>(`/compression/needs/${chatId}`),
+  translateBlock: (blockId: number) => api.put<any>(`/compression/block/${blockId}/translate`),
 };
 
 export default api;

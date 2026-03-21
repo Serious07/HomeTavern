@@ -78,6 +78,7 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
   let translatedText = '';
   let startTime = 0;
   let contentTokenCount = 0;
+  let reasoningTokenCount = 0;
 
   try {
     // 1. Проверяем доступ к чату
@@ -143,6 +144,7 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     // 6. Обрабатываем поток
     for await (const chunk of stream) {
       if (chunk.type === 'reasoning_token') {
+        reasoningTokenCount++;
         sendSSEEvent(res, 'reasoning_token', { token: chunk.token });
       } else if (chunk.type === 'content_token') {
         sendSSEEvent(res, 'content_token', { token: chunk.token });
@@ -154,8 +156,11 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     // 7. Вычисляем метрики генерации
     const endTime = Date.now();
     const durationSecs = startTime > 0 ? (endTime - startTime) / 1000 : 0;
-    const tokensPerSec = durationSecs > 0 ? contentTokenCount / durationSecs : 0;
-    console.log(`[ChatsRoute] Generation stats: ${contentTokenCount} tokens, ${durationSecs.toFixed(2)}s, ${tokensPerSec.toFixed(2)} tokens/sec`);
+    
+    // Рассчитываем общую скорость (content + reasoning)
+    const totalTokenCount = contentTokenCount + reasoningTokenCount;
+    const tokensPerSec = durationSecs > 0 ? totalTokenCount / durationSecs : 0;
+    console.log(`[ChatsRoute] Generation stats: ${contentTokenCount} content + ${reasoningTokenCount} reasoning = ${totalTokenCount} tokens, ${durationSecs.toFixed(2)}s, ${tokensPerSec.toFixed(2)} tokens/sec`);
 
     // 8. Переводим ответ на русский (если оригинал на английском)
     const responseLang = await translationService.detectLanguage(fullContent);
@@ -177,7 +182,8 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
       translated_content: translatedText !== fullContent ? translatedText : undefined,
       generated_at: new Date().toISOString(),
       tokens_per_sec: tokensPerSec,
-      total_tokens: contentTokenCount
+      total_tokens: totalTokenCount,
+      reasoning_tokens: reasoningTokenCount
     });
 
     // 10. Обновляем updated_at чата
@@ -332,6 +338,7 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
   let translatedText = '';
   let genStartTime = 0;
   let genContentTokenCount = 0;
+  let genReasoningTokenCount = 0;
 
   try {
     // 1. Проверяем доступ к чату
@@ -382,6 +389,7 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
     // 6. Обрабатываем поток
     for await (const chunk of stream) {
       if (chunk.type === 'reasoning_token') {
+        genReasoningTokenCount++;
         sendSSEEvent(res, 'reasoning_token', { token: chunk.token });
       } else if (chunk.type === 'content_token') {
         sendSSEEvent(res, 'content_token', { token: chunk.token });
@@ -393,8 +401,11 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
     // 7. Вычисляем метрики генерации
     const genEndTime = Date.now();
     const genDurationSecs = genStartTime > 0 ? (genEndTime - genStartTime) / 1000 : 0;
-    const genTokensPerSec = genDurationSecs > 0 ? genContentTokenCount / genDurationSecs : 0;
-    console.log(`[ChatsRoute] Generation stats: ${genContentTokenCount} tokens, ${genDurationSecs.toFixed(2)}s, ${genTokensPerSec.toFixed(2)} tokens/sec`);
+    
+    // Рассчитываем общую скорость (content + reasoning)
+    const genTotalTokenCount = genContentTokenCount + genReasoningTokenCount;
+    const genTokensPerSec = genDurationSecs > 0 ? genTotalTokenCount / genDurationSecs : 0;
+    console.log(`[ChatsRoute] Generation stats: ${genContentTokenCount} content + ${genReasoningTokenCount} reasoning = ${genTotalTokenCount} tokens, ${genDurationSecs.toFixed(2)}s, ${genTokensPerSec.toFixed(2)} tokens/sec`);
 
     // 8. Переводим ответ на русский (если оригинал на английском)
     const responseLang = await translationService.detectLanguage(fullContent);
@@ -426,7 +437,8 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
     messageRepository.updateMessage(assistantMessage.id, {
       generated_at: new Date().toISOString(),
       tokens_per_sec: genTokensPerSec,
-      total_tokens: genContentTokenCount
+      total_tokens: genTotalTokenCount,
+      reasoning_tokens: genReasoningTokenCount
     });
 
     // 10. Обновляем updated_at чата
