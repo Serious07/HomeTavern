@@ -562,7 +562,7 @@ const ChatPage: React.FC = () => {
 
       {/* Sidebar - статичный список чатов */}
       <div
-        className={`fixed md:static inset-y-0 left-0 z-30 w-72 bg-gray-800/50 border-r border-gray-700 transform transition-transform duration-300 ${
+        className={`fixed md:static inset-y-0 left-0 z-[60] w-72 bg-gray-800/50 border-r border-gray-700 transform transition-transform duration-300 ${
           showSidebar ? 'translate-x-0' : '-translate-x-full'
         } md:translate-x-0 flex flex-col`}
       >
@@ -622,7 +622,7 @@ const ChatPage: React.FC = () => {
         <div className={`shrink-0 transition-all duration-300 chat-header ${
           showHeaderFooter ? 'block' : 'hidden'
         }`}>
-          {/* Панель с гамбургером и кнопками для мобильных */}
+          {/* Панель с кнопками для мобильных (гамбургер + кнопки управления) */}
           <div className="md:hidden flex items-center justify-between">
             <div className="flex items-center gap-2">
               {/* Кнопка гамбургер для мобильных */}
@@ -635,6 +635,43 @@ const ChatPage: React.FC = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
+              {/* Кнопка ручного сжатия истории */}
+              <button
+                onClick={handleManualCompress}
+                className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition"
+                title="Сжать историю"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+              </button>
+              {/* Кнопка ручного выделения для сжатия */}
+              <button
+                onClick={handleStartSelection}
+                disabled={isSelectionMode}
+                className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition disabled:opacity-50"
+                title="Выделить сообщения для сжатия"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+              {currentChat && (
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition"
+                  title="Удалить чат"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+          {/* Панель с кнопками для десктопа (без гамбургера) */}
+          <div className="hidden md:flex md:items-center md:justify-between md:px-4 py-2 border-b border-gray-700/30">
+            <div className="flex items-center gap-2">
               {/* Кнопка ручного сжатия истории */}
               <button
                 onClick={handleManualCompress}
