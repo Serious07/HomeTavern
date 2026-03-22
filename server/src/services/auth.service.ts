@@ -95,7 +95,6 @@ export class AuthService {
       username,
       role,
     };
-    console.log('[Auth Service] Generating token with JWT_SECRET:', this.JWT_SECRET.substring(0, 10) + '...');
     return jwt.sign(payload, this.JWT_SECRET, {
       expiresIn: this.JWT_EXPIRES_IN,
     });
@@ -107,7 +106,6 @@ export class AuthService {
    * @returns Декодированные данные токена
    */
   verifyToken(token: string): AuthPayload {
-    console.log('[Auth Service] Verifying token with JWT_SECRET:', this.JWT_SECRET.substring(0, 10) + '...');
     return jwt.verify(token, this.JWT_SECRET) as AuthPayload;
   }
 

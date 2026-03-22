@@ -44,8 +44,11 @@ export const authenticate = (
     }
 
     console.log('[Auth Middleware] Token received, length:', token.length);
-    console.log('[Auth Middleware] JWT_SECRET from env:', process.env.JWT_SECRET ? 'SET' : 'NOT SET');
-    const secret = process.env.JWT_SECRET || 'default-secret';
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      res.status(500).json({ error: 'JWT_SECRET environment variable is not configured' });
+      return;
+    }
     const decoded = jwt.verify(token, secret) as AuthPayload;
     
     console.log('[Auth Middleware] Token verified for user:', decoded.username);
