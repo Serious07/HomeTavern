@@ -35,7 +35,9 @@ const AppHeader: React.FC<{
             title="Чаты"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 2H4C2.9 2 2 2.9 2 4V16C2 17.1 2.9 18 4 18H17L22 22V4C22 2.9 21.1 2 20 2Z" />
+              <rect x="6" y="7" width="12" height="2" rx="1" fill="currentColor" />
+              <rect x="6" y="11" width="6" height="2" rx="1" fill="currentColor" />
             </svg>
             <span className="text-xs mt-1">Чаты</span>
           </button>
@@ -156,7 +158,9 @@ const AppHeader: React.FC<{
                 title="Чаты"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 2H4C2.9 2 2 2.9 2 4V16C2 17.1 2.9 18 4 18H17L22 22V4C22 2.9 21.1 2 20 2Z" />
+                  <rect x="6" y="7" width="12" height="2" rx="1" fill="currentColor" />
+                  <rect x="6" y="11" width="6" height="2" rx="1" fill="currentColor" />
                 </svg>
               </button>
 
