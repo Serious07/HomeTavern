@@ -27,7 +27,7 @@ HomeTavern использует современные технологии дл
 
 ```bash
 git clone <url-репозитория>
-cd HomeTavern-V5
+cd HomeTavern
 ```
 
 ### Шаг 2. Установка зависимостей
