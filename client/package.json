@@ -1,7 +1,7 @@
 {
   "name": "hometavern-v5-client",
   "version": "1.0.0",
-  "description": "HomeTavern V5 Frontend Client",
+  "description": "HomeTavern Frontend Client",
   "type": "module",
   "scripts": {
     "dev": "vite",

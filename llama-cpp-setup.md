@@ -2,7 +2,7 @@
 
 ## Описание
 
-Этот документ содержит подробную инструкцию по запуску llama.cpp с OpenAI-compatible API для работы с HomeTavern V5.
+Этот документ содержит подробную инструкцию по запуску llama.cpp с OpenAI-compatible API для работы с HomeTavern.
 
 ## Требования
 
@@ -40,10 +40,10 @@ cmake --build build --config Release
 
 ```powershell
 # Windows (PowerShell)
-.\build\bin\Release\llama-server.exe --model .\models\qwen-3.5.gguf --port 1234
+.\build\bin\Release\llama-server.exe --model .\models\qwen-3.5.gguf --port 8080
 
 # Или если используете main
-.\build\bin\Release\llama-main.exe --model .\models\qwen-3.5.gguf --port 1234
+.\build\bin\Release\llama-main.exe --model .\models\qwen-3.5.gguf --port 8080
 ```
 
 ### Рекомендуемые параметры (для Qwen 3.5 с Reasoning)
@@ -51,7 +51,7 @@ cmake --build build --config Release
 ```powershell
 .\build\bin\Release\llama-server.exe `
   --model ./models/qwen-3.5.gguf `
-  --port 1234 `
+  --port 8080 `
   --host 127.0.0.1 `
   --n-ctx 8192 `
   --n-thread 8 `
@@ -68,7 +68,7 @@ cmake --build build --config Release
 | Параметр | Значение | Описание |
 |----------|----------|----------|
 | `--model` | путь к файлу | Путь к модели в формате GGUF |
-| `--port` | 1234 | Порт для API (обязательно 1234) |
+| `--port` | 8080 | Порт для API (обязательно 8080) |
 | `--host` | 127.0.0.1 | Хост для прослушивания |
 | `--n-ctx` | 8192 | Размер контекстного окна (увеличено для Reasoning) |
 | `--n-thread` | 8 | Количество CPU потоков |
@@ -82,7 +82,7 @@ cmake --build build --config Release
 ```powershell
 .\build\bin\Release\llama-server.exe `
   --model ./models/qwen-3.5.gguf `
-  --port 1234 `
+  --port 8080 `
   --n-ctx 8192 `
   --n-thread 8 `
   --mlock
@@ -97,7 +97,7 @@ cmake --build build --config Release
 ```powershell
 .\build\bin\Release\llama-server.exe `
   --model ./models/qwen-3.5.gguf `
-  --port 1234 `
+  --port 8080 `
   --n-gpu-layers 999 `
   --tensor-split 0,1 `
   --max-tensor-sizes 1024:2048
@@ -109,21 +109,21 @@ cmake --build build --config Release
 
 ```powershell
 # Запуск в фоне
-Start-Process -NoNewWindow .\build\bin\Release\llama-server.exe -ArgumentList "--model", ".\models\qwen-3.5.gguf", "--port", "1234"
+Start-Process -NoNewWindow .\build\bin\Release\llama-server.exe -ArgumentList "--model", ".\models\qwen-3.5.gguf", "--port", "8080"
 
 # Или использовать nssm для управления как службой
-nssm install llama-cpp "C:\path\to\llama-server.exe" "--model" "C:\models\model.gguf" "--port" "1234"
+nssm install llama-cpp "C:\path\to\llama-server.exe" "--model" "C:\models\model.gguf" "--port" "8080"
 ```
 
 ### Linux/macOS
 
 ```bash
 # Запуск в фоне с nohup
-nohup ./llama-server --model ./models/qwen-3.5.gguf --port 1234 &
+nohup ./llama-server --model ./models/qwen-3.5.gguf --port 8080 &
 
 # Или использовать screen/tmux
 tmux new -s llama-cpp
-./llama-server --model ./models/qwen-3.5.gguf --port 1234
+./llama-server --model ./models/qwen-3.5.gguf --port 8080
 # Ctrl+B, затем D для отключения
 ```
 
@@ -132,7 +132,7 @@ tmux new -s llama-cpp
 ### 1. Проверка здоровья
 
 ```powershell
-curl http://localhost:1234/v1/health
+curl http://localhost:8080/v1/health
 ```
 
 Ожидаемый ответ:
@@ -145,7 +145,7 @@ curl http://localhost:1234/v1/health
 ### 2. Получение списка моделей
 
 ```powershell
-curl http://localhost:1234/v1/models
+curl http://localhost:8080/v1/models
 ```
 
 Ожидаемый ответ:
@@ -165,7 +165,7 @@ curl http://localhost:1234/v1/models
 ### 3. Тестовый чат-запрос
 
 ```powershell
-curl http://localhost:1234/v1/chat/completions `
+curl http://localhost:8080/v1/chat/completions `
   -H "Content-Type: application/json" `
   -d '{
     "model": "qwen-3.5",
@@ -208,7 +208,7 @@ curl http://localhost:1234/v1/chat/completions `
 ### 1. Проверьте `.env` файл в `server/`
 
 ```env
-LLM_BASE_URL=http://localhost:1234/v1
+LLM_BASE_URL=http://localhost:8080/v1
 LLM_MODEL=qwen-3.5
 LLM_API_KEY=local-model-key
 ```
@@ -217,7 +217,7 @@ LLM_API_KEY=local-model-key
 
 ```powershell
 # Проверка порта
-netstat -ano | findstr :1234
+netstat -ano | findstr :8080
 ```
 
 ### 3. Перезапустите сервер HomeTavern
@@ -239,7 +239,7 @@ npm run server
 ### Ошибка: "Connection refused"
 
 - Убедитесь, что llama.cpp запущен
-- Проверьте, что порт 1234 свободен
+- Проверьте, что порт 8080 свободен
 - Проверьте брандмауэр
 
 ### Ошибка: "Model not found"

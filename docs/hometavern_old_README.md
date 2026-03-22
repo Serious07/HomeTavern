@@ -1,4 +1,4 @@
-# HomeTavern V5
+# HomeTavern
 
 AI-powered role-playing companion application. Создавайте персонажей, ведите диалоги с ИИ и погружайтесь в увлекательные ролевые приключения.
 
@@ -343,7 +343,7 @@ npm start
 
 ### Token Usage Tracking (Context Monitoring)
 
-HomeTavern V5 включает встроенный мониторинг использования токенов контекста llama.cpp.
+HomeTavern включает встроенный мониторинг использования токенов контекста llama.cpp.
 
 **API Endpoints:**
 | Метод | Endpoint | Описание |
@@ -516,7 +516,7 @@ start.bat
 
 ## Smart History Compression
 
-HomeTavern V5 includes an advanced "Smart History Compression" feature that automatically summarizes long conversation histories to save token usage when approaching context limits.
+HomeTavern includes an advanced "Smart History Compression" feature that automatically summarizes long conversation histories to save token usage when approaching context limits.
 
 ### How It Works
 

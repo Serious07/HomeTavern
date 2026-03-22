@@ -1,7 +1,7 @@
 {
   "name": "hometavern-v5-server",
   "version": "1.0.0",
-  "description": "HomeTavern V5 Backend Server",
+  "description": "HomeTavern Backend Server",
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",

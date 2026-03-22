@@ -38,7 +38,7 @@ app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 // Health check route
 app.get('/api/health', (req: Request, res: Response) => {
-  res.json({ status: 'ok', message: 'HomeTavern V5 Server is running' });
+  res.json({ status: 'ok', message: 'HomeTavern Server is running' });
 });
 
 // Auth routes
