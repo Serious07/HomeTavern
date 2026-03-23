@@ -132,10 +132,9 @@ const MessageItem = memo(({
 
   const handleCopy = () => {
     let textToCopy = message.content;
-    if (message.role === 'assistant' && message.translated_content) {
+    if (message.translated_content) {
+      // showOriginal = true → копируем оригинал, false → копируем перевод
       textToCopy = showOriginal ? message.content : message.translated_content;
-    } else if (message.role === 'user' && message.translated_content) {
-      textToCopy = showOriginal ? message.translated_content : message.content;
     }
     
     navigator.clipboard.writeText(textToCopy).then(() => {
