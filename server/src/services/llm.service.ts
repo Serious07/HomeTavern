@@ -432,7 +432,7 @@ export class LLMService {
         messages: messages,
         stream: true,
         temperature: 0.7,
-        max_tokens: 999999, // Увеличено для поддержки длинных ответов с Reasoning
+        max_tokens: 64000, // Установлено для совместимости с OpenRouter (max 131072 контекст)
       });
 
       // Обрабатываем поток
