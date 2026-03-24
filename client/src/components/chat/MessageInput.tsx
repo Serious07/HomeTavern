@@ -26,16 +26,15 @@ const MessageInput: React.FC<MessageInputProps> = ({
 }) => {
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const resizeTimeoutRef = useRef<number | null>(null);
-  const lastHeightRef = useRef<number>(0);
 
   // Debounced авто-ресайз textarea
-  const autoResize = useCallback((textarea: HTMLTextAreaElement, _newValue: string) => {
+  const autoResize = useCallback((textarea: HTMLTextAreaElement) => {
     // Очищаем предыдущий таймаут
     if (resizeTimeoutRef.current) {
       clearTimeout(resizeTimeoutRef.current);
     }
 
-    // Откладываем ресайз на 16ms (1 кадр при 60fps)
+    // Откладываем ресайз на 30ms для плавности
     resizeTimeoutRef.current = setTimeout(() => {
       if (!textarea) return;
 
@@ -43,16 +42,19 @@ const MessageInput: React.FC<MessageInputProps> = ({
       textarea.style.height = 'auto';
 
       // Вычисляем новую высоту на основе scrollHeight
-      const maxHeight = 200;
+      const maxHeight = 400;
       const newHeight = textarea.scrollHeight;
-
-      // Избегаем лишних манипуляций DOM если высота не изменилась
-      if (newHeight !== lastHeightRef.current) {
-        lastHeightRef.current = newHeight;
-        textarea.style.height = `${Math.min(newHeight, maxHeight)}px`;
-      }
-    }, 16);
+      textarea.style.height = `${Math.min(newHeight, maxHeight)}px`;
+    }, 30);
   }, []);
+
+  // Автоматический ресайз при изменении value (для корректного отображения multiline)
+  useEffect(() => {
+    const textarea = messageInputRef.current;
+    if (textarea) {
+      autoResize(textarea);
+    }
+  }, [value, autoResize]);
 
   // Очистка таймаута при размонтировании
   useEffect(() => {
@@ -68,7 +70,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newValue = e.target.value;
       onChange(newValue);
-      autoResize(e.target, newValue);
+      autoResize(e.target);
     },
     [onChange, autoResize]
   );
@@ -93,9 +95,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         className="w-full bg-gray-700/30 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 resize-none overflow-hidden"
-        style={{ 
-          minHeight: '40px', 
-          maxHeight: '200px',
+        style={{
+          minHeight: '40px',
+          maxHeight: '400px',
           lineHeight: '20px',
         }}
         disabled={disabled}
