@@ -133,14 +133,71 @@ const MessageItem = memo(({
   const handleCopy = () => {
     let textToCopy = message.content;
     if (message.translated_content) {
-      // showOriginal = true → копируем оригинал, false → копируем перевод
-      textToCopy = showOriginal ? message.content : message.translated_content;
+      // Для assistant: showOriginal = true → копируем content, false → translated_content
+      // Для user: showOriginal = true → копируем translated_content, false → content
+      if (message.role === 'assistant') {
+        textToCopy = showOriginal ? message.content : message.translated_content;
+      } else {
+        textToCopy = showOriginal ? message.translated_content : message.content;
+      }
     }
     
-    navigator.clipboard.writeText(textToCopy).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+    // Функция для получения времени показа индикатора в зависимости от устройства
+    const getDisplayDuration = () => {
+      const mediaQuery = window.matchMedia('(pointer: coarse)');
+      return mediaQuery.matches ? 3000 : 2000;
+    };
+
+    // Функция для попытки копирования через clipboard API
+    const tryClipboardCopy = (): Promise<boolean> => {
+      return navigator.clipboard.writeText(textToCopy)
+        .then(() => true)
+        .catch(() => false);
+    };
+
+    // Fallback через textarea и execCommand
+    const fallbackCopy = (): boolean => {
+      const textarea = document.createElement('textarea');
+      textarea.value = textToCopy;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      
+      try {
+        const success = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return success;
+      } catch (err) {
+        document.body.removeChild(textarea);
+        return false;
+      }
+    };
+
+    // Основная логика копирования с обработкой ошибок
+    const performCopy = async () => {
+      let success = false;
+      
+      // Пытаемся clipboard API
+      success = await tryClipboardCopy();
+      
+      // Если не сработало, пробуем fallback
+      if (!success) {
+        success = fallbackCopy();
+      }
+      
+      if (success) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), getDisplayDuration());
+        
+        // Вибрация при успешном копировании (только на мобильных)
+        if (navigator.vibrate) {
+          navigator.vibrate(50);
+        }
+      }
+    };
+
+    performCopy();
   };
 
   const getTextToRender = (): string => {
@@ -331,7 +388,7 @@ const MessageItem = memo(({
                   e.stopPropagation();
                   handleCopy();
                 }}
-                className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition"
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition active:scale-110"
                 title="Копировать"
               >
                 {copied ? (
