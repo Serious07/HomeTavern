@@ -7,6 +7,7 @@ import { translationService } from '../services/translation.service';
 import { messageRepository } from '../repositories/message.repository';
 import { chatRepository } from '../repositories/chat.repository';
 import { Message } from '../types';
+import { stripThoughtTags } from '../utils/text';
 
 const router = Router();
 
@@ -161,6 +162,9 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     const totalTokenCount = contentTokenCount + reasoningTokenCount;
     const tokensPerSec = durationSecs > 0 ? totalTokenCount / durationSecs : 0;
     console.log(`[ChatsRoute] Generation stats: ${contentTokenCount} content + ${reasoningTokenCount} reasoning = ${totalTokenCount} tokens, ${durationSecs.toFixed(2)}s, ${tokensPerSec.toFixed(2)} tokens/sec`);
+
+    // 7.5. Удаляем теги <thought> и их содержимое из ответа
+    fullContent = stripThoughtTags(fullContent);
 
     // 8. Переводим ответ на русский (если оригинал на английском)
     const responseLang = await translationService.detectLanguage(fullContent);
@@ -406,6 +410,9 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
     const genTotalTokenCount = genContentTokenCount + genReasoningTokenCount;
     const genTokensPerSec = genDurationSecs > 0 ? genTotalTokenCount / genDurationSecs : 0;
     console.log(`[ChatsRoute] Generation stats: ${genContentTokenCount} content + ${genReasoningTokenCount} reasoning = ${genTotalTokenCount} tokens, ${genDurationSecs.toFixed(2)}s, ${genTokensPerSec.toFixed(2)} tokens/sec`);
+
+    // 7.5. Удаляем теги <thought> и их содержимое из ответа
+    fullContent = stripThoughtTags(fullContent);
 
     // 8. Переводим ответ на русский (если оригинал на английском)
     const responseLang = await translationService.detectLanguage(fullContent);
