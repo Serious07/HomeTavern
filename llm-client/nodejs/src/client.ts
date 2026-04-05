@@ -22,7 +22,7 @@ export class LLMClient {
     constructor(options: ClientOptions) {
         this.baseURL = options.baseURL.replace(/\/$/, '');
         this.apiKey = options.apiKey;
-        this.timeout = options.timeout ?? 60000;
+        this.timeout = options.timeout ?? 900000; // 15 minutes
     }
 
     /**

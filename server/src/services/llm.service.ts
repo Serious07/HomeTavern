@@ -311,9 +311,10 @@ export class LLMService {
       // Динамический импорт llm-client
       const { LLMClient } = require('llm-client');
       this.client = new LLMClient({
-        baseURL: this.baseURL,
-        apiKey: this.apiKey,
-      });
+         baseURL: this.baseURL,
+         apiKey: this.apiKey,
+         timeout: 900000,
+       });
       console.log('[LLMService] LLMClient initialized successfully');
     } catch (error) {
       console.warn('llm-client not installed. Using fallback implementation.');
@@ -372,7 +373,7 @@ export class LLMService {
     chatId: number,
     userMessage: string
   ): AsyncGenerator<StreamChunk> {
-    const timeoutMs = 60000; // 60 секунд таймаут
+    const timeoutMs = 900000; // 15 минут таймаут
     const startTime = Date.now();
     let contentTokenCount = 0;
     let reasoningTokenCount = 0;

@@ -320,6 +320,7 @@ ${blockText}
       const client = new LLMClient({
         baseURL: process.env.LLM_BASE_URL || 'http://localhost:1234/v1',
         apiKey: process.env.LLM_API_KEY || 'local-model-key',
+        timeout: 900000,
       });
 
       const response = await client.chatCompletionsCreate({
