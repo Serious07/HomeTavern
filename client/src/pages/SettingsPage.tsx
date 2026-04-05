@@ -1,8 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../contexts/AuthContext';
 import { api } from '../services/api';
 import AppHeader from '../components/common/AppHeader';
+import { getVisibleMessageLimit, setVisibleMessageLimit } from '../components/chat/MessageList';
 
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -10,7 +11,23 @@ const SettingsPage: React.FC = () => {
   
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   
-  // State for password change
+  const [visibleMessageLimit, setVisibleMessageLimitState] = useState(getVisibleMessageLimit());
+  const [limitInput, setLimitInput] = useState(String(getVisibleMessageLimit()));
+  
+  useEffect(() => {
+    setLimitInput(String(visibleMessageLimit));
+  }, [visibleMessageLimit]);
+  
+  const handleSaveLimit = useCallback(() => {
+    const parsed = parseInt(limitInput, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      setVisibleMessageLimit(parsed);
+      setVisibleMessageLimitState(parsed);
+    } else {
+      setLimitInput(String(visibleMessageLimit));
+    }
+  }, [limitInput, visibleMessageLimit]);
+  
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -93,6 +110,82 @@ const SettingsPage: React.FC = () => {
                     {user?.id ?? '-'}
                   </p>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Display settings */}
+          <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
+            <h2 className="text-xl font-bold text-white mb-6">Отображение</h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="visibleLimit" className="block text-sm font-medium text-gray-300 mb-2">
+                  Лимит отображаемых сообщений
+                </label>
+                <p className="text-xs text-gray-400 mb-3">
+                  Оптимизация производительности: на экране отображается только указанное количество сообщений одновременно.
+                  Вся история сохраняется и доступна при прокрутке.
+                </p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    id="visibleLimit"
+                    value={limitInput}
+                    onChange={(e) => setLimitInput(e.target.value)}
+                    min="10"
+                    max="500"
+                    className="w-32 px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500"
+                    placeholder="50"
+                  />
+                  <button
+                    onClick={handleSaveLimit}
+                    className="py-3 px-6 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold text-white transition"
+                  >
+                    Применить
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Текущий лимит: {visibleMessageLimit} сообщений
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Display settings */}
+          <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
+            <h2 className="text-xl font-bold text-white mb-6">Отображение</h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="visibleLimit" className="block text-sm font-medium text-gray-300 mb-2">
+                  Лимит отображаемых сообщений
+                </label>
+                <p className="text-xs text-gray-400 mb-3">
+                  Оптимизация производительности: на экране отображается только указанное количество сообщений одновременно.
+                  Вся история сохраняется и доступна при прокрутке.
+                </p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    id="visibleLimit"
+                    value={limitInput}
+                    onChange={(e) => setLimitInput(e.target.value)}
+                    min="10"
+                    max="500"
+                    className="w-32 px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500"
+                    placeholder="50"
+                  />
+                  <button
+                    onClick={handleSaveLimit}
+                    className="py-3 px-6 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold text-white transition"
+                  >
+                    Применить
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Текущий лимит: {visibleMessageLimit} сообщений
+                </p>
               </div>
             </div>
           </div>

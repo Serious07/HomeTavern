@@ -1,9 +1,25 @@
-import React, { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import React, { memo, useMemo, useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { Message } from '../../types';
 import { MarkdownRenderer } from '../common/MarkdownRenderer';
 import { MessageStatsPanel } from './MessageStatsPanel';
 import { ChatBlockWithParsedIds } from '../../types/compression';
 import { ChatBlock } from './ChatBlock';
+
+const VISIBLE_LIMIT_STORAGE_KEY = 'hometavern_visible_message_limit';
+const DEFAULT_VISIBLE_LIMIT = 50;
+
+export function getVisibleMessageLimit(): number {
+  const stored = localStorage.getItem(VISIBLE_LIMIT_STORAGE_KEY);
+  if (stored) {
+    const parsed = parseInt(stored, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_VISIBLE_LIMIT;
+}
+
+export function setVisibleMessageLimit(value: number): void {
+  localStorage.setItem(VISIBLE_LIMIT_STORAGE_KEY, String(value));
+}
 
 interface ExpandedBlockMessages {
   blockId: number;
@@ -19,24 +35,20 @@ interface MessageListProps {
   onToggleThinking?: (messageId: number) => void;
   translatingMessageId?: number | null;
   onTranslate?: (messageId: number) => void;
-  // Новые пропсы для сжатия истории
   blocks?: ChatBlockWithParsedIds[];
   onEditBlock?: (blockId: number, updates: { title?: string; summary?: string }) => void;
   onToggleBlockCompression?: (blockId: number, isCompressed: boolean) => void;
   onDeleteBlock?: (blockId: number) => void;
   onExpandBlock?: (block: ChatBlockWithParsedIds) => void;
   onBlockUpdate?: (blockId: number, updatedBlock: ChatBlockWithParsedIds) => void;
-  // Для ручного выделения сообщений
   isSelectionMode?: boolean;
   selectionStart?: number | null;
   selectionEnd?: number | null;
   onMessageSelectionClick?: (messageId: number) => void;
   onCancelSelection?: () => void;
+  visibleLimit?: number;
 }
 
-/**
- * Форматирование времени сообщения
- */
 const formatMessageTime = (dateString: string): string => {
   const date = new Date(dateString);
   return date.toLocaleTimeString('ru-RU', {
@@ -46,10 +58,6 @@ const formatMessageTime = (dateString: string): string => {
   });
 };
 
-/**
- * Мемоизированный компонент для отображения одного сообщения
- * Используется внутри виртуального списка
- */
 const MessageItem = memo(({
   message,
   onRegenerate,
@@ -88,7 +96,6 @@ const MessageItem = memo(({
   const isUser = message.role === 'user';
   const isEditing = editingMessageId === message.id;
 
-  // Для system сообщений
   if (isSystem) {
     return (
       <div className="flex justify-center py-2">
@@ -112,8 +119,6 @@ const MessageItem = memo(({
 
   const handleEditSave = () => {
     if (editingMessageId && onEdit) {
-      // Передаем и content, и translated_content для двунаправленного перевода
-      // Проверяем, что translated_content не null
       const translatedContent = message.translated_content !== null ? message.translated_content : undefined;
       onEdit(editingMessageId, editContent, translatedContent);
       setEditingMessageId(null);
@@ -133,8 +138,6 @@ const MessageItem = memo(({
   const handleCopy = () => {
     let textToCopy = message.content;
     if (message.translated_content) {
-      // Для assistant: showOriginal = true → копируем content, false → translated_content
-      // Для user: showOriginal = true → копируем translated_content, false → content
       if (message.role === 'assistant') {
         textToCopy = showOriginal ? message.content : message.translated_content;
       } else {
@@ -142,20 +145,17 @@ const MessageItem = memo(({
       }
     }
     
-    // Функция для получения времени показа индикатора в зависимости от устройства
     const getDisplayDuration = () => {
       const mediaQuery = window.matchMedia('(pointer: coarse)');
       return mediaQuery.matches ? 3000 : 2000;
     };
 
-    // Функция для попытки копирования через clipboard API
     const tryClipboardCopy = (): Promise<boolean> => {
       return navigator.clipboard.writeText(textToCopy)
         .then(() => true)
         .catch(() => false);
     };
 
-    // Fallback через textarea и execCommand
     const fallbackCopy = (): boolean => {
       const textarea = document.createElement('textarea');
       textarea.value = textToCopy;
@@ -174,23 +174,15 @@ const MessageItem = memo(({
       }
     };
 
-    // Основная логика копирования с обработкой ошибок
     const performCopy = async () => {
       let success = false;
-      
-      // Пытаемся clipboard API
       success = await tryClipboardCopy();
-      
-      // Если не сработало, пробуем fallback
       if (!success) {
         success = fallbackCopy();
       }
-      
       if (success) {
         setCopied(true);
         setTimeout(() => setCopied(false), getDisplayDuration());
-        
-        // Вибрация при успешном копировании (только на мобильных)
         if (navigator.vibrate) {
           navigator.vibrate(50);
         }
@@ -228,7 +220,6 @@ const MessageItem = memo(({
           isUser ? 'order-1' : 'order-2'
         }`}
       >
-        {/* Message bubble */}
         <div
           className={`rounded-2xl px-4 py-3 ${
             isUser
@@ -236,7 +227,6 @@ const MessageItem = memo(({
               : 'bg-gray-700/80 text-white rounded-bl-md'
           }`}
         >
-          {/* Thinking/Reasoning section */}
           {message.reasoning_content && (
             <div className="mb-3 pb-3 border-b border-gray-600">
               <button
@@ -269,7 +259,6 @@ const MessageItem = memo(({
             </div>
           )}
 
-          {/* Message content */}
           {isEditing ? (
             <div className="space-y-2">
               <textarea
@@ -300,7 +289,6 @@ const MessageItem = memo(({
           )}
         </div>
 
-        {/* Message stats panel - отображается под сообщением assistant */}
         {message.role === 'assistant' && (
           <MessageStatsPanel
             message={message}
@@ -308,7 +296,6 @@ const MessageItem = memo(({
           />
         )}
 
-        {/* Message metadata and actions */}
         <div
           className={`flex items-center gap-2 mt-1 ${
             isUser ? 'flex-row-reverse' : 'flex-row'
@@ -318,15 +305,12 @@ const MessageItem = memo(({
             {formatMessageTime(message.created_at)}
           </span>
 
-          {/* Action buttons */}
           {!isEditing && (
             <div className="flex items-center gap-1">
-              {/* Индикатор перевода */}
               {message.role === 'assistant' && translatingMessageId === message.id && (
                 <span className="text-xs text-gray-400">Перевод...</span>
               )}
               
-              {/* Кнопка переключения оригинал/перевод для assistant сообщений с переводом */}
               {message.role === 'assistant' && message.translated_content && (
                 <button
                   onClick={(e) => {
@@ -340,7 +324,6 @@ const MessageItem = memo(({
                 </button>
               )}
               
-              {/* Кнопка перевода для assistant сообщений без перевода */}
               {message.role === 'assistant' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
                 <button
                   onClick={(e) => {
@@ -354,7 +337,6 @@ const MessageItem = memo(({
                 </button>
               )}
               
-              {/* Кнопка переключения оригинал/перевод для user сообщений с переводом */}
               {message.role === 'user' && message.translated_content && (
                 <button
                   onClick={(e) => {
@@ -368,7 +350,6 @@ const MessageItem = memo(({
                 </button>
               )}
               
-              {/* Кнопка перевода для user сообщений без перевода */}
               {message.role === 'user' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
                 <button
                   onClick={(e) => {
@@ -382,7 +363,6 @@ const MessageItem = memo(({
                 </button>
               )}
               
-              {/* Кнопка копирования для всех сообщений */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -402,7 +382,6 @@ const MessageItem = memo(({
                 )}
               </button>
               
-              {/* Кнопка редактирования для user сообщений и всех сообщений assistant */}
               {(isUser || message.role === 'assistant') && onEdit && (
                 <button
                   onClick={(e) => {
@@ -418,7 +397,6 @@ const MessageItem = memo(({
                 </button>
               )}
               
-              {/* Кнопка перегенерации только для последнего сообщения assistant */}
               {onRegenerate && isLastAssistantMessage && (
                 <button
                   onClick={(e) => {
@@ -435,7 +413,6 @@ const MessageItem = memo(({
                 </button>
               )}
               
-              {/* Кнопка удаления */}
               {onDelete && (
                 <button
                   onClick={(e) => {
@@ -460,9 +437,12 @@ const MessageItem = memo(({
 
 MessageItem.displayName = 'MessageItem';
 
-/**
- * Компонент списка сообщений - поддерживает сжатые блоки
- */
+type RenderItem = 
+  | { type: 'block'; block: ChatBlockWithParsedIds; key: string }
+  | { type: 'message'; message: Message; key: string };
+
+const DEFAULT_ITEM_HEIGHT = 150;
+
 const MessageList: React.FC<MessageListProps> = ({
   messages,
   onRegenerate,
@@ -472,56 +452,45 @@ const MessageList: React.FC<MessageListProps> = ({
   onToggleThinking,
   translatingMessageId = null,
   onTranslate,
-  // Новые пропсы для сжатия
   blocks = [],
   onEditBlock,
   onToggleBlockCompression,
   onDeleteBlock,
   onExpandBlock,
   onBlockUpdate,
-  // Для ручного выделения
   isSelectionMode = false,
   selectionStart = null,
   selectionEnd = null,
   onMessageSelectionClick,
   onCancelSelection,
+  visibleLimit: visibleLimitProp,
 }) => {
-  // State для развернутых блоков
   const [expandedBlockMessages, setExpandedBlockMessages] = useState<ExpandedBlockMessages | null>(null);
   
-  // Ref для скролла к концу
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const heightCache = useRef<Map<string, number>>(new Map());
+  const resizeObservers = useRef<Map<string, ResizeObserver>>(new Map());
+  const isRestoringScroll = useRef(false);
+  const prevSpacerTop = useRef(0);
+  const scrollRafRef = useRef<number>(0);
+  const isScrolling = useRef(false);
+  const scrollEndTimer = useRef<ReturnType<typeof setTimeout>>(0);
   
-  // Эффект для автоматического скролла к концу при изменении сообщений
-  useEffect(() => {
-    // Функция скролла к концу с учетом динамического изменения контента
-    const scrollToBottom = () => {
-      if (messagesEndRef.current) {
-        // Используем scrollIntoView с block: 'end' чтобы скроллить к концу видимой области
-        // behavior: 'auto' для мгновенного скролла (важно для стриминга)
-        messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
-      }
-    };
-    
-    // Вызываем скролл с задержкой чтобы дать браузеру время на рендеринг
-    const timeoutId = setTimeout(scrollToBottom, 0);
-    return () => clearTimeout(timeoutId);
-  }, [messages, blocks, expandedBlockMessages]);
+  const visibleLimit = visibleLimitProp ?? getVisibleMessageLimit();
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [scrollPos, setScrollPos] = useState(0);
 
-  // Обработчик развертывания блока
   const handleExpandBlock = useCallback((block: ChatBlockWithParsedIds) => {
-    // Фильтруем сообщения, которые входят в этот блок
     const blockMessages = messages.filter(msg => block.original_message_ids.includes(msg.id));
     setExpandedBlockMessages({ blockId: block.id, messages: blockMessages });
-    // Вызываем внешний обработчик если есть
     onExpandBlock?.(block);
   }, [messages, onExpandBlock]);
 
-  // Сворачивание блока
   const handleCollapseBlock = useCallback(() => {
     setExpandedBlockMessages(null);
   }, []);
-  // Создаем маппинг message_id -> block для быстрого поиска
+
   const messageToBlock = useMemo(() => {
     const map = new Map<number, ChatBlockWithParsedIds>();
     for (const block of blocks) {
@@ -532,48 +501,205 @@ const MessageList: React.FC<MessageListProps> = ({
     return map;
   }, [blocks]);
 
-  // Строим список элементов для рендера (чередование блоков и сообщений)
   const renderItems = useMemo(() => {
-    const items: Array<{ type: 'block'; block: ChatBlockWithParsedIds } | { type: 'message'; message: Message }> = [];
+    const items: RenderItem[] = [];
     const processedMessageIds = new Set<number>();
 
-    // Проходим по сообщениям в порядке created_at
     for (const msg of messages) {
       const block = messageToBlock.get(msg.id);
 
       if (block) {
-        // Если это start_message_id блока, добавляем блок
         if (msg.id === block.start_message_id) {
-          items.push({ type: 'block', block });
+          items.push({ type: 'block', block, key: `block-${block.id}` });
         }
-        // Помечаем сообщения блока как обработанные
         block.original_message_ids.forEach(id => processedMessageIds.add(id));
       } else {
-        // Сообщение не в блоке - добавляем как обычно
-        items.push({ type: 'message', message: msg });
+        items.push({ type: 'message', message: msg, key: `msg-${msg.id}` });
       }
     }
 
     return items;
   }, [messages, messageToBlock]);
 
-  // Обработка клика по сообщению в режиме выделения
+  const totalItemCount = renderItems.length;
+
+  const getItemHeight = useCallback((index: number): number => {
+    if (index < 0 || index >= renderItems.length) return DEFAULT_ITEM_HEIGHT;
+    const key = renderItems[index].key;
+    const cached = heightCache.current.get(key);
+    return (cached && cached > 0) ? cached : DEFAULT_ITEM_HEIGHT;
+  }, [renderItems]);
+
+  const getTotalHeight = useCallback((): number => {
+    let total = 0;
+    for (let i = 0; i < renderItems.length; i++) {
+      total += getItemHeight(i);
+    }
+    return total;
+  }, [renderItems, getItemHeight]);
+
+  const getOffsetForIndex = useCallback((index: number): number => {
+    let offset = 0;
+    for (let i = 0; i < index; i++) {
+      offset += getItemHeight(i);
+    }
+    return offset;
+  }, [getItemHeight]);
+
+  const measureItem = useCallback((index: number, element: HTMLDivElement | null) => {
+    const key = renderItems[index]?.key;
+    if (!key || !element) return;
+    
+    const existingObserver = resizeObservers.current.get(key);
+    if (existingObserver) {
+      existingObserver.disconnect();
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const newHeight = entry.contentRect.height;
+        const cachedHeight = heightCache.current.get(key);
+        if (Math.abs((cachedHeight ?? 0) - newHeight) > 1) {
+          heightCache.current.set(key, newHeight);
+          setScrollPos(n => n + 1);
+        }
+      }
+    });
+
+    observer.observe(element);
+    resizeObservers.current.set(key, observer);
+
+    const currentHeight = element.offsetHeight;
+    if (currentHeight > 0) {
+      heightCache.current.set(key, currentHeight);
+    }
+  }, [renderItems]);
+
+  useEffect(() => {
+    return () => {
+      resizeObservers.current.forEach((observer) => observer.disconnect());
+      resizeObservers.current.clear();
+    };
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    isScrolling.current = true;
+    clearTimeout(scrollEndTimer.current);
+    
+    if (scrollRafRef.current) return;
+    
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      const container = scrollContainerRef.current;
+      if (container) {
+        setScrollPos(container.scrollTop);
+      }
+    });
+
+    scrollEndTimer.current = setTimeout(() => {
+      isScrolling.current = false;
+    }, 150);
+  }, []);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+      clearTimeout(scrollEndTimer.current);
+    };
+  }, [handleScroll]);
+
+  const visibleItems = useMemo(() => {
+    if (totalItemCount === 0) {
+      return { startIndex: 0, endIndex: 0, items: [] as Array<{ item: RenderItem; index: number }>, totalHeight: 0, spacerTop: 0, spacerBottom: 0 };
+    }
+
+    const container = scrollContainerRef.current;
+    const scrollTop = container?.scrollTop ?? scrollPos;
+
+    let startIndex = 0;
+    let endIndex = totalItemCount;
+
+    if (totalItemCount > visibleLimit) {
+      let low = 0;
+      let high = totalItemCount - 1;
+      
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        const offset = getOffsetForIndex(mid);
+        if (offset < scrollTop) {
+          low = mid + 1;
+        } else {
+          high = mid;
+        }
+      }
+      
+      let firstVisibleIndex = Math.max(0, low - 1);
+      
+      startIndex = Math.max(0, firstVisibleIndex - Math.floor(visibleLimit / 2));
+      endIndex = Math.min(totalItemCount, startIndex + visibleLimit);
+      
+      if (endIndex === totalItemCount) {
+        startIndex = Math.max(0, endIndex - visibleLimit);
+      }
+    }
+
+    const spacerTop = getOffsetForIndex(startIndex);
+    const spacerBottom = getTotalHeight() - getOffsetForIndex(endIndex);
+
+    const items: Array<{ item: RenderItem; index: number }> = [];
+    for (let i = startIndex; i < endIndex; i++) {
+      items.push({ item: renderItems[i], index: i });
+    }
+
+    return { startIndex, endIndex, items, totalHeight: getTotalHeight(), spacerTop, spacerBottom };
+  }, [renderItems, totalItemCount, visibleLimit, getOffsetForIndex, getTotalHeight, scrollPos]);
+
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const spacerDiff = visibleItems.spacerTop - prevSpacerTop.current;
+    if (spacerDiff !== 0 && !isRestoringScroll.current) {
+      container.scrollTop += spacerDiff;
+    }
+    prevSpacerTop.current = visibleItems.spacerTop;
+  }, [visibleItems.spacerTop]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    isRestoringScroll.current = true;
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+      isRestoringScroll.current = false;
+    });
+  }, [messages.length, blocks.length]);
+
+  const lastAssistantIndex = useMemo(() => {
+    const indices = renderItems
+      .map((item, idx) => item.type === 'message' && item.message.role === 'assistant' ? idx : -1)
+      .filter(idx => idx !== -1);
+    return indices.length > 0 ? indices[indices.length - 1] : -1;
+  }, [renderItems]);
+
   const handleSelectionClick = (messageId: number) => {
     if (!onMessageSelectionClick) return;
     
     if (selectionStart === null) {
-      // Первое выделение
       onMessageSelectionClick(messageId);
     } else if (messageId > selectionStart) {
-      // Второе выделение (конец диапазона)
       onMessageSelectionClick(messageId);
     } else {
-      // Обновляем начало выделения
       onMessageSelectionClick(messageId);
     }
   };
 
-  // Вычисляем количество сообщений в выделении
   const selectionCount = useMemo(() => {
     if (selectionStart === null || selectionEnd === null) return 0;
     const start = Math.min(selectionStart, selectionEnd);
@@ -581,101 +707,119 @@ const MessageList: React.FC<MessageListProps> = ({
     return messages.filter(m => m.id >= start && m.id <= end).length;
   }, [selectionStart, selectionEnd, messages]);
 
+  const renderItemContent = (item: RenderItem, index: number) => {
+    if (item.type === 'block') {
+      const isExpanded = expandedBlockMessages && expandedBlockMessages.blockId === item.block.id;
+      return (
+        <React.Fragment key={item.key}>
+          <ChatBlock
+            block={item.block}
+            onEdit={(blockId, updates) => onEditBlock?.(blockId, updates)}
+            onToggleCompression={(blockId, isCompressed) => onToggleBlockCompression?.(blockId, isCompressed)}
+            onDelete={(blockId) => onDeleteBlock?.(blockId)}
+            onExpand={handleExpandBlock}
+            isExpanded={!!isExpanded}
+            onBlockUpdate={onBlockUpdate}
+          />
+          {isExpanded && (
+            <div className="ml-4 border-l-2 border-cyan-700 pl-4 py-2 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-cyan-400 font-medium">Оригинальные сообщения ({expandedBlockMessages.messages.length})</span>
+                <button
+                  onClick={handleCollapseBlock}
+                  className="text-xs text-cyan-400 hover:text-cyan-300 transition"
+                >
+                  ▲ Свернуть
+                </button>
+              </div>
+              <div className="space-y-2">
+                {expandedBlockMessages.messages.map((msg) => (
+                  <MessageItem
+                    key={msg.id}
+                    message={msg}
+                    onRegenerate={onRegenerate}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    showThinking={showThinking}
+                    onToggleThinking={onToggleThinking}
+                    translatingMessageId={translatingMessageId}
+                    onTranslate={onTranslate}
+                    isLastAssistantMessage={false}
+                    messageIndex={index}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </React.Fragment>
+      );
+    } else {
+      const isLastAssistantMessage =
+        item.message.role === 'assistant' &&
+        index === lastAssistantIndex;
+      
+      const isSelected = isSelectionMode &&
+        selectionStart !== null &&
+        selectionEnd !== null &&
+        item.message.id >= Math.min(selectionStart, selectionEnd) &&
+        item.message.id <= Math.max(selectionStart, selectionEnd);
+
+      return (
+        <MessageItem
+          message={item.message}
+          onRegenerate={onRegenerate}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          showThinking={showThinking}
+          onToggleThinking={onToggleThinking}
+          translatingMessageId={translatingMessageId}
+          onTranslate={onTranslate}
+          isLastAssistantMessage={isLastAssistantMessage}
+          messageIndex={index}
+          isSelectionMode={isSelectionMode}
+          isSelected={isSelected}
+          onSelectionClick={handleSelectionClick}
+        />
+      );
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full">
-      {/* Список сообщений и блоков - скроллируемая область */}
-      <div className="flex-1 overflow-y-auto px-4 pt-4 pb-4">
-        <div className="space-y-2">
-          {renderItems.map((item, index) => {
-            if (item.type === 'block') {
-              const isExpanded = expandedBlockMessages && expandedBlockMessages.blockId === item.block.id;
-              return (
-                <React.Fragment key={`block-fragment-${item.block.id}`}>
-                  <ChatBlock
-                      block={item.block}
-                      onEdit={(blockId, updates) => onEditBlock?.(blockId, updates)}
-                      onToggleCompression={(blockId, isCompressed) => onToggleBlockCompression?.(blockId, isCompressed)}
-                      onDelete={(blockId) => onDeleteBlock?.(blockId)}
-                      onExpand={handleExpandBlock}
-                      isExpanded={!!isExpanded}
-                      onBlockUpdate={onBlockUpdate}
-                    />
-                  {/* Отображение развернутых сообщений блока */}
-                  {isExpanded && (
-                    <div className="ml-4 border-l-2 border-cyan-700 pl-4 py-2 mb-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs text-cyan-400 font-medium">Оригинальные сообщения ({expandedBlockMessages.messages.length})</span>
-                        <button
-                          onClick={handleCollapseBlock}
-                          className="text-xs text-cyan-400 hover:text-cyan-300 transition"
-                        >
-                          ▲ Свернуть
-                        </button>
-                      </div>
-                      <div className="space-y-2">
-                        {expandedBlockMessages.messages.map((msg) => (
-                          <MessageItem
-                            key={msg.id}
-                            message={msg}
-                            onRegenerate={onRegenerate}
-                            onEdit={onEdit}
-                            onDelete={onDelete}
-                            showThinking={showThinking}
-                            onToggleThinking={onToggleThinking}
-                            translatingMessageId={translatingMessageId}
-                            onTranslate={onTranslate}
-                            isLastAssistantMessage={false}
-                            messageIndex={index}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </React.Fragment>
-               );
-           } else {
-               // Находим последнее сообщение assistant в renderItems
-               const lastAssistantIndex = renderItems.map((i, idx) =>
-                 i.type === 'message' && i.message.role === 'assistant' ? idx : -1
-               ).filter(idx => idx !== -1).pop();
-               
-               const isLastAssistantMessage =
-                 item.message.role === 'assistant' &&
-                 index === lastAssistantIndex;
-               
-               // Проверяем, выделено ли сообщение
-               const isSelected = isSelectionMode &&
-                 selectionStart !== null &&
-                 selectionEnd !== null &&
-                 item.message.id >= Math.min(selectionStart, selectionEnd) &&
-                 item.message.id <= Math.max(selectionStart, selectionEnd);
-
-               return (
-                 <MessageItem
-                   key={item.message.id}
-                   message={item.message}
-                   onRegenerate={onRegenerate}
-                   onEdit={onEdit}
-                   onDelete={onDelete}
-                   showThinking={showThinking}
-                   onToggleThinking={onToggleThinking}
-                   translatingMessageId={translatingMessageId}
-                   onTranslate={onTranslate}
-                   isLastAssistantMessage={isLastAssistantMessage}
-                   messageIndex={index}
-                   isSelectionMode={isSelectionMode}
-                   isSelected={isSelected}
-                   onSelectionClick={handleSelectionClick}
-                 />
-               );
-             }
-           })}
+      <div 
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto px-4 pt-4 pb-4"
+      >
+        <div 
+          className="relative"
+          style={{ height: `${visibleItems.totalHeight}px` }}
+        >
+          {visibleItems.spacerTop > 0 && (
+            <div 
+              style={{ height: `${visibleItems.spacerTop}px` }}
+              aria-hidden="true"
+            />
+          )}
+          
+          <div className="space-y-2">
+            {visibleItems.items.map(({ item, index }) => (
+              <div key={item.key} ref={(el) => measureItem(index, el)}>
+                {renderItemContent(item, index)}
+              </div>
+            ))}
+          </div>
+          
+          {visibleItems.spacerBottom > 0 && (
+            <div 
+              style={{ height: `${visibleItems.spacerBottom}px` }}
+              aria-hidden="true"
+            />
+          )}
+          
+          <div ref={messagesEndRef} />
         </div>
-        {/* Ref для скролла к концу - внутри скроллируемой области */}
-        <div ref={messagesEndRef} />
       </div>
 
-      {/* Тулбар выделения */}
       {isSelectionMode && (
         <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800 border border-cyan-700 rounded-lg shadow-xl p-4 z-40">
           <div className="flex items-center gap-4">
@@ -686,9 +830,8 @@ const MessageList: React.FC<MessageListProps> = ({
                 </div>
                 <button
                   onClick={() => {
-                    // Запуск сжатия выделенного диапазона
                     const end = Math.max(selectionStart, selectionEnd);
-                    onMessageSelectionClick?.(end); // Это вызовет сжатие
+                    onMessageSelectionClick?.(end);
                   }}
                   className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded transition"
                 >
