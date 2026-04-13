@@ -433,7 +433,7 @@ export class LLMService {
         messages: messages,
         stream: true,
         temperature: 0.7,
-        max_tokens: 64000, // Установлено для совместимости с OpenRouter (max 131072 контекст)
+        max_tokens: parseInt(process.env.LLM_MAX_TOKENS || '') || 64000, // Установлено для совместимости с OpenRouter (max 131072 контекст)
       });
 
       // Обрабатываем поток
@@ -566,7 +566,7 @@ export class LLMService {
       messages: messages,
       stream: false,
       temperature: 0.7,
-      max_tokens: 500,
+      max_tokens: parseInt(process.env.LLM_MAX_TOKENS || '') || 64000,
     });
 
     const content = response.choices?.[0]?.message?.content || '';
