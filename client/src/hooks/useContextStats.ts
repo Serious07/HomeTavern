@@ -111,7 +111,8 @@ export function useContextStats(
 
 /**
  * Hook для использования во время генерации сообщения
- * Обновляет статистику каждые 2 секунды
+ * НЕ выполняет синхронизацию во время генерации (чтобы избежать лишних API вызовов к llama.cpp)
+ * Статистика доступна только после завершения генерации
  */
 export function useContextStatsDuringGeneration(
   chatId: number | null,
@@ -121,7 +122,6 @@ export function useContextStatsDuringGeneration(
   sync: () => Promise<void>;
 } {
   const [stats, setStats] = useState<ContextStats | null>(null);
-  const intervalRef = useRef<number | null>(null);
 
   const sync = useCallback(async () => {
     if (!chatId) return;
@@ -134,26 +134,11 @@ export function useContextStatsDuringGeneration(
     }
   }, [chatId]);
 
-  // Запускаем синхронизацию каждые 2 секунды во время генерации
+  // НЕ выполняем синхронизацию во время генерации (избегаем лишних API вызовов к llama.cpp)
+  // Синхронизация может быть вызвана вручную после завершения генерации
   useEffect(() => {
-    if (isGenerating && chatId) {
-      // Немедленная синхронизация при начале генерации
-      sync();
-
-      intervalRef.current = window.setInterval(() => {
-        sync().catch((err) => {
-          console.error('[useContextStatsDuringGeneration] Periodic sync error:', err);
-        });
-      }, 2000);
-
-      return () => {
-        if (intervalRef.current !== null) {
-          window.clearInterval(intervalRef.current);
-          intervalRef.current = null;
-        }
-      };
-    }
-  }, [isGenerating, chatId, sync]);
+    // Ничего не делаем во время генерации
+  }, [isGenerating, chatId]);
 
   return { stats, sync };
 }
