@@ -1,7 +1,23 @@
 /**
- * Removes <thought> tags and their content from text
- * Handles multiline content and various tag formats
+ * Removes thinking/reasoning tags from text
+ * Handles multiple tag formats:
+ *   - <thought>...</thought> / <\/thought>
+ *   - <think>...</think>
+ *   - <think>...</think> / <\/think>
+ * Handles multiline content and greedy matching for nested/unclosed tags
  */
 export function stripThoughtTags(text: string): string {
-  return text.replace(/<thought>[\s\S]*?<\/thought>/gi, '').trim();
+  // Remove <think>...</think> (using escaped brackets in regex)
+  const thinkOpenRegex = new RegExp('<think>[\\s\\S]*?</think>', 'gi');
+  text = text.replace(thinkOpenRegex, '');
+  
+  // Remove <thought>...</thought>
+  const thoughtRegex = /<thought>[\s\S]*?<\/thought>/gi;
+  text = text.replace(thoughtRegex, '');
+  
+  // Remove <think>...</think> (using escaped brackets in regex)
+  const thinkCloseRegex = new RegExp('<think>[\\s\\S]*?<\\/think>', 'gi');
+  text = text.replace(thinkCloseRegex, '');
+  
+  return text.trim();
 }
