@@ -14,9 +14,27 @@ const SettingsPage: React.FC = () => {
   const [visibleMessageLimit, setVisibleMessageLimitState] = useState(getVisibleMessageLimit());
   const [limitInput, setLimitInput] = useState(String(getVisibleMessageLimit()));
   
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [soundLoading, setSoundLoading] = useState<boolean>(false);
+  
   useEffect(() => {
     setLimitInput(String(visibleMessageLimit));
   }, [visibleMessageLimit]);
+  
+  // Load settings on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const { data } = await api.get('/settings');
+        if (data?.sound_enabled !== undefined) {
+          setSoundEnabled(data.sound_enabled === 'true');
+        }
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+      }
+    };
+    loadSettings();
+  }, []);
   
   const handleSaveLimit = useCallback(() => {
     const parsed = parseInt(limitInput, 10);
@@ -27,6 +45,20 @@ const SettingsPage: React.FC = () => {
       setLimitInput(String(visibleMessageLimit));
     }
   }, [limitInput, visibleMessageLimit]);
+  
+  const handleSoundToggle = async () => {
+    const newValue = !soundEnabled;
+    setSoundEnabled(newValue);
+    setSoundLoading(true);
+    try {
+      await api.put('/settings', { key: 'sound_enabled', value: String(newValue) });
+    } catch (error) {
+      console.error('Failed to save sound setting:', error);
+      setSoundEnabled(!newValue); // Revert on error
+    } finally {
+      setSoundLoading(false);
+    }
+  };
   
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -149,6 +181,36 @@ const SettingsPage: React.FC = () => {
                   Текущий лимит: {visibleMessageLimit} сообщений
                 </p>
               </div>
+            </div>
+          </div>
+
+          {/* Notifications section */}
+          <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
+            <h2 className="text-xl font-bold text-white mb-6">Уведомления</h2>
+            
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-300 font-medium">Звук уведомлений</p>
+                <p className="text-sm text-gray-400 mt-1">
+                  Воспроизводить звук, когда ИИ закончит генерацию сообщения
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSoundToggle}
+                disabled={soundLoading}
+                className={`${
+                  soundEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
+                role="switch"
+                aria-checked={soundEnabled}
+              >
+                <span
+                  className={`${
+                    soundEnabled ? 'translate-x-6' : 'translate-x-1'
+                  } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
+                />
+              </button>
             </div>
           </div>
 

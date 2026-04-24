@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { chatsApi, charactersApi } from '../services/api';
+import { useNavigate, useParams } from 'react-router-dom';
+import { chatsApi, charactersApi, settingsApi } from '../services/api';
 import { Chat, Message, Character } from '../types';
+import { playNotificationSound } from '../utils/notificationSound';
 import MessageList from '../components/chat/MessageList';
 import StreamingResponse from '../components/chat/StreamingResponse';
 import MessageInput from '../components/chat/MessageInput';
@@ -70,12 +71,8 @@ function formatLastMessageDate(updatedAt: string): string {
 
 const ChatPage: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const { id: chatId } = useParams();
   
-  // Определение активных страниц
-  const isChatsActive = location.pathname.startsWith('/chats');
-
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChat, setCurrentChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -91,6 +88,9 @@ const ChatPage: React.FC = () => {
   const [showHeaderFooter, setShowHeaderFooter] = useState(true);
   const [translatingMessageId, setTranslatingMessageId] = useState<number | null>(null);
   const [messageInput, setMessageInput] = useState('');
+  
+  // Sound notification setting
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   
   // Ref для хранения состояния showThinking для стримингового сообщения
   const streamingMessageThinkingRef = useRef<boolean>(false);
@@ -208,6 +208,12 @@ const ChatPage: React.FC = () => {
     }
     // Затем обновляем сообщения без показа загрузки
     await fetchMessages(false);
+    
+    // Play notification sound if enabled
+    if (soundEnabled) {
+      playNotificationSound();
+    }
+    
     // Синхронизация токенов после окончания генерации
     syncDuringGeneration();
     // Принудительная синхронизация контекста после завершения генерации
@@ -215,7 +221,7 @@ const ChatPage: React.FC = () => {
     // useEffect автоматически скроллит к новому сообщению
     setIsStreaming(false);
     setIsSending(false);
-  }, [fetchMessages, syncDuringGeneration, syncContextStats]);
+  }, [fetchMessages, syncDuringGeneration, syncContextStats, soundEnabled]);
 
   const handleStreamingError = useCallback(async (error: string) => {
     console.error('[ChatPage] Streaming error:', error);
@@ -259,6 +265,22 @@ const ChatPage: React.FC = () => {
       checkNeedsCompression();
     }
   }, [chatId, fetchMessages, loadBlocks, checkNeedsCompression]);
+
+  // Load user settings (including sound notification preference)
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await settingsApi.getAll();
+        const data = response.data;
+        if (data.sound_enabled !== undefined) {
+          setSoundEnabled(data.sound_enabled === 'true');
+        }
+      } catch (err) {
+        console.error('Error loading settings:', err);
+      }
+    };
+    loadSettings();
+  }, []);
 
   const handleSendMessage = async () => {
     const messageToSend = messageInput.trim();

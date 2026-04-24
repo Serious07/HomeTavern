@@ -145,4 +145,11 @@ export const compressionApi = {
   translateBlock: (blockId: number) => api.put<any>(`/compression/block/${blockId}/translate`),
 };
 
+// Settings API
+export const settingsApi = {
+  getAll: () => api.get<Record<string, string>>('/settings'),
+  update: (key: string, value: string) => api.put('/settings', { key, value }),
+  delete: (key: string) => api.delete(`/settings?key=${encodeURIComponent(key)}`),
+};
+
 export default api;
