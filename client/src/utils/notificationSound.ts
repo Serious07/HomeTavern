@@ -7,36 +7,74 @@ export const playNotificationSound = (): void => {
     }
 
     const ctx = audioContext;
-    
-    // Create a pleasant two-tone notification sound
     const now = ctx.currentTime;
     
-    // First tone
-    const oscillator1 = ctx.createOscillator();
-    const gain1 = ctx.createGain();
-    oscillator1.connect(gain1);
-    gain1.connect(ctx.destination);
-    oscillator1.type = 'sine';
-    oscillator1.frequency.setValueAtTime(600, now);
-    oscillator1.frequency.setValueAtTime(800, now + 0.1);
-    gain1.gain.setValueAtTime(0.3, now);
-    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-    oscillator1.start(now);
-    oscillator1.stop(now + 0.2);
+    // Melody notes: frequencies and start times
+    const notes = [
+      { freq: 523.25, time: 0 },      // C5
+      { freq: 587.33, time: 0.15 },   // D5
+      { freq: 659.25, time: 0.3 },    // E5
+      { freq: 783.99, time: 0.45 },   // G5
+      { freq: 659.25, time: 0.65 },   // E5
+      { freq: 587.33, time: 0.8 },    // D5
+    ];
     
-    // Second tone (slightly delayed for a pleasant chime effect)
-    const oscillator2 = ctx.createOscillator();
-    const gain2 = ctx.createGain();
-    oscillator2.connect(gain2);
-    gain2.connect(ctx.destination);
-    oscillator2.type = 'sine';
-    oscillator2.frequency.setValueAtTime(800, now + 0.15);
-    oscillator2.frequency.setValueAtTime(1000, now + 0.25);
-    gain2.gain.setValueAtTime(0, now);
-    gain2.gain.linearRampToValueAtTime(0.3, now + 0.15);
-    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
-    oscillator2.start(now + 0.15);
-    oscillator2.stop(now + 0.45);
+    notes.forEach((note) => {
+      // Main oscillator
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(note.freq, now + note.time);
+      
+      // Add slight upward glide for musicality
+      osc.frequency.exponentialRampToValueAtTime(
+        note.freq * 1.01, 
+        now + note.time + 0.05
+      );
+      osc.frequency.exponentialRampToValueAtTime(
+        note.freq, 
+        now + note.time + 0.1
+      );
+      
+      // Envelope: quick attack, smooth decay
+      const noteDuration = 0.2;
+      gain.gain.setValueAtTime(0, now + note.time);
+      gain.gain.linearRampToValueAtTime(0.2, now + note.time + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + note.time + noteDuration);
+      
+      osc.start(now + note.time);
+      osc.stop(now + note.time + noteDuration);
+      
+      // Harmonic overtone (one octave higher, quieter)
+      const oscHarmonic = ctx.createOscillator();
+      const gainHarmonic = ctx.createGain();
+      oscHarmonic.connect(gainHarmonic);
+      gainHarmonic.connect(ctx.destination);
+      oscHarmonic.type = 'sine';
+      oscHarmonic.frequency.setValueAtTime(note.freq * 2, now + note.time);
+      
+      gainHarmonic.gain.setValueAtTime(0, now + note.time);
+      gainHarmonic.gain.linearRampToValueAtTime(0.1, now + note.time + 0.02);
+      gainHarmonic.gain.exponentialRampToValueAtTime(0.01, now + note.time + noteDuration);
+      
+      oscHarmonic.start(now + note.time);
+      oscHarmonic.stop(now + note.time + noteDuration);
+    });
+    
+    // Final sustained tone for completion feeling
+    const finalOsc = ctx.createOscillator();
+    const finalGain = ctx.createGain();
+    finalOsc.connect(finalGain);
+    finalGain.connect(ctx.destination);
+    finalOsc.type = 'sine';
+    finalOsc.frequency.setValueAtTime(587.33, now + 1.0);
+    finalGain.gain.setValueAtTime(0, now + 1.0);
+    finalGain.gain.linearRampToValueAtTime(0.15, now + 1.05);
+    finalGain.gain.exponentialRampToValueAtTime(0.01, now + 1.3);
+    finalOsc.start(now + 1.0);
+    finalOsc.stop(now + 1.3);
     
   } catch (error) {
     console.warn('Failed to play notification sound:', error);
