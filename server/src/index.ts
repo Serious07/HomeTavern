@@ -22,6 +22,7 @@ import contextRoutes from './routes/context';
 import compressionRoutes from './routes/compression';
 import translateRoutes from './routes/translate';
 import systemPromptsRoutes from './routes/system-prompts';
+import settingsRoutes from './routes/settings';
 
 const app: Application = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -70,6 +71,9 @@ app.use('/api/translate', translateRoutes);
 
 // System Prompts routes
 app.use('/api/system-prompts', systemPromptsRoutes);
+
+// Settings routes
+app.use('/api/settings', settingsRoutes);
 
 // Автоматическое создание администратора при первом запуске
 const initializeAdminUser = async () => {
