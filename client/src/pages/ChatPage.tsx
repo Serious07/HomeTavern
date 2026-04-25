@@ -91,6 +91,7 @@ const ChatPage: React.FC = () => {
   
   // Sound notification setting
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [notificationVolume, setNotificationVolume] = useState<number>(70);
   
   // Ref для хранения состояния showThinking для стримингового сообщения
   const streamingMessageThinkingRef = useRef<boolean>(false);
@@ -211,7 +212,7 @@ const ChatPage: React.FC = () => {
     
     // Play notification sound if enabled
     if (soundEnabled) {
-      playNotificationSound();
+      playNotificationSound(notificationVolume);
     }
     
     // Синхронизация токенов после окончания генерации
@@ -274,6 +275,9 @@ const ChatPage: React.FC = () => {
         const data = response.data;
         if (data.sound_enabled !== undefined) {
           setSoundEnabled(data.sound_enabled === 'true');
+        }
+        if (data.notification_volume !== undefined) {
+          setNotificationVolume(parseInt(data.notification_volume) || 70);
         }
       } catch (err) {
         console.error('Error loading settings:', err);

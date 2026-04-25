@@ -17,6 +17,8 @@ const SettingsPage: React.FC = () => {
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [soundLoading, setSoundLoading] = useState<boolean>(false);
   
+  const [notificationVolume, setNotificationVolume] = useState<number>(70);
+  
   useEffect(() => {
     setLimitInput(String(visibleMessageLimit));
   }, [visibleMessageLimit]);
@@ -28,6 +30,9 @@ const SettingsPage: React.FC = () => {
         const { data } = await api.get('/settings');
         if (data?.sound_enabled !== undefined) {
           setSoundEnabled(data.sound_enabled === 'true');
+        }
+        if (data?.notification_volume !== undefined) {
+          setNotificationVolume(Number(data.notification_volume));
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
@@ -58,6 +63,14 @@ const SettingsPage: React.FC = () => {
     } finally {
       setSoundLoading(false);
     }
+  };
+  
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVolume = Number(e.target.value);
+    setNotificationVolume(newVolume);
+    api.put('/settings', { key: 'notification_volume', value: String(newVolume) }).catch(err => {
+      console.error('Failed to save volume setting:', err);
+    });
   };
   
   const [oldPassword, setOldPassword] = useState('');
@@ -211,6 +224,28 @@ const SettingsPage: React.FC = () => {
                   } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
                 />
               </button>
+            </div>
+            
+            <div className="mt-4">
+              <div className="flex items-center justify-between">
+                <label htmlFor="notification-volume" className="text-sm text-gray-300">
+                  Громкость уведомления
+                </label>
+                <span className="text-sm text-gray-400">{notificationVolume}%</span>
+              </div>
+              <input
+                type="range"
+                id="notification-volume"
+                min="0"
+                max="100"
+                value={notificationVolume}
+                onChange={handleVolumeChange}
+                className="w-full mt-2 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              />
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>Тихо</span>
+                <span>Громко</span>
+              </div>
             </div>
           </div>
 
