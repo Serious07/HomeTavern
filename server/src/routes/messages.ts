@@ -5,6 +5,7 @@ import { chatService } from '../services/chat.service';
 import { translationService } from '../services/translation.service';
 import { messageRepository, UpdateMessageParams } from '../repositories/message.repository';
 import { chatRepository } from '../repositories/chat.repository';
+import db from '../config/database';
 
 const router = Router();
 
@@ -55,18 +56,26 @@ router.post('/chats/:chatId/messages', async (req: AuthenticatedRequest, res: Re
     // Автоматический перевод сообщения пользователя на английский
     let translatedContent = translated_content;
     if (role === 'user' && !translatedContent) {
-      try {
-        const detectedLang = await translationService.detectLanguage(content);
-        if (detectedLang !== 'en') {
-          translatedContent = await translationService.translate(content, { sourceLang: detectedLang, targetLang: 'en' }).then(r => r.translatedText);
-          console.log(`[Translation] Translated user message from ${detectedLang} to en:`, translatedContent);
-        } else {
-          translatedContent = content; // Уже на английском
+      // Проверяем настройку перевода
+      const settings = db.prepare('SELECT value FROM settings WHERE user_id = ? AND key = ?').all(userId, 'translation_enabled') as Array<{ value: string | null }>;
+      const translationEnabled = settings.length === 0 || settings[0].value === 'true'; // По умолчанию включен
+      
+      if (translationEnabled) {
+        try {
+          const detectedLang = await translationService.detectLanguage(content);
+          if (detectedLang !== 'en') {
+            translatedContent = await translationService.translate(content, { sourceLang: detectedLang, targetLang: 'en' }).then(r => r.translatedText);
+            console.log(`[Translation] Translated user message from ${detectedLang} to en:`, translatedContent);
+          } else {
+            translatedContent = content; // Уже на английском
+          }
+        } catch (translateError) {
+          console.error('[Translation] Translation error:', translateError);
+          // Если перевод не удался, используем оригинал
+          translatedContent = content;
         }
-      } catch (translateError) {
-        console.error('[Translation] Translation error:', translateError);
-        // Если перевод не удался, используем оригинал
-        translatedContent = content;
+      } else {
+        console.log('[Translation] Translation is disabled for this user, using original content');
       }
     }
 

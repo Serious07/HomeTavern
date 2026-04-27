@@ -18,6 +18,8 @@ const SettingsPage: React.FC = () => {
   const [soundLoading, setSoundLoading] = useState<boolean>(false);
   
   const [notificationVolume, setNotificationVolume] = useState<number>(70);
+  const [translationEnabled, setTranslationEnabled] = useState<boolean>(true);
+  const [translationLoading, setTranslationLoading] = useState<boolean>(false);
   
   useEffect(() => {
     setLimitInput(String(visibleMessageLimit));
@@ -34,12 +36,29 @@ const SettingsPage: React.FC = () => {
         if (data?.notification_volume !== undefined) {
           setNotificationVolume(Number(data.notification_volume));
         }
+        if (data?.translation_enabled !== undefined) {
+          setTranslationEnabled(data.translation_enabled === 'true');
+        }
       } catch (error) {
         console.error('Failed to load settings:', error);
       }
     };
     loadSettings();
   }, []);
+
+  const handleTranslationToggle = async () => {
+    const newValue = !translationEnabled;
+    setTranslationEnabled(newValue);
+    setTranslationLoading(true);
+    try {
+      await api.put('/settings', { key: 'translation_enabled', value: String(newValue) });
+    } catch (error) {
+      console.error('Failed to save translation setting:', error);
+      setTranslationEnabled(!newValue); // Revert on error
+    } finally {
+      setTranslationLoading(false);
+    }
+  };
   
   const handleSaveLimit = useCallback(() => {
     const parsed = parseInt(limitInput, 10);
@@ -287,7 +306,37 @@ const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Security section */}
+            {/* Translation section */}
+            <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
+              <h2 className="text-xl font-bold text-white mb-6">Перевод</h2>
+              
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-300 font-medium">Перевод сообщений на английский</p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    Автоматически переводить сообщения с русского на английский для отправки ИИ. При отключении ИИ будет получать сообщения на исходном языке.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTranslationToggle}
+                  disabled={translationLoading}
+                  className={`${
+                    translationEnabled ? 'bg-blue-600' : 'bg-gray-400'
+                  } relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900`}
+                  role="switch"
+                  aria-checked={translationEnabled}
+                >
+                  <span
+                    className={`${
+                      translationEnabled ? 'translate-x-5' : 'translate-x-0'
+                    } inline-block h-6 w-6 transform rounded-full bg-white shadow transition duration-200 ease-in-out`}
+                  />
+                </button>
+              </div>
+            </div>
+
+           {/* Security section */}
           <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
             <h2 className="text-xl font-bold text-white mb-6">Безопасность</h2>
             

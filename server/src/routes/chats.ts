@@ -8,6 +8,13 @@ import { messageRepository } from '../repositories/message.repository';
 import { chatRepository } from '../repositories/chat.repository';
 import { Message } from '../types';
 import { stripThoughtTags } from '../utils/text';
+import db from '../config/database';
+
+// Вспомогательная функция для проверки настройки перевода
+function isTranslationEnabled(userId: number): boolean {
+  const settings = db.prepare('SELECT value FROM settings WHERE user_id = ? AND key = ?').all(userId, 'translation_enabled') as Array<{ value: string | null }>;
+  return settings.length === 0 || settings[0].value === 'true'; // По умолчанию включен
+}
 
 const router = Router();
 
@@ -102,22 +109,35 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     // 3. Используем контент сообщения (уже может быть переведен на английский)
     console.log('[ChatsRoute] Last user message content:', lastUserMessage.content);
     console.log('[ChatsRoute] Last user message translated_content:', lastUserMessage.translated_content);
-    const messageText = lastUserMessage.translated_content || lastUserMessage.content;
-    console.log('[ChatsRoute] Using message text:', messageText);
-    const detectedLang = await translationService.detectLanguage(messageText);
-    console.log('[ChatsRoute] Detected language:', detectedLang);
-    let messageInEnglish = messageText;
+    
+    // Проверяем настройку перевода
+    const translationEnabled = isTranslationEnabled(userId);
+    
+    let messageText: string;
+    let messageInEnglish: string;
+    
+    if (translationEnabled) {
+      messageText = lastUserMessage.translated_content || lastUserMessage.content;
+      console.log('[ChatsRoute] Using message text (with translation):', messageText);
+      const detectedLang = await translationService.detectLanguage(messageText);
+      console.log('[ChatsRoute] Detected language:', detectedLang);
+      messageInEnglish = messageText;
 
-    if (detectedLang === 'ru') {
-      sendSSEEvent(res, 'translation', {
-        type: 'user_message_translation',
-        from: 'ru',
-        to: 'en'
-      });
-      messageInEnglish = await translationService.translateToEnglish(messageText);
-      console.log(`Translated user message: "${messageText}" -> "${messageInEnglish}"`);
+      if (detectedLang === 'ru') {
+        sendSSEEvent(res, 'translation', {
+          type: 'user_message_translation',
+          from: 'ru',
+          to: 'en'
+        });
+        messageInEnglish = await translationService.translateToEnglish(messageText);
+        console.log(`Translated user message: "${messageText}" -> "${messageInEnglish}"`);
+      } else {
+        console.log('[ChatsRoute] Message is already in English, no translation needed');
+      }
     } else {
-      console.log('[ChatsRoute] Message is already in English, no translation needed');
+      messageText = lastUserMessage.content;
+      messageInEnglish = messageText;
+      console.log('[ChatsRoute] Translation disabled, using original content for LLM:', messageText);
     }
 
     // 4. Записываем время начала генерации
@@ -166,24 +186,29 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     // 7.5. Удаляем теги <thought> и их содержимое из ответа
     fullContent = stripThoughtTags(fullContent);
 
-    // 8. Переводим ответ на русский (если оригинал на английском)
-    const responseLang = await translationService.detectLanguage(fullContent);
-    if (responseLang === 'en') {
-      sendSSEEvent(res, 'translation', {
-        type: 'assistant_message_translation',
-        from: 'en',
-        to: 'ru'
-      });
-      translatedText = await translationService.translateToRussian(fullContent);
-      console.log(`Translated assistant response: "${fullContent}" -> "${translatedText}"`);
+    // 8. Переводим ответ на русский (если оригинал на английском и перевод включен)
+    if (translationEnabled) {
+      const responseLang = await translationService.detectLanguage(fullContent);
+      if (responseLang === 'en') {
+        sendSSEEvent(res, 'translation', {
+          type: 'assistant_message_translation',
+          from: 'en',
+          to: 'ru'
+        });
+        translatedText = await translationService.translateToRussian(fullContent);
+        console.log(`Translated assistant response: "${fullContent}" -> "${translatedText}"`);
+      } else {
+        translatedText = fullContent;
+      }
     } else {
       translatedText = fullContent;
+      console.log('[ChatsRoute] Translation disabled, assistant response saved as-is');
     }
 
     // 9. Обновляем сообщение ассистента в БД с полным контентом, переводом и метриками
     messageRepository.updateMessage(tempMessage.id, {
       content: fullContent,
-      translated_content: translatedText !== fullContent ? translatedText : undefined,
+      translated_content: translationEnabled && translatedText !== fullContent ? translatedText : undefined,
       generated_at: new Date().toISOString(),
       tokens_per_sec: tokensPerSec,
       total_tokens: totalTokenCount,
@@ -353,26 +378,39 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
       return;
     }
 
-    // 2. Переводим сообщение пользователя на английский (если на русском)
+    // 2. Переводим сообщение пользователя на английский (если на русском и перевод включен)
     console.log('[ChatsRoute] Original message:', message);
-    const detectedLang = await translationService.detectLanguage(message);
-    console.log('[ChatsRoute] Detected language:', detectedLang);
-    let messageInEnglish = message;
+    
+    // Проверяем настройку перевода
+    const translationEnabled = isTranslationEnabled(userId);
+    
+    let messageInEnglish: string;
+    let detectedLang: string;
+    
+    if (translationEnabled) {
+      detectedLang = await translationService.detectLanguage(message);
+      console.log('[ChatsRoute] Detected language:', detectedLang);
+      messageInEnglish = message;
 
-    if (detectedLang === 'ru') {
-      sendSSEEvent(res, 'translation', {
-        type: 'user_message_translation',
-        from: 'ru',
-        to: 'en'
-      });
-      messageInEnglish = await translationService.translateToEnglish(message);
-      console.log(`Translated user message: "${message}" -> "${messageInEnglish}"`);
+      if (detectedLang === 'ru') {
+        sendSSEEvent(res, 'translation', {
+          type: 'user_message_translation',
+          from: 'ru',
+          to: 'en'
+        });
+        messageInEnglish = await translationService.translateToEnglish(message);
+        console.log(`Translated user message: "${message}" -> "${messageInEnglish}"`);
+      } else {
+        console.log('[ChatsRoute] Message is already in English, no translation needed');
+      }
     } else {
-      console.log('[ChatsRoute] Message is already in English, no translation needed');
+      messageInEnglish = message;
+      detectedLang = await translationService.detectLanguage(message);
+      console.log('[ChatsRoute] Translation disabled, using original content for LLM:', message);
     }
 
     // 3. Сохраняем сообщение пользователя в БД
-    const shouldSaveTranslation = messageInEnglish !== message && messageInEnglish.trim() !== '';
+    const shouldSaveTranslation = translationEnabled && messageInEnglish !== message && messageInEnglish.trim() !== '';
     console.log('[ChatsRoute] Should save translation:', shouldSaveTranslation, '- messageInEnglish:', messageInEnglish);
     const createdAt = new Date().toISOString();  // Сохраняем время создания в UTC ISO 8601
     const userMessage = messageRepository.createMessage(
@@ -414,18 +452,23 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
     // 7.5. Удаляем теги <thought> и их содержимое из ответа
     fullContent = stripThoughtTags(fullContent);
 
-    // 8. Переводим ответ на русский (если оригинал на английском)
-    const responseLang = await translationService.detectLanguage(fullContent);
-    if (responseLang === 'en') {
-      sendSSEEvent(res, 'translation', {
-        type: 'assistant_message_translation',
-        from: 'en',
-        to: 'ru'
-      });
-      translatedText = await translationService.translateToRussian(fullContent);
-      console.log(`Translated assistant response: "${fullContent}" -> "${translatedText}"`);
+    // 8. Переводим ответ на русский (если оригинал на английском и перевод включен)
+    if (translationEnabled) {
+      const responseLang = await translationService.detectLanguage(fullContent);
+      if (responseLang === 'en') {
+        sendSSEEvent(res, 'translation', {
+          type: 'assistant_message_translation',
+          from: 'en',
+          to: 'ru'
+        });
+        translatedText = await translationService.translateToRussian(fullContent);
+        console.log(`Translated assistant response: "${fullContent}" -> "${translatedText}"`);
+      } else {
+        translatedText = fullContent;
+      }
     } else {
       translatedText = fullContent;
+      console.log('[ChatsRoute] Translation disabled, assistant response saved as-is');
     }
 
     // 9. Сохраняем сообщение ассистента в БД с метриками
@@ -434,7 +477,7 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
       chatIdNum,
       'assistant',
       fullContent,
-      translatedText !== fullContent ? translatedText : undefined,
+      translationEnabled && translatedText !== fullContent ? translatedText : undefined,
       undefined,
       assistantMessageCreatedAt
     );
