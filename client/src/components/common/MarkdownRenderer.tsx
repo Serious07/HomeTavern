@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useRef, useEffect } from 'react';
+import React, { memo, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -71,17 +71,49 @@ function wrapQuotesWithMarkers(text: string): string {
 }
 
 /**
+ * Разбивает текст на части по маркерам цитат.
+ * Возвращает массив: [{ type: 'text', content: string }, { type: 'quote', content: string }, ...]
+ */
+function splitByQuoteMarkers(text: string): Array<{ type: 'text' | 'quote', content: string }> {
+  const result: Array<{ type: 'text' | 'quote', content: string }> = [];
+  const parts = text.split(QUOTE_MARKER_START);
+
+  for (let i = 0; i < parts.length; i++) {
+    if (i === 0) {
+      // Первая часть - обычный текст (может быть пустой)
+      if (parts[i]) {
+        result.push({ type: 'text', content: parts[i] });
+      }
+    } else {
+      // Часть после QUOTE_MARKER_START
+      const endIdx = parts[i].indexOf(QUOTE_MARKER_END);
+      if (endIdx >= 0) {
+        const quoteContent = parts[i].substring(0, endIdx);
+        result.push({ type: 'quote', content: quoteContent });
+        const remainder = parts[i].substring(endIdx + QUOTE_MARKER_END.length);
+        if (remainder) {
+          result.push({ type: 'text', content: remainder });
+        }
+      } else {
+        // Нет закрывающего маркера, считаем остаток текстом
+        result.push({ type: 'text', content: parts[i] });
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
  * Компонент для рендеринга Markdown с поддержкой:
  * - Статус-бара (автоматическое обнаружение и форматирование)
  * - Подсветки текста в кавычках оранжевым цветом
  * - Полной поддержки Markdown (таблицы, списки, код, заголовки и т.д.)
- * Оптимизирован для мобильных устройств с memo и useMemo
+ * Оптимизирован с memo для предотвращения лишних ре-рендеров
  */
 const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean }> = ({
   children,
 }) => {
-  const contentRef = useRef<HTMLDivElement>(null);
-
   const { statusBar, processedContent } = useMemo(() => {
     const { statusBar: parsedStatusBar, content: extractedContent } = extractStatusBar(children);
     // Оборачиваем кавычки в маркеры
@@ -89,94 +121,25 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
     return { statusBar: parsedStatusBar, processedContent: withMarkers };
   }, [children]);
 
-  // После рендеринга заменяем маркеры на span с оранжевым цветом
-  useEffect(() => {
-    const container = contentRef.current;
-    if (!container) return;
+  // Разбиваем контент на части для подсветки цитат на уровне React
+  const quoteParts = useMemo(() => splitByQuoteMarkers(processedContent), [processedContent]);
 
-    const markerStart = '\u0001QUOTE_START\u0001';
-    const markerEnd = '\u0001QUOTE_END\u0001';
-
-    const processNode = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.textContent || '';
-        if (text.includes(markerStart) || text.includes(markerEnd)) {
-          const fragment = document.createDocumentFragment();
-          const parts = text.split(markerStart);
-
-          for (let i = 0; i < parts.length; i++) {
-            if (i === 0) {
-              // Первая часть - обычный текст
-              if (parts[i]) {
-                fragment.appendChild(document.createTextNode(parts[i]));
-              }
-            } else {
-              // Контент цитаты до markerEnd
-              const endIdx = parts[i].indexOf(markerEnd);
-              if (endIdx >= 0) {
-                const content = parts[i].substring(0, endIdx);
-                if (content) {
-                  const span = document.createElement('span');
-                  span.className = 'text-orange-400 font-medium';
-                  span.textContent = content;
-                  fragment.appendChild(span);
-                }
-                // Остаток после markerEnd
-                const remainder = parts[i].substring(endIdx + markerEnd.length);
-                if (remainder) {
-                  const tempDiv = document.createElement('div');
-                  tempDiv.textContent = remainder;
-                  while (tempDiv.firstChild) {
-                    fragment.appendChild(tempDiv.firstChild);
-                  }
-                }
-              } else {
-                if (parts[i]) {
-                  fragment.appendChild(document.createTextNode(parts[i]));
-                }
-              }
-            }
-          }
-
-          node.parentNode?.replaceChild(fragment, node);
-        }
-      } else {
-        let child: Node | null = node.firstChild;
-        while (child) {
-          const next = child.nextSibling;
-          processNode(child);
-          child = next;
-        }
-      }
-    };
-
-    // Не рекурсируем в code/pre элементы
-    const skipElements = container.querySelectorAll('code, pre');
-    const skipSet = new Set(skipElements);
-
-    const processDescendants = (node: Element) => {
-      if (skipSet.has(node)) return;
-      let child: Node | null = node.firstChild;
-      while (child) {
-        const next = child.nextSibling;
-        processNode(child);
-        if (child.nodeType === Node.ELEMENT_NODE) {
-          processDescendants(child as Element);
-        }
-        child = next;
-      }
-    };
-
-    processDescendants(container as Element);
-  }, [processedContent]);
+  // Проверка: есть ли в контенте маркеры цитат
+  const hasQuotes = quoteParts.some(p => p.type === 'quote');
 
   return (
-    <div className="markdown-content" ref={contentRef}>
+    <div className="markdown-content">
       {statusBar && <StatusBar {...statusBar} />}
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight, rehypeRemoveQuoteMarkers]}
         components={{
+          // Поддержка цитат на уровне React - оборачиваем весь контент
+          p: ({ children }) => {
+            // Проверяем, содержит ли children элементы с маркерами
+            const processedChildren = hasQuotes ? processNodeForQuotes(children) : children;
+            return <p className="mb-4">{processedChildren}</p>;
+          },
           // Блоки кода с подсветкой синтаксиса
           code: ({ className, children, ...props }) => {
             const match = /language-(\w+)/.exec(className || '');
@@ -247,6 +210,61 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
     </div>
   );
 };
+
+/**
+ * Рекурсивно обрабатывает React-дети, заменяя текст с маркерами на span с оранжевым цветом.
+ * Работает с текстовыми узлами внутри React-компонентов.
+ */
+function processNodeForQuotes(node: React.ReactNode): React.ReactNode {
+  if (typeof node === 'string') {
+    return splitAndRenderQuotes(node);
+  }
+
+  if (typeof node === 'object' && node !== null && 'props' in node) {
+    // React element - обрабатываем children
+    const reactElement = node as React.ReactElement;
+    const children = reactElement.props?.children;
+    
+    if (Array.isArray(children)) {
+      const newChildren = children.map(child => processNodeForQuotes(child));
+      return React.cloneElement(
+        reactElement,
+        { ...reactElement.props },
+        ...newChildren
+      );
+    } else if (children) {
+      return React.cloneElement(
+        reactElement,
+        { ...reactElement.props },
+        processNodeForQuotes(children)
+      );
+    }
+  }
+
+  return node;
+}
+
+/**
+ * Разбивает текст по маркерам и рендерит каждая часть appropriately.
+ */
+function splitAndRenderQuotes(text: string): React.ReactNode {
+  const parts = splitByQuoteMarkers(text);
+  
+  if (parts.length === 1 && parts[0].type === 'text') {
+    return text;
+  }
+
+  return parts.map((part, index) => {
+    if (part.type === 'quote') {
+      return (
+        <span key={`q-${index}`} className="text-orange-400 font-medium">
+          {part.content}
+        </span>
+      );
+    }
+    return <span key={`t-${index}`}>{part.content}</span>;
+  });
+}
 
 // Обертка с memo для предотвращения лишних ре-рендеров при неизменных props
 export const MarkdownRenderer = memo(
