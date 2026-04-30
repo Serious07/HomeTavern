@@ -472,6 +472,9 @@ const MessageList: React.FC<MessageListProps> = ({
   // Track how many items to show (starts at visibleLimit, increases as user scrolls up)
   const [displayCount, setDisplayCount] = useState(visibleLimit);
   
+  // Ref to track if user is scrolled near bottom (to avoid auto-scroll when reading history)
+  const isScrolledToBottomRef = useRef<boolean>(true);
+  
   const handleExpandBlock = useCallback((block: ChatBlockWithParsedIds) => {
     const blockMessages = messages.filter(msg => block.original_message_ids.includes(msg.id));
     setExpandedBlockMessages({ blockId: block.id, messages: blockMessages });
@@ -535,12 +538,51 @@ const MessageList: React.FC<MessageListProps> = ({
   useEffect(() => {
     if (messages.length > prevMessagesLengthRef.current) {
       setDisplayCount(visibleLimit);
+      // Auto-scroll to bottom when new messages arrive
+      // Only if user was already at bottom or it's the initial load
+      setTimeout(() => {
+        const container = scrollContainerRef.current;
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      }, 50);
     }
     prevMessagesLengthRef.current = messages.length;
   }, [messages.length, visibleLimit]);
+  
+  // Auto-scroll to bottom when displayCount changes (user scrolls up to load older messages)
+  // but ONLY if they were at the bottom before
+  useEffect(() => {
+    if (displayCount > prevMessagesLengthRef.current) {
+      // User is loading older messages, don't scroll
+      return;
+    }
+    // If user is at bottom, scroll to bottom after any content change
+    if (isScrolledToBottomRef.current) {
+      setTimeout(() => {
+        const container = scrollContainerRef.current;
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      }, 50);
+    }
+  }, [displayCount, messages.length]);
+
+  // Check if user is scrolled near bottom
+  const checkScrollPosition = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    
+    const { scrollHeight, scrollTop, clientHeight } = container;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    // Consider "at bottom" if within 100px of the bottom
+    isScrolledToBottomRef.current = distanceFromBottom < 100;
+  }, []);
 
   // Handle scroll events
   const handleScroll = useCallback(() => {
+    checkScrollPosition();
+    
     const container = scrollContainerRef.current;
     if (!container) return;
     
@@ -554,7 +596,7 @@ const MessageList: React.FC<MessageListProps> = ({
         return Math.min(newCount, totalItemCount);
       });
     }
-  }, [totalItemCount, visibleLimit]);
+  }, [totalItemCount, visibleLimit, checkScrollPosition]);
 
   // Load more messages when scrolling near top
   const loadMoreMessages = useCallback(() => {

@@ -8,6 +8,7 @@ interface ChatInputAreaProps {
   placeholder?: string;
   showMobileModal?: boolean;
   onOpenMobileModal?: () => void;
+  autoFocus?: boolean;
 }
 
 /**
@@ -23,6 +24,7 @@ const ChatInputAreaInternal: React.FC<ChatInputAreaProps> = ({
   placeholder = 'Введите сообщение...',
   showMobileModal,
   onOpenMobileModal,
+  autoFocus = false,
 }) => {
   const [value, setValue] = useState(initialValue);
   const [, startTransition] = useTransition();
@@ -52,6 +54,21 @@ const ChatInputAreaInternal: React.FC<ChatInputAreaProps> = ({
       pendingValueRef.current = initialValue;
     }
   }, [initialValue]);
+
+  // Focus input when autoFocus changes or initialValue changes (e.g., after send)
+  useEffect(() => {
+    if (autoFocus && messageInputRef.current && !disabled) {
+      messageInputRef.current.focus();
+    }
+  }, [autoFocus, disabled]);
+
+  // Ref to track if we just cleared the input to prevent focus steal
+  const justClearedRef = useRef(false);
+  useEffect(() => {
+    if (initialValue === '' && value === '' && messageInputRef.current && !disabled) {
+      justClearedRef.current = true;
+    }
+  }, [initialValue, value, disabled]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -89,6 +106,7 @@ const ChatInputAreaInternal: React.FC<ChatInputAreaProps> = ({
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      // Focus after send (handled by parent via autoFocus prop)
       onSend();
     }
   }, [onSend]);

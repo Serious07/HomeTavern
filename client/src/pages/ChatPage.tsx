@@ -224,6 +224,12 @@ const ChatPage: React.FC = () => {
     // useEffect автоматически скроллит к новому сообщению
     setIsStreaming(false);
     setIsSending(false);
+    
+    // Возвращаем фокус в поле ввода после завершения генерации
+    // Небольшая задержка чтобы DOM успел обновиться
+    setTimeout(() => {
+      setInputAutoFocus(true);
+    }, 100);
   }, [fetchMessages, syncDuringGeneration, syncContextStats, soundEnabled]);
 
   const handleStreamingError = useCallback(async (error: string) => {
@@ -291,6 +297,10 @@ const ChatPage: React.FC = () => {
   // Ref для хранения текущего значения ввода (для handleSendMessage)
   const currentInputRef = useRef<string>('');
   
+  // State для управления очисткой поля ввода и фокусом
+  const [inputClearKey, setInputClearKey] = useState(0);
+  const [inputAutoFocus, setInputAutoFocus] = useState(false);
+  
   const handleSendMessage = useCallback(async () => {
     const messageToSend = currentInputRef.current.trim();
     if (!messageToSend || !chatId || isSending || isStreaming) return;
@@ -318,6 +328,11 @@ const ChatPage: React.FC = () => {
       
       // Start streaming response
       setIsStreaming(true);
+      
+      // Очищаем поле ввода после отправки (смена key заставит React пересоздать input)
+      setInputClearKey(prev => prev + 1);
+      // Снимаем фокус во время стриминга
+      setInputAutoFocus(false);
     } catch (err: any) {
       console.error('Error sending message:', err);
       setIsSending(false);
@@ -817,12 +832,14 @@ const ChatPage: React.FC = () => {
           showHeaderFooter ? 'flex' : 'hidden'
         }`}>
           <ChatInputArea
+            key={inputClearKey}
             onChange={handleInputChanged}
             onSend={handleSendMessage}
             disabled={isSending || isStreaming || !currentChat}
             placeholder="Введите сообщение..."
             showMobileModal={true}
             onOpenMobileModal={() => setShowMobileInputModal(true)}
+            autoFocus={inputAutoFocus}
           />
         </div>
       </div>
