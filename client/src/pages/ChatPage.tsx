@@ -307,18 +307,6 @@ const ChatPage: React.FC = () => {
       // Fetch updated messages без показа загрузки
       await fetchMessages(false);
       
-      // Находим последнее сообщение пользователя в обновлённом списке (после fetchMessages)
-      // Используем response.data из fetchMessages, но так как fetchMessages не возвращает данные,
-      // нам нужно найти последнее сообщение из текущего state messages
-      // После fetchMessages messages обновится, но это произойдет асинхронно
-      // Поэтому мы используем lastMessageIdRef.current который установим после fetchMessages
-      // Но так как fetchMessages обновляет messages через setMessages, нам нужно подождать
-      // Простое решение: найти последнее сообщение пользователя из текущего списка
-      // Но это не сработает, так как messages еще не обновился
-      // Лучшее решение: после fetchMessages, найти последнее сообщение пользователя из DOM
-      // Или: изменить fetchMessages чтобы он возвращал сообщения
-      
-      
       // Обновляем статистику токенов после отправки сообщения
       await syncContextStats();
       
@@ -742,8 +730,8 @@ const ChatPage: React.FC = () => {
           )}
         </div>
 
-        {/* Messages area */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Messages area - removed overflow-y-auto, MessageList handles its own scrolling */}
+        <div className="flex-1 overflow-hidden">
           {!currentChat ? (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">

@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
+import React, { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { Message } from '../../types';
 import { MarkdownRenderer } from '../common/MarkdownRenderer';
 import { MessageStatsPanel } from './MessageStatsPanel';
@@ -441,8 +441,6 @@ type RenderItem =
   | { type: 'block'; block: ChatBlockWithParsedIds; key: string }
   | { type: 'message'; message: Message; key: string };
 
-const DEFAULT_ITEM_HEIGHT = 150;
-
 const MessageList: React.FC<MessageListProps> = ({
   messages,
   onRegenerate,
@@ -467,20 +465,13 @@ const MessageList: React.FC<MessageListProps> = ({
 }) => {
   const [expandedBlockMessages, setExpandedBlockMessages] = useState<ExpandedBlockMessages | null>(null);
   
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const heightCache = useRef<Map<string, number>>(new Map());
-  const resizeObservers = useRef<Map<string, ResizeObserver>>(new Map());
-  const isRestoringScroll = useRef(false);
-  const prevSpacerTop = useRef(0);
-  const scrollRafRef = useRef<number>(0);
-  const isScrolling = useRef(false);
-  const scrollEndTimer = useRef<ReturnType<typeof setTimeout>>(0);
-  
   const visibleLimit = visibleLimitProp ?? getVisibleMessageLimit();
-  
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [scrollPos, setScrollPos] = useState(0);
-
+  
+  // Track how many items to show (starts at visibleLimit, increases as user scrolls up)
+  const [displayCount, setDisplayCount] = useState(visibleLimit);
+  
   const handleExpandBlock = useCallback((block: ChatBlockWithParsedIds) => {
     const blockMessages = messages.filter(msg => block.original_message_ids.includes(msg.id));
     setExpandedBlockMessages({ blockId: block.id, messages: blockMessages });
@@ -503,7 +494,6 @@ const MessageList: React.FC<MessageListProps> = ({
 
   const renderItems = useMemo(() => {
     const items: RenderItem[] = [];
-    const processedMessageIds = new Set<number>();
 
     for (const msg of messages) {
       const block = messageToBlock.get(msg.id);
@@ -512,7 +502,6 @@ const MessageList: React.FC<MessageListProps> = ({
         if (msg.id === block.start_message_id) {
           items.push({ type: 'block', block, key: `block-${block.id}` });
         }
-        block.original_message_ids.forEach(id => processedMessageIds.add(id));
       } else {
         items.push({ type: 'message', message: msg, key: `msg-${msg.id}` });
       }
@@ -523,170 +512,50 @@ const MessageList: React.FC<MessageListProps> = ({
 
   const totalItemCount = renderItems.length;
 
-  const getItemHeight = useCallback((index: number): number => {
-    if (index < 0 || index >= renderItems.length) return DEFAULT_ITEM_HEIGHT;
-    const key = renderItems[index].key;
-    const cached = heightCache.current.get(key);
-    return (cached && cached > 0) ? cached : DEFAULT_ITEM_HEIGHT;
-  }, [renderItems]);
-
-  const getTotalHeight = useCallback((): number => {
-    let total = 0;
-    for (let i = 0; i < renderItems.length; i++) {
-      total += getItemHeight(i);
+  // Get the items to display (last N items)
+  const displayedItems = useMemo(() => {
+    if (totalItemCount <= visibleLimit) {
+      return renderItems;
     }
-    return total;
-  }, [renderItems, getItemHeight]);
-
-  const getOffsetForIndex = useCallback((index: number): number => {
-    let offset = 0;
-    for (let i = 0; i < index; i++) {
-      offset += getItemHeight(i);
-    }
-    return offset;
-  }, [getItemHeight]);
-
-  const measureItem = useCallback((index: number, element: HTMLDivElement | null) => {
-    const key = renderItems[index]?.key;
-    if (!key || !element) return;
-    
-    const existingObserver = resizeObservers.current.get(key);
-    if (existingObserver) {
-      existingObserver.disconnect();
-    }
-
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const newHeight = entry.contentRect.height;
-        const cachedHeight = heightCache.current.get(key);
-        if (Math.abs((cachedHeight ?? 0) - newHeight) > 1) {
-          heightCache.current.set(key, newHeight);
-          setScrollPos(n => n + 1);
-        }
-      }
-    });
-
-    observer.observe(element);
-    resizeObservers.current.set(key, observer);
-
-    const currentHeight = element.offsetHeight;
-    if (currentHeight > 0) {
-      heightCache.current.set(key, currentHeight);
-    }
-  }, [renderItems]);
-
-  useEffect(() => {
-    return () => {
-      resizeObservers.current.forEach((observer) => observer.disconnect());
-      resizeObservers.current.clear();
-    };
-  }, []);
-
-  const handleScroll = useCallback(() => {
-    isScrolling.current = true;
-    clearTimeout(scrollEndTimer.current);
-    
-    if (scrollRafRef.current) return;
-    
-    scrollRafRef.current = requestAnimationFrame(() => {
-      scrollRafRef.current = 0;
-      const container = scrollContainerRef.current;
-      if (container) {
-        setScrollPos(container.scrollTop);
-      }
-    });
-
-    scrollEndTimer.current = setTimeout(() => {
-      isScrolling.current = false;
-    }, 150);
-  }, []);
-
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => {
-      container.removeEventListener('scroll', handleScroll);
-      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
-      clearTimeout(scrollEndTimer.current);
-    };
-  }, [handleScroll]);
-
-  const visibleItems = useMemo(() => {
-    if (totalItemCount === 0) {
-      return { startIndex: 0, endIndex: 0, items: [] as Array<{ item: RenderItem; index: number }>, totalHeight: 0, spacerTop: 0, spacerBottom: 0 };
-    }
-
-    const container = scrollContainerRef.current;
-    const scrollTop = container?.scrollTop ?? scrollPos;
-
-    let startIndex = 0;
-    let endIndex = totalItemCount;
-
-    if (totalItemCount > visibleLimit) {
-      let low = 0;
-      let high = totalItemCount - 1;
-      
-      while (low < high) {
-        const mid = Math.floor((low + high) / 2);
-        const offset = getOffsetForIndex(mid);
-        if (offset < scrollTop) {
-          low = mid + 1;
-        } else {
-          high = mid;
-        }
-      }
-      
-      let firstVisibleIndex = Math.max(0, low - 1);
-      
-      startIndex = Math.max(0, firstVisibleIndex - Math.floor(visibleLimit / 2));
-      endIndex = Math.min(totalItemCount, startIndex + visibleLimit);
-      
-      if (endIndex === totalItemCount) {
-        startIndex = Math.max(0, endIndex - visibleLimit);
-      }
-    }
-
-    const spacerTop = getOffsetForIndex(startIndex);
-    const spacerBottom = getTotalHeight() - getOffsetForIndex(endIndex);
-
-    const items: Array<{ item: RenderItem; index: number }> = [];
-    for (let i = startIndex; i < endIndex; i++) {
-      items.push({ item: renderItems[i], index: i });
-    }
-
-    return { startIndex, endIndex, items, totalHeight: getTotalHeight(), spacerTop, spacerBottom };
-  }, [renderItems, totalItemCount, visibleLimit, getOffsetForIndex, getTotalHeight, scrollPos]);
-
-  useLayoutEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    const spacerDiff = visibleItems.spacerTop - prevSpacerTop.current;
-    if (spacerDiff !== 0 && !isRestoringScroll.current) {
-      container.scrollTop += spacerDiff;
-    }
-    prevSpacerTop.current = visibleItems.spacerTop;
-  }, [visibleItems.spacerTop]);
-
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    isRestoringScroll.current = true;
-    requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight;
-      isRestoringScroll.current = false;
-    });
-  }, [messages.length, blocks.length]);
+    return renderItems.slice(-displayCount);
+  }, [renderItems, displayCount, totalItemCount, visibleLimit]);
 
   const lastAssistantIndex = useMemo(() => {
-    const indices = renderItems
+    const indices = displayedItems
       .map((item, idx) => item.type === 'message' && item.message.role === 'assistant' ? idx : -1)
       .filter(idx => idx !== -1);
     return indices.length > 0 ? indices[indices.length - 1] : -1;
-  }, [renderItems]);
+  }, [displayedItems]);
+
+  // Reset display count when messages change (new messages = show all)
+  useEffect(() => {
+    setDisplayCount(visibleLimit);
+  }, [messages.length, visibleLimit]);
+
+  // Handle scroll events
+  const handleScroll = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    
+    const { scrollHeight, scrollTop, clientHeight } = container;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    
+    // If user scrolled up and is near the top of loaded content, load more
+    if (distanceFromBottom > clientHeight * 0.8) {
+      setDisplayCount(prev => {
+        const newCount = prev + visibleLimit;
+        return Math.min(newCount, totalItemCount);
+      });
+    }
+  }, [totalItemCount, visibleLimit]);
+
+  // Load more messages when scrolling near top
+  const loadMoreMessages = useCallback(() => {
+    setDisplayCount(prev => {
+      const newCount = prev + visibleLimit;
+      return Math.min(newCount, totalItemCount);
+    });
+  }, [totalItemCount, visibleLimit]);
 
   const handleSelectionClick = (messageId: number) => {
     if (!onMessageSelectionClick) return;
@@ -707,7 +576,7 @@ const MessageList: React.FC<MessageListProps> = ({
     return messages.filter(m => m.id >= start && m.id <= end).length;
   }, [selectionStart, selectionEnd, messages]);
 
-  const renderItemContent = (item: RenderItem, index: number) => {
+  const renderItemContent = useCallback((item: RenderItem, index: number) => {
     if (item.type === 'block') {
       const isExpanded = expandedBlockMessages && expandedBlockMessages.blockId === item.block.id;
       return (
@@ -782,42 +651,37 @@ const MessageList: React.FC<MessageListProps> = ({
         />
       );
     }
-  };
+  }, [expandedBlockMessages, lastAssistantIndex, isSelectionMode, selectionStart, selectionEnd, onEditBlock, onToggleBlockCompression, onDeleteBlock, handleExpandBlock, onBlockUpdate, handleCollapseBlock, onRegenerate, onEdit, onDelete, showThinking, onToggleThinking, translatingMessageId, onTranslate, handleSelectionClick]);
+
+  const hasMoreMessages = totalItemCount > displayCount;
 
   return (
     <div className="flex-1 flex flex-col h-full">
       <div 
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto px-4 pt-4 pb-4"
+        onScroll={handleScroll}
       >
-        <div 
-          className="relative"
-          style={{ height: `${visibleItems.totalHeight}px` }}
-        >
-          {visibleItems.spacerTop > 0 && (
-            <div 
-              style={{ height: `${visibleItems.spacerTop}px` }}
-              aria-hidden="true"
-            />
-          )}
-          
-          <div className="space-y-2">
-            {visibleItems.items.map(({ item, index }) => (
-              <div key={item.key} ref={(el) => measureItem(index, el)}>
-                {renderItemContent(item, index)}
-              </div>
-            ))}
+        {/* Load more button when user scrolls up */}
+        {hasMoreMessages && displayCount > visibleLimit && (
+          <div className="flex justify-center py-2 sticky top-0 z-10">
+            <button
+              onClick={loadMoreMessages}
+              className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-4 py-2 rounded-lg text-sm transition"
+            >
+              Загрузить старше ({totalItemCount - displayCount} сообщений скрыто)
+            </button>
           </div>
-          
-          {visibleItems.spacerBottom > 0 && (
-            <div 
-              style={{ height: `${visibleItems.spacerBottom}px` }}
-              aria-hidden="true"
-            />
-          )}
-          
-          <div ref={messagesEndRef} />
-        </div>
+        )}
+        
+        {displayedItems.map((item, index) => (
+          <React.Fragment key={item.key}>
+            {renderItemContent(item, index)}
+          </React.Fragment>
+        ))}
+        
+        {/* Bottom spacer to ensure scrollable area matches content */}
+        <div ref={messagesEndRef} />
       </div>
 
       {isSelectionMode && (
