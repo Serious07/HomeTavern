@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 interface MobileMessageInputModalProps {
   isOpen: boolean;
@@ -10,9 +10,9 @@ interface MobileMessageInputModalProps {
 }
 
 /**
- * Модальное окно для ввода сообщений на мобильных устройствах
- * Предотвращает проблемы с уменьшением/увеличением текстового поля
- * и позволяет листать строки при достижении предела
+ * Модальное окно для ввода сообщений на мобильных устройствах.
+ * Полностью изолировано от родителя — использует только локальное состояние.
+ * onChange вызывается ТОЛЬКО при закрытии и отправке, не на каждый символ.
  */
 export const MobileMessageInputModal: React.FC<MobileMessageInputModalProps> = ({
   isOpen,
@@ -23,7 +23,7 @@ export const MobileMessageInputModal: React.FC<MobileMessageInputModalProps> = (
   placeholder = 'Введите сообщение...',
 }) => {
   const [localValue, setLocalValue] = useState(value);
-  
+
   // Синхронизация с внешним значением при открытии модального окна
   useEffect(() => {
     if (isOpen) {
@@ -31,26 +31,27 @@ export const MobileMessageInputModal: React.FC<MobileMessageInputModalProps> = (
     }
   }, [isOpen, value]);
 
-  // Синхронизация локального значения с внешним при изменении
-  useEffect(() => {
-    setLocalValue(value);
-  }, [value]);
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    // Только локальное состояние — никаких вызовов onChange на каждый символ!
+    setLocalValue(e.target.value);
+  }, []);
   
-  const handleSend = () => {
+  const handleSend = useCallback(() => {
     if (localValue.trim()) {
-      // Сначала закрываем модальное окно
+      // Передаём значение родителю перед закрытием
+      onChange(localValue);
+      // Закрываем модальное окно
       onClose();
-      // Затем отправляем сообщение (не ждем завершения)
-      // onSend() в ChatPage является асинхронной функцией handleSendMessage
+      // Отправляем сообщение
       onSend();
     }
-  };
+  }, [localValue, onChange, onClose, onSend]);
   
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     // Сохраняем текущее значение перед закрытием
     onChange(localValue);
     onClose();
-  };
+  }, [localValue, onChange, onClose]);
 
   return (
     <div className={`fixed inset-0 z-50 ${isOpen ? '' : 'pointer-events-none'}`}>
@@ -72,20 +73,16 @@ export const MobileMessageInputModal: React.FC<MobileMessageInputModalProps> = (
             <div className="w-12 h-1.5 bg-gray-600 rounded-full" />
           </div>
           
-          {/* Textarea с прокруткой */}
+          {/* Textarea с прокруткой — onChange вызывает ТОЛЬКО setLocalValue */}
           <textarea
             value={localValue}
-            onChange={(e) => {
-              setLocalValue(e.target.value);
-              onChange(e.target.value);
-            }}
+            onChange={handleChange}
             placeholder={placeholder}
             className="w-full h-48 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none overflow-y-auto"
             style={{
               minHeight: '150px',
               maxHeight: '50vh',
             }}
-            // Отключаем автоматическое исправление на мобильных
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck="false"

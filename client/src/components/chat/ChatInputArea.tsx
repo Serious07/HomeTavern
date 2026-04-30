@@ -1,22 +1,22 @@
-import React, { memo, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useTransition, memo } from 'react';
 
-interface MessageInputProps {
-  value: string;
+interface ChatInputAreaProps {
+  initialValue?: string;
   onChange: (value: string) => void;
   onSend: () => void;
   disabled: boolean;
   placeholder?: string;
-  // Пропсы для мобильного модального окна
   showMobileModal?: boolean;
   onOpenMobileModal?: () => void;
 }
 
 /**
- * Мемоизированный компонент ввода сообщения
- * Оптимизирован для мобильных устройств с debounce и предотвращением лишних ре-рендеров
+ * Изолированный компонент поля ввода с useTransition для полной
+ * производительности ввода текста. Все обновления кроме самого input
+ * откладываются через startTransition.
  */
-const MessageInput: React.FC<MessageInputProps> = ({
-  value,
+const ChatInputAreaInternal: React.FC<ChatInputAreaProps> = ({
+  initialValue = '',
   onChange,
   onSend,
   disabled,
@@ -24,72 +24,74 @@ const MessageInput: React.FC<MessageInputProps> = ({
   showMobileModal,
   onOpenMobileModal,
 }) => {
+  const [value, setValue] = useState(initialValue);
+  const [, startTransition] = useTransition();
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const resizeTimeoutRef = useRef<number | null>(null);
+  const pendingValueRef = useRef<string>(value);
 
-  // Debounced авто-ресайз textarea
+  // Debounced auto-resize textarea с использованием requestAnimationFrame
   const autoResize = useCallback((textarea: HTMLTextAreaElement) => {
-    // Очищаем предыдущий таймаут
     if (resizeTimeoutRef.current) {
-      clearTimeout(resizeTimeoutRef.current);
+      cancelAnimationFrame(resizeTimeoutRef.current);
     }
 
-    // Откладываем ресайз на 30ms для плавности
-    resizeTimeoutRef.current = setTimeout(() => {
+    resizeTimeoutRef.current = requestAnimationFrame(() => {
       if (!textarea) return;
-
-      // Сбросить высоту чтобы пересчитать
       textarea.style.height = 'auto';
-
-      // Вычисляем новую высоту на основе scrollHeight
       const maxHeight = 400;
       const newHeight = textarea.scrollHeight;
       textarea.style.height = `${Math.min(newHeight, maxHeight)}px`;
-    }, 30);
+    });
   }, []);
 
-  // Автоматический ресайз при изменении value (для корректного отображения multiline)
-  // Вызывается напрямую в handleChange с debounce (30ms)
-  // Это предотвращает лишний layout thrashing при каждом символе
-  
-  // Инициализация размера textarea при монтировании
+  // Sync external value changes (e.g., when input is cleared after send)
   useEffect(() => {
-    const textarea = messageInputRef.current;
-    if (textarea && value) {
-      autoResize(textarea);
+    if (value !== initialValue) {
+      setValue(initialValue);
+      pendingValueRef.current = initialValue;
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [initialValue]);
 
-  // Очистка таймаута при размонтировании
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (resizeTimeoutRef.current) {
-        clearTimeout(resizeTimeoutRef.current);
+        cancelAnimationFrame(resizeTimeoutRef.current);
       }
     };
   }, []);
 
-  // Обработчик изменения значения
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const newValue = e.target.value;
-      onChange(newValue);
-      // autoResize уже имеет debounce (30ms) внутри, вызываем напрямую
-      autoResize(e.target);
-    },
-    [onChange, autoResize]
-  );
+  // Initial resize
+  useEffect(() => {
+    const textarea = messageInputRef.current;
+    if (textarea) {
+      autoResize(textarea);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Обработчик нажатия клавиши
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        onSend();
-      }
-    },
-    [onSend]
-  );
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    pendingValueRef.current = newValue;
+    
+    // Обновляем локальное состояние синхронно для мгновенного отображения
+    setValue(newValue);
+    
+    // Передаваемое наружу обновление — через transition (не блокирует input)
+    startTransition(() => {
+      onChange(newValue);
+    });
+    
+    // Auto-resize в requestAnimationFrame (не блокирует рендеринг)
+    autoResize(e.target);
+  }, [onChange, autoResize]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onSend();
+    }
+  }, [onSend]);
 
   return (
     <div className="flex items-end gap-3 w-full">
@@ -106,7 +108,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
           lineHeight: '20px',
         }}
         disabled={disabled}
-        // Отключаем автоматическое исправление на мобильных
         autoCorrect="off"
         autoCapitalize="off"
         spellCheck="false"
@@ -121,7 +122,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
         </svg>
       </button>
-      {/* Кнопка для открытия мобильного модального окна */}
       {showMobileModal && onOpenMobileModal && (
         <button
           onClick={onOpenMobileModal}
@@ -138,4 +138,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
   );
 };
 
-export default memo(MessageInput);
+// Memoize to prevent unnecessary re-renders
+const ChatInputArea = memo(ChatInputAreaInternal);
+ChatInputArea.displayName = 'ChatInputArea';
+
+export default ChatInputArea;

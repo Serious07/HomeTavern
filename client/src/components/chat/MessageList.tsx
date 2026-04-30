@@ -527,9 +527,16 @@ const MessageList: React.FC<MessageListProps> = ({
     return indices.length > 0 ? indices[indices.length - 1] : -1;
   }, [displayedItems]);
 
-  // Reset display count when messages change (new messages = show all)
+  // Track previous messages length to detect actual new messages
+  const prevMessagesLengthRef = useRef<number>(messages.length);
+  
+  // Reset display count to show all when new messages arrive (length increases)
+  // This only triggers when genuinely new messages are added, not on every parent re-render
   useEffect(() => {
-    setDisplayCount(visibleLimit);
+    if (messages.length > prevMessagesLengthRef.current) {
+      setDisplayCount(visibleLimit);
+    }
+    prevMessagesLengthRef.current = messages.length;
   }, [messages.length, visibleLimit]);
 
   // Handle scroll events

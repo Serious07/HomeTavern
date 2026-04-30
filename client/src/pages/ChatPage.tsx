@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { chatsApi, charactersApi, settingsApi } from '../services/api';
 import { Chat, Message, Character } from '../types';
 import { playNotificationSound } from '../utils/notificationSound';
 import MessageList from '../components/chat/MessageList';
 import StreamingResponse from '../components/chat/StreamingResponse';
-import MessageInput from '../components/chat/MessageInput';
+import ChatInputArea from '../components/chat/ChatInputArea';
 import MobileMessageInputModal from '../components/chat/MobileMessageInputModal';
 import ContextStatsDisplay from '../components/chat/ContextStatsDisplay';
 import { useContextStats, useContextStatsDuringGeneration } from '../hooks/useContextStats';
@@ -87,7 +87,6 @@ const ChatPage: React.FC = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showHeaderFooter, setShowHeaderFooter] = useState(true);
   const [translatingMessageId, setTranslatingMessageId] = useState<number | null>(null);
-  const [messageInput, setMessageInput] = useState('');
   
   // Sound notification setting
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
@@ -136,6 +135,9 @@ const ChatPage: React.FC = () => {
   
   // Ref для хранения последнего ID сообщения для скролла
   const lastMessageIdRef = useRef<number | null>(null);
+
+  // memoized messages to prevent unnecessary MessageList re-renders (Optimization A)
+  const memoizedMessages = useMemo(() => messages, [messages]);
 
   const fetchChats = useCallback(async () => {
     try {
@@ -286,23 +288,27 @@ const ChatPage: React.FC = () => {
     loadSettings();
   }, []);
 
-  const handleSendMessage = async () => {
-    const messageToSend = messageInput.trim();
+  // Ref для хранения текущего значения ввода (для handleSendMessage)
+  const currentInputRef = useRef<string>('');
+  
+  const handleSendMessage = useCallback(async () => {
+    const messageToSend = currentInputRef.current.trim();
     if (!messageToSend || !chatId || isSending || isStreaming) return;
     
     // Сбрасываем состояние showThinking для нового стримингового сообщения
     streamingMessageThinkingRef.current = false;
     
     setIsSending(true);
-    const userMessage = messageToSend;
-    setMessageInput('');
-
+    
     try {
       // Отправляем сообщение на сервер
       await chatsApi.sendMessage(parseInt(chatId), {
-        content: userMessage,
+        content: messageToSend,
         role: 'user',
       });
+
+      // Сбрасываем значение ввода
+      currentInputRef.current = '';
 
       // Fetch updated messages без показа загрузки
       await fetchMessages(false);
@@ -316,7 +322,12 @@ const ChatPage: React.FC = () => {
       console.error('Error sending message:', err);
       setIsSending(false);
     }
-  };
+  }, [chatId, isSending, isStreaming, fetchMessages, syncContextStats]);
+
+  // Callback для ChatInputArea
+  const handleInputChanged = useCallback((value: string) => {
+    currentInputRef.current = value;
+  }, []);
 
   const handleRegenerate = async (messageId: number) => {
     if (!chatId || isStreaming) return;
@@ -763,7 +774,7 @@ const ChatPage: React.FC = () => {
           ) : (
             <>
                <MessageList
-                  messages={messages}
+                  messages={memoizedMessages}
                   onRegenerate={handleRegenerate}
                   onEdit={handleEditMessage}
                   onDelete={handleDeleteMessage}
@@ -801,13 +812,12 @@ const ChatPage: React.FC = () => {
           )}
         </div>
 
-        {/* Message input - используем оптимизированный компонент */}
+        {/* Message input - изолированный компонент с useTransition */}
         <div className={`shrink-0 border-t border-gray-700 p-4 chat-footer ${
           showHeaderFooter ? 'flex' : 'hidden'
         }`}>
-          <MessageInput
-            value={messageInput}
-            onChange={setMessageInput}
+          <ChatInputArea
+            onChange={handleInputChanged}
             onSend={handleSendMessage}
             disabled={isSending || isStreaming || !currentChat}
             placeholder="Введите сообщение..."
@@ -855,8 +865,8 @@ const ChatPage: React.FC = () => {
       {/* Mobile message input modal */}
       <MobileMessageInputModal
         isOpen={showMobileInputModal}
-        value={messageInput}
-        onChange={setMessageInput}
+        value=""
+        onChange={() => {}}
         onSend={handleSendMessage}
         onClose={() => setShowMobileInputModal(false)}
         placeholder="Введите сообщение..."
