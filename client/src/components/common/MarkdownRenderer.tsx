@@ -2,112 +2,117 @@ import React, { memo, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeRaw from 'rehype-raw';
 import { extractStatusBar } from '../../utils/statusBar';
 import { StatusBar } from './StatusBar';
 
-const QUOTE_MARKER_START = '\u0001QUOTE_START\u0001';
-const QUOTE_MARKER_END = '\u0001QUOTE_END\u0001';
+// ==================== Обработка кавычек ====================
 
 /**
- * Рекурсивный обход дерева AST
+ * Оборачивает текст в кавычках в оранжевый span.
+ * Игнорирует HTML-теги и inline code.
+ * 
+ * Поддерживаемые типы кавычек:
+ * - "текст в двойных кавычках"
+ * - «текст в ёлочках»
+ * - „текст в нижних кавычках"
  */
-function walkAst(node: any, visitor: (node: any) => void) {
-  visitor(node);
-  if (node.type === 'element' && Array.isArray(node.children)) {
-    if (node.tagName === 'code' || node.tagName === 'pre') return;
-    for (const child of node.children) {
-      walkAst(child, visitor);
-    }
-  }
-}
-
-/**
- * Rehype-плагин для удаления маркеров кавычек из AST.
- * Маркеры вставляются до передачи в ReactMarkdown и удаляются здесь.
- */
-function rehypeRemoveQuoteMarkers() {
-  return function transform(tree: any) {
-    walkAst(tree, (node: any) => {
-      if (node.type === 'text' && typeof node.value === 'string') {
-        if (node.value.includes(QUOTE_MARKER_START) || node.value.includes(QUOTE_MARKER_END)) {
-          node.value = node.value
-            .split(QUOTE_MARKER_START)
-            .join('')
-            .split(QUOTE_MARKER_END)
-            .join('');
-        }
-      }
-    });
-  };
-}
-
-/**
- * Заменяет текст в кавычках на маркеры, которые будут обработаны ReactMarkdown + кастомным компонентом.
- * Игнорирует контент внутри inline code блоков.
- */
-function wrapQuotesWithMarkers(text: string): string {
-  // Шаг 1: Находим все inline code блоки и заменяем их плейсхолдерами
+function wrapQuotesInText(text: string): string {
+  const htmlTags: string[] = [];
   const codeBlocks: string[] = [];
-  const codePlaceholder = (index: number) => `\x00CODE${index}\x00`;
 
-  let processed = text.replace(/`([^`]+)`/g, (_, content) => {
+  let processed = text;
+
+  // Извлекаем HTML-теги
+  const htmlPH = (i: number) => `\x01HTML${i}\x01`;
+  processed = processed.replace(/<[^>]*>/g, (m) => {
+    htmlTags.push(m);
+    return htmlPH(htmlTags.length - 1);
+  });
+
+  // Извлекаем inline code (бэктики)
+  const codePH = (i: number) => `\x02CODE${i}\x02`;
+  processed = processed.replace(/`([^`]+)`/g, (_, content) => {
     codeBlocks.push(content);
-    return codePlaceholder(codeBlocks.length - 1);
+    return codePH(codeBlocks.length - 1);
   });
 
-  // Шаг 2: Находим кавычки и заменяем на маркеры
-  const quotePattern = /("([^"]+)"|«([^»]+)»|„([^"]+)")/g;
-  processed = processed.replace(quotePattern, (_, __, inner1, inner2, inner3) => {
-    const content = inner1 ?? inner2 ?? inner3 ?? '';
-    return QUOTE_MARKER_START + content + QUOTE_MARKER_END;
+  // Оборачиваем кавычки в оранжевый span
+  const quotePattern = /(".*?"|«[^»]+?»|„[^"]+?")/g;
+  processed = processed.replace(quotePattern, (fullMatch) => {
+    return `<span class="text-orange-400 font-medium">${fullMatch}</span>`;
   });
 
-  // Шаг 3: Восстанавливаем inline code блоки
+  // Восстанавливаем inline code
   for (let i = 0; i < codeBlocks.length; i++) {
-    processed = processed.replace(codePlaceholder(i), `\`${codeBlocks[i]}\``);
+    processed = processed.replace(codePH(i), `\`${codeBlocks[i]}\``);
+  }
+
+  // Восстанавливаем HTML-теги
+  for (let i = 0; i < htmlTags.length; i++) {
+    processed = processed.replace(htmlPH(i), htmlTags[i]);
   }
 
   return processed;
 }
 
+// ==================== Обработка тегов разметки LLM ====================
+
 /**
- * Разбивает текст на части по маркерам цитат.
- * Возвращает массив: [{ type: 'text', content: string }, { type: 'quote', content: string }, ...]
+ * Преобразует специальные теги LLM в HTML-спаны для стилизации.
+ * 
+ * Нейросеть использует теги для маркирования типов речи:
+ * - <speech>...</speech> → прямая речь (оранжевый)
+ * - <monologue>...</monologue> → монолог/мысли (оранжевый курсив)
+ * - <dialog>...</dialog> → диалог между персонажами (оранжевый)
+ * - <narration>...</narration> → описание действий/окружения (обычный текст)
+ * 
+ * Теги автоматически удаляются после преобразования содержимого.
  */
-function splitByQuoteMarkers(text: string): Array<{ type: 'text' | 'quote', content: string }> {
-  const result: Array<{ type: 'text' | 'quote', content: string }> = [];
-  const parts = text.split(QUOTE_MARKER_START);
-
-  for (let i = 0; i < parts.length; i++) {
-    if (i === 0) {
-      // Первая часть - обычный текст (может быть пустой)
-      if (parts[i]) {
-        result.push({ type: 'text', content: parts[i] });
-      }
-    } else {
-      // Часть после QUOTE_MARKER_START
-      const endIdx = parts[i].indexOf(QUOTE_MARKER_END);
-      if (endIdx >= 0) {
-        const quoteContent = parts[i].substring(0, endIdx);
-        result.push({ type: 'quote', content: quoteContent });
-        const remainder = parts[i].substring(endIdx + QUOTE_MARKER_END.length);
-        if (remainder) {
-          result.push({ type: 'text', content: remainder });
-        }
-      } else {
-        // Нет закрывающего маркера, считаем остаток текстом
-        result.push({ type: 'text', content: parts[i] });
-      }
-    }
-  }
-
-  return result;
+function processLLMTags(text: string): string {
+  // Заменяем теги LLM на стилизованные span
+  // Порядок важен: сначала speech, затем monologue, dialog, narration
+  
+  // <speech> — прямая речь (оранжевый)
+  text = text.replace(/<speech>([\s\S]*?)<\/speech>/gi, '<span class="text-orange-400 font-medium">$1</span>');
+  
+  // <monologue> — монолог/внутренние мысли (оранжевый курсив)
+  text = text.replace(/<monologue>([\s\S]*?)<\/monologue>/gi, '<span class="text-orange-400 font-medium italic">$1</span>');
+  
+  // <dialog> — диалог между персонажами (оранжевый)
+  text = text.replace(/<dialog>([\s\S]*?)<\/dialog>/gi, '<span class="text-orange-400 font-medium">$1</span>');
+  
+  // <narration> — описание/действия (обычный текст, просто удаляем теги)
+  text = text.replace(/<narration>([\s\S]*?)<\/narration>/gi, '$1');
+  
+  return text;
 }
+
+// ==================== Главная функция ====================
+
+/**
+ * Главная функция обработки текста:
+ * 1. Преобразует теги LLM (speech, monologue, dialog, narration) в HTML-спаны
+ * 2. Оборачивает текст в кавычках в оранжевый span
+ * 
+ * Теги LLM используются для маркирования типов речи нейросетью.
+ */
+function wrapQuotesWithSpan(text: string): string {
+  // Шаг 1: Обрабатываем теги LLM (speech, monologue, dialog, narration)
+  let withLLMTags = processLLMTags(text);
+
+  // Шаг 2: Оборачиваем кавычки
+  let withWrappedQuotes = wrapQuotesInText(withLLMTags);
+
+  return withWrappedQuotes;
+}
+
+// ==================== React-компонент ====================
 
 /**
  * Компонент для рендеринга Markdown с поддержкой:
  * - Статус-бара (автоматическое обнаружение и форматирование)
- * - Подсветки текста в кавычках оранжевым цветом
+ * - Подсветки текста в кавычках и двойных тире оранжевым цветом
  * - Полной поддержки Markdown (таблицы, списки, код, заголовки и т.д.)
  * Оптимизирован с memo для предотвращения лишних ре-рендеров
  */
@@ -116,31 +121,18 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
 }) => {
   const { statusBar, processedContent } = useMemo(() => {
     const { statusBar: parsedStatusBar, content: extractedContent } = extractStatusBar(children);
-    // Оборачиваем кавычки в маркеры
-    const withMarkers = wrapQuotesWithMarkers(extractedContent);
-    return { statusBar: parsedStatusBar, processedContent: withMarkers };
+    const withSpan = wrapQuotesWithSpan(extractedContent);
+    return { statusBar: parsedStatusBar, processedContent: withSpan };
   }, [children]);
-
-  // Разбиваем контент на части для подсветки цитат на уровне React
-  const quoteParts = useMemo(() => splitByQuoteMarkers(processedContent), [processedContent]);
-
-  // Проверка: есть ли в контенте маркеры цитат
-  const hasQuotes = quoteParts.some(p => p.type === 'quote');
 
   return (
     <div className="markdown-content">
       {statusBar && <StatusBar {...statusBar} />}
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight, rehypeRemoveQuoteMarkers]}
+        rehypePlugins={[rehypeHighlight, rehypeRaw]}
         components={{
-          // Поддержка цитат на уровне React - оборачиваем весь контент
-          p: ({ children }) => {
-            // Проверяем, содержит ли children элементы с маркерами
-            const processedChildren = hasQuotes ? processNodeForQuotes(children) : children;
-            return <p className="mb-4">{processedChildren}</p>;
-          },
-          // Блоки кода с подсветкой синтаксиса
+          p: ({ children }) => <p className="mb-4">{children}</p>,
           code: ({ className, children, ...props }) => {
             const match = /language-(\w+)/.exec(className || '');
             return match ? (
@@ -155,16 +147,13 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
               </code>
             );
           },
-          // Заголовки
           h1: ({ children }) => <h1 className="text-2xl font-bold mb-4 mt-6">{children}</h1>,
           h2: ({ children }) => <h2 className="text-xl font-bold mb-3 mt-5">{children}</h2>,
           h3: ({ children }) => <h3 className="text-lg font-bold mb-2 mt-4">{children}</h3>,
           h4: ({ children }) => <h4 className="text-base font-bold mb-2 mt-4">{children}</h4>,
-          // Списки
           ul: ({ children }) => <ul className="list-disc list-inside mb-4 ml-4">{children}</ul>,
           ol: ({ children }) => <ol className="list-decimal list-inside mb-4 ml-4">{children}</ol>,
           li: ({ children }) => <li className="mb-1">{children}</li>,
-          // Таблицы
           table: ({ children }) => (
             <div className="overflow-x-auto my-4">
               <table className="min-w-full border border-gray-700">{children}</table>
@@ -176,15 +165,12 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
           td: ({ children }) => (
             <td className="border border-gray-700 px-4 py-2">{children}</td>
           ),
-          // Цитаты
           blockquote: ({ children }) => (
             <blockquote className="border-l-4 border-gray-600 pl-4 py-2 my-4 bg-gray-800/50 italic text-gray-300">
               {children}
             </blockquote>
           ),
-          // Горизонтальная линия
           hr: () => <hr className="my-4 border-gray-700" />,
-          // Ссылки
           a: ({ href, children }) => (
             <a
               href={href}
@@ -195,14 +181,15 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
               {children}
             </a>
           ),
-          // Жирный текст
           strong: ({ children }) => <strong className="font-bold text-gray-300">{children}</strong>,
-          // Курсив
           em: ({ children }) => <em className="italic text-gray-300">{children}</em>,
-          // Зачеркнутый текст
           del: ({ children }) => <del className="line-through">{children}</del>,
-          // Разрыв строки
           br: () => <br />,
+          span: ({ children, className }: { children?: React.ReactNode; className?: string | string[] }) => (
+            <span className={Array.isArray(className) ? className.join(' ') : className}>
+              {children}
+            </span>
+          ),
         }}
       >
         {processedContent}
@@ -210,61 +197,6 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
     </div>
   );
 };
-
-/**
- * Рекурсивно обрабатывает React-дети, заменяя текст с маркерами на span с оранжевым цветом.
- * Работает с текстовыми узлами внутри React-компонентов.
- */
-function processNodeForQuotes(node: React.ReactNode): React.ReactNode {
-  if (typeof node === 'string') {
-    return splitAndRenderQuotes(node);
-  }
-
-  if (typeof node === 'object' && node !== null && 'props' in node) {
-    // React element - обрабатываем children
-    const reactElement = node as React.ReactElement;
-    const children = reactElement.props?.children;
-    
-    if (Array.isArray(children)) {
-      const newChildren = children.map(child => processNodeForQuotes(child));
-      return React.cloneElement(
-        reactElement,
-        { ...reactElement.props },
-        ...newChildren
-      );
-    } else if (children) {
-      return React.cloneElement(
-        reactElement,
-        { ...reactElement.props },
-        processNodeForQuotes(children)
-      );
-    }
-  }
-
-  return node;
-}
-
-/**
- * Разбивает текст по маркерам и рендерит каждая часть appropriately.
- */
-function splitAndRenderQuotes(text: string): React.ReactNode {
-  const parts = splitByQuoteMarkers(text);
-  
-  if (parts.length === 1 && parts[0].type === 'text') {
-    return text;
-  }
-
-  return parts.map((part, index) => {
-    if (part.type === 'quote') {
-      return (
-        <span key={`q-${index}`} className="text-orange-400 font-medium">
-          {part.content}
-        </span>
-      );
-    }
-    return <span key={`t-${index}`}>{part.content}</span>;
-  });
-}
 
 // Обертка с memo для предотвращения лишних ре-рендеров при неизменных props
 export const MarkdownRenderer = memo(
