@@ -144,9 +144,15 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     startTime = Date.now();
     const createdAt = new Date().toISOString();  // Сохраняем время создания в UTC ISO 8601
     
+    // 5. Создаём AbortController для возможности отмены генерации
+    const abortController = new AbortController();
+    
+    // Сохраняем AbortController в LLMService для возможности отмены
+    llmService.setAbortController(chatId, abortController);
+    
     // 5. Генерируем поток ответа от LLM
     console.log('[ChatsRoute] Sending to LLM:', messageInEnglish);
-    const stream = llmService.generateStream(userId, chatId, messageInEnglish);
+    const stream = llmService.generateStream(userId, chatId, messageInEnglish, abortController.signal);
 
     // 5. Создаем сообщение ассистента в БД ПЕРЕД потоком (чтобы получить ID)
     const tempMessage = messageRepository.createMessage(
@@ -231,7 +237,41 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
       message: error instanceof Error ? error.message : 'Unknown error'
     });
   } finally {
+    // Очищаем AbortController
+    llmService.setAbortController(chatId, null);
     res.end();
+  }
+});
+
+/**
+ * POST /api/chats/:chatId/cancel
+ * Отмена генерации для чата - прерывает генерацию на стороне LLM
+ */
+router.post('/:chatId/cancel', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const chatId = parseInt(req.params.chatId, 10);
+
+    if (isNaN(chatId)) {
+      return res.status(400).json({ error: 'Invalid chatId' });
+    }
+
+    // Проверяем доступ к чату
+    const chat = chatRepository.getChatById(chatId);
+    if (!chat || chat.user_id !== userId) {
+      return res.status(404).json({ error: 'Chat not found or access denied' });
+    }
+
+    // Отменяем генерацию на стороне LLM
+    const cancelled = llmService.cancelGeneration(chatId);
+
+    res.status(200).json({ 
+      cancelled,
+      message: cancelled ? 'Generation cancelled' : 'No active generation to cancel' 
+    });
+  } catch (error) {
+    console.error('Error in POST /api/chats/:chatId/cancel:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

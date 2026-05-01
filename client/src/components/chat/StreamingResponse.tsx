@@ -39,6 +39,10 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   const streamingMessageRef = useRef<HTMLDivElement>(null);
   const contentEndRef = useRef<HTMLDivElement>(null);
   
+  // Ref для chatId (чтобы использовать в handleStop)
+  const chatIdRef = useRef(chatId);
+  chatIdRef.current = chatId;
+  
   const eventSourceRef = useRef<EventSource | null>(null);
   const messageIdRef = useRef<number>(0);
   const translatedTextRef = useRef<string | null>(null);
@@ -177,12 +181,37 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   }, [chatId, onComplete, onError]);
 
   // Функция остановки генерации
-  const handleStop = () => {
+  const handleStop = async () => {
     console.log('[handleStop] Stopping generation');
+    
+    // Сначала закрываем SSE соединение
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
+    
+    // Отправляем запрос на сервер для отмены генерации на стороне LLM
+    try {
+      const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+      const cancelUrl = `/api/chats/${chatIdRef.current}/cancel`;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      console.log('[handleStop] Sending cancel request to:', cancelUrl);
+      await fetch(cancelUrl, {
+        method: 'POST',
+        headers,
+      });
+      console.log('[handleStop] Cancel request sent successfully');
+    } catch (err) {
+      console.error('[handleStop] Error sending cancel request:', err);
+      // Не блокируем остановку если отмена не удалась
+    }
+    
     setIsStreaming(false);
     
     // Вызываем onComplete с текущим контентом (используем refs)
@@ -190,7 +219,7 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       console.log('[handleStop] Calling onComplete with partial message');
       onComplete({
         id: messageIdRef.current,
-        chat_id: chatId,
+        chat_id: chatIdRef.current,
         user_id: 0,
         content: contentRef.current,
         role: 'assistant',

@@ -384,6 +384,7 @@ export class LLMService {
   private apiKey: string;
   private model: string;
   private client: any; // LLMClient instance
+  private activeAbortControllers: Map<number, AbortController> = new Map();
 
   constructor() {
     this.baseURL = process.env.LLM_BASE_URL || 'http://localhost:1234/v1';
@@ -413,9 +414,42 @@ export class LLMService {
   }
 
   /**
-   * Получение контекста чата для генерации
-   */
-  async getChatContext(userId: number, chatId: number): Promise<ChatContext | null> {
+    * Получение AbortController для чата (для отмены)
+    */
+   getAbortController(chatId: number): AbortController | null {
+     return this.activeAbortControllers.get(chatId) || null;
+   }
+
+  /**
+    * Установка AbortController для чата
+    */
+   setAbortController(chatId: number, controller: AbortController | null): void {
+     if (controller) {
+       this.activeAbortControllers.set(chatId, controller);
+     } else {
+       this.activeAbortControllers.delete(chatId);
+     }
+   }
+
+  /**
+    * Отмена генерации для чата
+    */
+   cancelGeneration(chatId: number): boolean {
+     const controller = this.activeAbortControllers.get(chatId);
+     if (controller) {
+       controller.abort();
+       this.activeAbortControllers.delete(chatId);
+       console.log(`[LLMService] Generation cancelled for chat ${chatId}`);
+       return true;
+     }
+     console.log(`[LLMService] No active generation to cancel for chat ${chatId}`);
+     return false;
+   }
+
+  /**
+    * Получение контекста чата для генерации
+    */
+   async getChatContext(userId: number, chatId: number): Promise<ChatContext | null> {
     try {
       const chat = chatRepository.getChatById(chatId);
       if (!chat || chat.user_id !== userId) {
@@ -451,17 +485,19 @@ export class LLMService {
   }
 
   /**
- * Генерация потока ответа от LLM
- * @param userId - ID пользователя
- * @param chatId - ID чата
- * @param userMessage - Сообщение пользователя
- * @returns Асинхронный итератор с чанками (reasoning_token и content_token)
- */
-  async *generateStream(
-    userId: number,
-    chatId: number,
-    userMessage: string
-  ): AsyncGenerator<StreamChunk> {
+    * Генерация потока ответа от LLM
+    * @param userId - ID пользователя
+    * @param chatId - ID чата
+    * @param userMessage - Сообщение пользователя
+    * @param abortSignal - Signal для отмены генерации
+    * @returns Асинхронный итератор с чанками (reasoning_token и content_token)
+    */
+   async *generateStream(
+     userId: number,
+     chatId: number,
+     userMessage: string,
+     abortSignal?: AbortSignal
+   ): AsyncGenerator<StreamChunk> {
     const timeoutMs = 900000; // 15 минут таймаут
     const startTime = Date.now();
     let contentTokenCount = 0;
@@ -517,13 +553,14 @@ export class LLMService {
       }
 
       // Отправляем запрос к LLM с stream: true
+      // Передаем abortSignal если есть (для отмены генерации)
       const stream = await this.client.chatCompletionsCreate({
         model: this.model,
         messages: messages,
         stream: true,
         temperature: 0.7,
         max_tokens: parseInt(process.env.LLM_MAX_TOKENS || '') || 64000, // Установлено для совместимости с OpenRouter (max 131072 контекст)
-      });
+      }, { signal: abortSignal });
 
       // Обрабатываем поток
       for await (const chunk of stream) {
@@ -556,14 +593,17 @@ export class LLMService {
         }
       }
 
-      // Сохраняем информацию о токенах в БД после завершения генерации
-      if (lastUsage) {
-        const totalTokens = lastUsage.total_tokens;
-        console.log(`[LLMService] Saving token usage for chat ${chatId}: ${totalTokens} total tokens`);
-        contextRepository.updateCachedStats(chatId, totalTokens, new Date().toISOString());
-      }
+       // Удаляем AbortController после завершения генерации
+       this.activeAbortControllers.delete(chatId);
 
-      // Логирование метрик генерации с учетом reasoning
+       // Сохраняем информацию о токенах в БД после завершения генерации
+       if (lastUsage) {
+         const totalTokens = lastUsage.total_tokens;
+         console.log(`[LLMService] Saving token usage for chat ${chatId}: ${totalTokens} total tokens`);
+         contextRepository.updateCachedStats(chatId, totalTokens, new Date().toISOString());
+       }
+
+       // Логирование метрик генерации с учетом reasoning
       const endTime = Date.now();
       const durationSecs = (endTime - startTime) / 1000;
       
@@ -581,16 +621,24 @@ export class LLMService {
       console.log(`  Duration: ${durationSecs.toFixed(2)}s`);
       console.log(`  Content tokens/sec: ${contentTokensPerSec.toFixed(2)}`);
       console.log(`  Total tokens/sec: ${totalTokensPerSec.toFixed(2)}`);
-    } catch (error) {
-      const elapsed = Date.now() - startTime;
-      console.error(`LLM Stream Error after ${elapsed}ms:`, error);
+     } catch (error) {
+       const elapsed = Date.now() - startTime;
+       
+       // Проверяем, была ли ошибка вызвана отменой
+       if (error instanceof Error && error.name === 'AbortError') {
+         console.log(`[LLMService] Generation aborted for chat ${chatId} after ${elapsed}ms`);
+         this.activeAbortControllers.delete(chatId);
+         return; // Graceful exit on abort
+       }
+       
+       console.error(`LLM Stream Error after ${elapsed}ms:`, error);
 
-      if (elapsed > timeoutMs) {
-        throw new Error('Request timeout');
-      }
+       if (elapsed > timeoutMs) {
+         throw new Error('Request timeout');
+       }
 
-      throw error;
-    }
+       throw error;
+     }
   }
 
   /**
