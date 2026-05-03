@@ -663,7 +663,7 @@ const MessageList: React.FC<MessageListProps> = ({
                     translatingMessageId={translatingMessageId}
                     onTranslate={onTranslate}
                     isLastAssistantMessage={false}
-                    messageIndex={index}
+                    messageIndex={messages.findIndex(m => m.id === msg.id)}
                   />
                 ))}
               </div>
@@ -672,6 +672,8 @@ const MessageList: React.FC<MessageListProps> = ({
         </React.Fragment>
       );
     } else {
+      // Compute the actual index of the message in the full messages array
+      const actualMessageIndex = messages.findIndex(m => m.id === item.message.id);
       const isLastAssistantMessage =
         item.message.role === 'assistant' &&
         index === lastAssistantIndex;
@@ -693,7 +695,7 @@ const MessageList: React.FC<MessageListProps> = ({
           translatingMessageId={translatingMessageId}
           onTranslate={onTranslate}
           isLastAssistantMessage={isLastAssistantMessage}
-          messageIndex={index}
+          messageIndex={actualMessageIndex}
           isSelectionMode={isSelectionMode}
           isSelected={isSelected}
           onSelectionClick={handleSelectionClick}
