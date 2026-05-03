@@ -29,7 +29,8 @@ export const ChatBlock: React.FC<ChatBlockProps> = ({
   const displaySummary = showOriginal ? block.summary : (block.summary_translation || block.summary);
 
   const handleEditClick = () => {
-    onEdit(block.id, { title: displayTitle, summary: displaySummary });
+    // Передаём оригинальные значения, а не переведённые
+    onEdit(block.id, { title: block.title, summary: block.summary });
   };
 
   const handleToggleCompression = () => {

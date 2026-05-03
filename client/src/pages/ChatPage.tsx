@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { chatsApi, charactersApi, settingsApi } from '../services/api';
+import { compressionApi } from '../services/api';
 import { Chat, Message, Character } from '../types';
 import { playNotificationSound } from '../utils/notificationSound';
 import MessageList from '../components/chat/MessageList';
@@ -13,6 +14,8 @@ import { useCompression } from '../hooks/useCompression';
 import { EditBlockModal } from '../components/chat/EditBlockModal';
 import { ChatBlockWithParsedIds } from '../types/compression';
 import AppHeader from '../components/common/AppHeader';
+import CompressionProgressOverlay from '../components/chat/CompressionProgressOverlay';
+import CompressionConfirmModal from '../components/chat/CompressionConfirmModal';
 
 /**
  * Форматирование даты последнего сообщения
@@ -105,6 +108,9 @@ const ChatPage: React.FC = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState<ChatBlockWithParsedIds | null>(null);
   
+  // State для модального окна подтверждения сжатия
+  const [showCompressionConfirm, setShowCompressionConfirm] = useState(false);
+  
   // Context stats for token usage tracking
   const currentChatId = chatId ? parseInt(chatId) : null;
   const { stats: contextStats, isLoading: isContextLoading, sync: syncContextStats } = useContextStats(
@@ -119,6 +125,8 @@ const ChatPage: React.FC = () => {
   // Compression hooks
   const {
     blocks,
+    isCompressing,
+    compressionProgress,
     compress,
     editBlock,
     toggleCompression,
@@ -496,12 +504,24 @@ const ChatPage: React.FC = () => {
   };
 
   // Handlers для сжатия истории
-  const handleManualCompress = useCallback(async () => {
+  const handleManualCompressClick = useCallback(() => {
     if (!currentChatId) return;
-    await compress();
+    setShowCompressionConfirm(true);
+  }, [currentChatId]);
+
+  const handleManualCompressConfirm = useCallback(async () => {
+    setShowCompressionConfirm(false);
+    if (!currentChatId) return;
+    const result = await compress();
     // После сжатия обновляем сообщения без показа загрузки
-    await fetchMessages(false);
+    if (result) {
+      await fetchMessages(false);
+    }
   }, [currentChatId, compress, fetchMessages]);
+
+  const handleManualCompressCancel = useCallback(() => {
+    setShowCompressionConfirm(false);
+  }, []);
 
   const handleCloseEditModal = useCallback(() => {
     setIsEditModalOpen(false);
@@ -677,7 +697,7 @@ const ChatPage: React.FC = () => {
               </button>
               {/* Кнопка ручного сжатия истории */}
               <button
-                onClick={handleManualCompress}
+                onClick={handleManualCompressClick}
                 className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition"
                 title="Сжать историю"
               >
@@ -714,7 +734,7 @@ const ChatPage: React.FC = () => {
             <div className="flex items-center gap-2">
               {/* Кнопка ручного сжатия истории */}
               <button
-                onClick={handleManualCompress}
+                onClick={handleManualCompressClick}
                 className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition"
                 title="Сжать историю"
               >
@@ -865,19 +885,27 @@ const ChatPage: React.FC = () => {
           )}
         </button>
 
-     {/* Edit block modal */}
-      {isEditModalOpen && editingBlock && (
-        <EditBlockModal
-          block={editingBlock}
-          onSave={async (blockId, updates) => {
-            await editBlock(blockId, updates);
-            handleCloseEditModal();
-            // После успешного сохранения обновляем блоки
-            await loadBlocks();
-          }}
-          onCancel={handleCloseEditModal}
-        />
-      )}
+      {/* Edit block modal */}
+       {isEditModalOpen && editingBlock && (
+         <EditBlockModal
+           block={editingBlock}
+           onSave={async (blockId, updates) => {
+             await editBlock(blockId, updates);
+             handleCloseEditModal();
+             // После успешного сохранения обновляем блоки
+             await loadBlocks();
+           }}
+           onCancel={handleCloseEditModal}
+           onTranslate={async (bId: number) => {
+             try {
+               await compressionApi.translateBlock(bId);
+               await loadBlocks();
+             } catch (error) {
+               console.error('[ChatPage] Error translating block:', error);
+             }
+           }}
+         />
+       )}
 
       {/* Mobile message input modal */}
       <MobileMessageInputModal
@@ -914,6 +942,21 @@ const ChatPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Compression confirm modal - показываем только когда нужно */}
+      {showCompressionConfirm && (
+        <CompressionConfirmModal
+          onConfirm={handleManualCompressConfirm}
+          onCancel={handleManualCompressCancel}
+          isCompressing={isCompressing}
+        />
+      )}
+
+      {/* Compression progress overlay */}
+      <CompressionProgressOverlay
+        isOpen={isCompressing}
+        progress={compressionProgress}
+      />
     </div>
   );
 };

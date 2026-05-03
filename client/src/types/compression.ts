@@ -72,3 +72,49 @@ export interface EditBlockResponse {
   title: string;
   summary: string;
 }
+
+/**
+ * Progress info for compression operation (SSE)
+ */
+export interface CompressionProgress {
+  currentBlock: number;
+  totalBlocks: number;
+  status: string;
+  title?: string;
+}
+
+/**
+ * SSE event data for compression progress
+ */
+export interface CompressionProgressEvent {
+  type: 'progress';
+  currentBlock: number;
+  totalBlocks: number;
+  status: string;
+  title?: string;
+}
+
+/**
+ * SSE event data for compression completion
+ */
+export interface CompressionCompleteEvent {
+  type: 'complete';
+  success: boolean;
+  blocks: ChatBlock[];
+  originalCount: number;
+  compressedCount: number;
+  tokenSavings: number;
+}
+
+/**
+ * SSE event data for compression error
+ */
+export interface CompressionErrorEvent {
+  type: 'error';
+  error: string;
+}
+
+/**
+ * Union type for all compression SSE events
+ */
+export type CompressionSSEEvent = CompressionProgressEvent | CompressionCompleteEvent | CompressionErrorEvent;

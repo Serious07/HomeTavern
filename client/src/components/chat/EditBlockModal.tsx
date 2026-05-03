@@ -1,56 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { ChatBlockWithParsedIds } from '../../types/compression';
-import { compressionApi } from '../../services/api';
 
 interface EditBlockModalProps {
   block: ChatBlockWithParsedIds;
   onSave: (blockId: number, updates: { title: string; summary: string }) => void | Promise<void>;
   onCancel: () => void;
+  onTranslate: (blockId: number) => Promise<void>;
 }
 
 export const EditBlockModal: React.FC<EditBlockModalProps> = ({
   block,
   onSave,
   onCancel,
+  onTranslate,
 }) => {
   const [title, setTitle] = useState(block.title);
   const [summary, setSummary] = useState(block.summary);
   const [error, setError] = useState<string | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
-  const [isTranslating, setIsTranslating] = useState(false);
+  const [hasTranslation, setHasTranslation] = useState(!!(block.title_translation && block.summary_translation));
 
-  // Для отображения значений на выбранном языке
-  const displayTitle = showOriginal ? block.title : (block.title_translation || block.title);
-  const displaySummary = showOriginal ? block.summary : (block.summary_translation || block.summary);
 
   // Обновляем состояние при изменении блока
   useEffect(() => {
     setTitle(block.title);
     setSummary(block.summary);
     setError(null);
+    setHasTranslation(!!(block.title_translation && block.summary_translation));
   }, [block]);
 
-  const handleToggleLanguage = async () => {
-    const newShowOriginal = !showOriginal;
-    setShowOriginal(newShowOriginal);
-
-    // Если перевод еще не загружен, запрашиваем его
-    if (!newShowOriginal && !block.summary_translation) {
-      setIsTranslating(true);
-      try {
-        const response = await compressionApi.translateBlock(block.id);
-        const updatedBlock = response.data;
-        
-        // Обновляем локальное состояние для отображения
-        setTitle(updatedBlock.title);
-        setSummary(updatedBlock.summary);
-      } catch (error) {
-        console.error('Error translating block:', error);
-      } finally {
-        setIsTranslating(false);
-      }
-    }
+  const handleToggleLanguage = () => {
+    // Просто переключаем отображение без API-запроса
+    // Перевод загружается отдельно через кнопку "Перевести" в списке блоков
+    setShowOriginal(!showOriginal);
   };
+
+  // Для редактирования всегда используем локальное состояние (оригинальные значения)
+  const editTitle = title;
+  const editSummary = summary;
 
   const handleSave = async () => {
     // Валидация
@@ -71,7 +58,16 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
       return;
     }
 
-    await onSave(block.id, { title: title.trim(), summary: summary.trim() });
+    try {
+      await onSave(block.id, { title: title.trim(), summary: summary.trim() });
+      
+      // Если есть перевод - обновляем перевод
+      if (hasTranslation) {
+        await onTranslate(block.id);
+      }
+    } catch (e) {
+      // error handled by parent
+    }
   };
 
   return (
@@ -85,11 +81,10 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
             {/* Кнопка переключения языка */}
             <button
               onClick={handleToggleLanguage}
-              disabled={isTranslating}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-sm"
               title={showOriginal ? 'Показать перевод' : 'Показать оригинал'}
             >
-              {isTranslating ? '...' : (showOriginal ? 'EN' : 'RU')}
+              {showOriginal ? 'EN' : 'RU'}
             </button>
 
             <button
@@ -110,7 +105,7 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
             </label>
             <input
               type="text"
-              value={displayTitle}
+              value={editTitle}
               onChange={(e) => {
                 setTitle(e.target.value);
                 setError(null);
@@ -120,7 +115,7 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
               maxLength={100}
             />
             <div className="text-xs text-gray-500 mt-1 text-right">
-              {displayTitle.length}/100
+              {editTitle.length}/100
             </div>
           </div>
 
@@ -130,7 +125,7 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
               Краткий пересказ:
             </label>
             <textarea
-              value={displaySummary}
+              value={editSummary}
               onChange={(e) => {
                 setSummary(e.target.value);
                 setError(null);
@@ -141,7 +136,7 @@ export const EditBlockModal: React.FC<EditBlockModalProps> = ({
               maxLength={2000}
             />
             <div className="text-xs text-gray-500 mt-1 text-right">
-              {displaySummary.length}/2000
+              {editSummary.length}/2000
             </div>
           </div>
 

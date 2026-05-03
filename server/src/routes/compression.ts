@@ -44,8 +44,116 @@ router.post('/compress/:chatId', async (req: AuthenticatedRequest, res: Response
 });
 
 /**
+ * GET /api/compression/compress-stream/:chatId
+ * Запустить сжатие истории для чата с возвратом прогресса через SSE (Server-Sent Events)
+ * Response: Stream of SSE events (text/event-stream)
+ * Query params: token (for authentication)
+ */
+router.get('/compress-stream/:chatId', async (req: AuthenticatedRequest, res: Response) => {
+  console.log('[CompressStream] >>> Incoming request for chatId:', req.params.chatId);
+  console.log('[CompressStream] >>> User:', req.user?.username);
+  console.log('[CompressStream] >>> Headers:', JSON.stringify(req.headers));
+
+  // Проверяем валидность chatId ДО отправки заголовков
+  const chatId = parseInt(req.params.chatId, 10);
+
+  if (isNaN(chatId)) {
+    console.log('[CompressStream] >>> Invalid chatId');
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(400).json({ error: 'Invalid chatId' });
+  }
+
+  // Проверяем аутентификацию ДО отправки заголовков
+  if (!req.user) {
+    console.log('[CompressStream] >>> No user - returning 401');
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const userId = req.user.userId;
+  console.log('[CompressStream] >>> chatId:', chatId, ', userId:', userId);
+
+  // Устанавливаем заголовки для SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
+  console.log('[CompressStream] >>> Setting SSE headers and flushing...');
+  res.flushHeaders?.();
+  console.log('[CompressStream] >>> Headers flushed successfully');
+
+  // Функция для отправки SSE событий
+  const sendEvent = (data: Record<string, any>) => {
+    const eventData = JSON.stringify(data);
+    console.log('[CompressStream] >>> Sending event:', eventData.substring(0, 200));
+    res.write(`data: ${eventData}\n\n`);
+  };
+
+  // Функция для завершения SSE соединения с ошибкой
+  const errorStream = (errorMessage: string) => {
+    const eventData = JSON.stringify({ type: 'error', error: errorMessage });
+    res.write(`data: ${eventData}\n\n`);
+    res.write('event: error\n\n');
+    res.end();
+  };
+
+  // Функция для завершения SSE соединения
+  const finishStream = (data: Record<string, any>) => {
+    const eventData = JSON.stringify(data);
+    res.write(`data: ${eventData}\n\n`);
+    res.write('event: complete\n\n');
+    res.end();
+  };
+
+  // Создаём callback для прогресса
+  const onProgress = (progress: any) => {
+    sendEvent({
+      type: 'progress',
+      currentBlock: progress.currentBlock,
+      totalBlocks: progress.totalBlocks,
+      status: progress.status,
+      title: progress.title
+    });
+  };
+
+  // Отправляем начальное событие подключения
+  console.log('[CompressStream] >>> Sending connected event...');
+  sendEvent({ type: 'connected', status: 'Подключение установлено' });
+
+  try {
+    console.log('[CompressStream] >>> Starting compression service...');
+    // Запускаем сжатие с callback для прогресса
+    const result = await compressionService.compressChat(chatId, userId, { onProgress });
+
+    // Отправляем финальное событие
+    finishStream({
+      type: 'complete',
+      success: true,
+      blocks: result.blocks,
+      originalCount: result.originalCount,
+      compressedCount: result.compressedCount,
+      tokenSavings: result.tokenSavings
+    });
+  } catch (error) {
+    console.error('[CompressStream] >>> Error during compression:', error);
+    console.error('[CompressionRoute] Error compressing chat (stream):', error);
+    // Пытаемся отправить ошибку, если заголовки ещё не отправлены
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'application/json');
+      res.status(500).json({ error: 'Internal server error' });
+    } else {
+      errorStream('Internal server error');
+    }
+  }
+});
+
+/**
  * POST /api/compression/compress-selected/:chatId
- * Запустить сжатие выделенного диапазона
+ * Запустить сжатие выделенного диапазона (устаревший, без прогресса)
  * Body: { startMessageId: number, endMessageId: number }
  * Response: { success: boolean, block: ChatBlock }
  */
@@ -77,6 +185,91 @@ router.post('/compress-selected/:chatId', async (req: AuthenticatedRequest, res:
   } catch (error) {
     console.error('[CompressionRoute] Error compressing selected range:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/compression/compress-selected-stream/:chatId
+ * Запустить сжатие выделенного диапазона с прогрессом через SSE
+ * Query: startMessageId, endMessageId
+ */
+router.get('/compress-selected-stream/:chatId', async (req: AuthenticatedRequest, res: Response) => {
+  const chatId = parseInt(req.params.chatId, 10);
+  const startMessageId = parseInt(req.query.startMessageId as string, 10);
+  const endMessageId = parseInt(req.query.endMessageId as string, 10);
+
+  if (isNaN(chatId) || isNaN(startMessageId) || isNaN(endMessageId)) {
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(400).json({ error: 'Invalid parameters' });
+  }
+
+  if (!req.user) {
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const userId = req.user.userId;
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const sendEvent = (data: Record<string, any>) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const finishStream = (data: Record<string, any>) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    res.write('event: complete\n\n');
+    res.end();
+  };
+
+  const errorStream = (errorMessage: string) => {
+    res.write(`data: ${JSON.stringify({ type: 'error', error: errorMessage })}\n\n`);
+    res.end();
+  };
+
+  // Отправляем начальный прогресс: 1 блок всего
+  sendEvent({ type: 'connected', status: 'Подключение установлено' });
+  sendEvent({
+    type: 'progress',
+    currentBlock: 0,
+    totalBlocks: 1,
+    status: 'Начало сжатия...'
+  });
+
+  try {
+    sendEvent({
+      type: 'progress',
+      currentBlock: 0,
+      totalBlocks: 1,
+      status: 'Обработка блока 1 из 1...'
+    });
+
+    const block = await compressionService.compressSelectedRange(
+      chatId,
+      userId,
+      startMessageId,
+      endMessageId
+    );
+
+    sendEvent({
+      type: 'progress',
+      currentBlock: 1,
+      totalBlocks: 1,
+      status: 'Обработан блок 1 из 1',
+      title: block.title
+    });
+
+    finishStream({
+      type: 'complete',
+      success: true,
+      block
+    });
+  } catch (error) {
+    console.error('[CompressionRoute] Error compressing selected range (stream):', error);
+    errorStream('Internal server error');
   }
 });
 
