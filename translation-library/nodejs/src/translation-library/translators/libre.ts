@@ -11,6 +11,7 @@ import {
   TranslationError,
   TranslatorProvider,
 } from '../types';
+import { translateWithTagProtection, hasProtectedTags } from '../tag-protector';
 
 /**
  * Переводчик LibreTranslate
@@ -34,6 +35,49 @@ export class LibreTranslator extends BaseTranslator {
   }
 
   /**
+   * Переводит один чанк текста через LibreTranslate
+   */
+  private async translateChunk(chunk: string, targetLang: string): Promise<string> {
+    const endpoint = this.endpoint || this.defaultEndpoint;
+
+    const result = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        q: chunk,
+        source: 'auto',
+        target: targetLang,
+        format: 'text',
+        api_key: this.apiKey,
+      }),
+      signal: AbortSignal.timeout(this.timeout),
+    });
+
+    if (!result.ok) {
+      const errorText = await result.text();
+      throw this.createError(
+        `LibreTranslate API error: ${result.statusText}`,
+        result.status,
+        errorText
+      );
+    }
+
+    const json = await result.json();
+
+    if (!json.translatedText) {
+      throw this.createError(
+        'LibreTranslate API returned invalid response',
+        undefined,
+        json
+      );
+    }
+
+    return json.translatedText;
+  }
+
+  /**
    * Выполняет перевод текста с использованием LibreTranslate
    * @param text Текст для перевода
    * @param options Опции перевода
@@ -48,47 +92,70 @@ export class LibreTranslator extends BaseTranslator {
     const normalizedLang = this.normalizeLibreLanguageCode(targetLang);
 
     try {
-      const endpoint = this.endpoint || this.defaultEndpoint;
+      // Проверяем, содержит ли текст защищаемые теги
+      const hasTags = hasProtectedTags(text);
 
-      const result = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          q: text,
-          source: 'auto',
-          target: normalizedLang,
-          format: 'text',
-          api_key: this.apiKey,
-        }),
-        signal: AbortSignal.timeout(this.timeout),
-      });
-
-      if (!result.ok) {
-        const errorText = await result.text();
-        throw this.createError(
-          `LibreTranslate API error: ${result.statusText}`,
-          result.status,
-          errorText
+      if (hasTags) {
+        // Используем защиту тегов при переводе
+        console.log('[LibreTranslator] Text contains protected tags, using tag protection');
+        
+        const translatedText = await translateWithTagProtection(
+          text,
+          async (chunkText) => {
+            return await this.translateChunk(chunkText, normalizedLang);
+          },
+          4000
         );
+        
+        return {
+          text: translatedText,
+          sourceLanguage: undefined,
+          provider: this.provider,
+        };
+      } else {
+        // Обычный перевод без защиты тегов
+        const endpoint = this.endpoint || this.defaultEndpoint;
+
+        const result = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            q: text,
+            source: 'auto',
+            target: normalizedLang,
+            format: 'text',
+            api_key: this.apiKey,
+          }),
+          signal: AbortSignal.timeout(this.timeout),
+        });
+
+        if (!result.ok) {
+          const errorText = await result.text();
+          throw this.createError(
+            `LibreTranslate API error: ${result.statusText}`,
+            result.status,
+            errorText
+          );
+        }
+
+        const json = await result.json();
+
+        if (!json.translatedText) {
+          throw this.createError(
+            'LibreTranslate API returned invalid response',
+            undefined,
+            json
+          );
+        }
+
+        return {
+          text: json.translatedText,
+          sourceLanguage: json.source || undefined,
+          provider: this.provider,
+        };
       }
-
-      const json = await result.json();
-
-      if (!json.translatedText) {
-        throw this.createError(
-          'LibreTranslate API returned invalid response',
-          undefined,
-          json
-        );
-      }
-
-      return {
-        text: json.translatedText,
-        sourceLanguage: json.source || undefined,
-        provider: this.provider,
-      };
     } catch (error) {
       if (error instanceof TranslationError) {
         throw error;

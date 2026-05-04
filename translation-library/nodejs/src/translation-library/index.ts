@@ -186,3 +186,15 @@ export {
   normalizeText,
   isValidText,
 } from './chunker';
+
+// Tag protection module
+export {
+  PROTECTED_TAG_PATTERNS,
+  extractTags,
+  restoreTags,
+  translateWithTagProtection,
+  hasProtectedTags,
+  getFoundTags,
+} from './tag-protector';
+
+export type { TagInfo } from './tag-protector';

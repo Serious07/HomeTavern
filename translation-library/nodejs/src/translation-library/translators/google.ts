@@ -13,6 +13,7 @@ import {
   TranslatorProvider,
 } from '../types';
 import { chunkText, restoreTextWithLinks, chunkWithLinks } from '../chunker';
+import { translateWithTagProtection, extractTags, restoreTags, hasProtectedTags } from '../tag-protector';
 
 /**
  * Переводчик Google Translate
@@ -53,28 +54,66 @@ export class GoogleTranslator extends BaseTranslator {
     const normalizedTargetLang = this.normalizeGoogleLanguageCode(targetLang);
 
     try {
-      // Разделяем текст на чанки для обработки
-      const { chunks, links } = chunkWithLinks(text, this.chunkSize);
+      // Проверяем, содержит ли текст защищаемые теги
+      const hasTags = hasProtectedTags(text);
 
-      const translatedChunks: string[] = [];
+      if (hasTags) {
+        // Используем защиту тегов при переводе
+        console.log('[GoogleTranslator] Text contains protected tags, using tag protection');
+        
+        // Сначала извлекаем ссылки на изображения
+        const { chunks: linkChunks, links } = chunkWithLinks(text, this.chunkSize * 2);
+        
+        const translatedChunks: string[] = [];
+        
+        for (const chunk of linkChunks) {
+          if (chunk.trim().length === 0) {
+            continue;
+          }
+          
+          // Переводим каждый чанк с защитой тегов
+          const translatedChunk = await translateWithTagProtection(
+            chunk,
+            async (chunkText) => {
+              return await this.translateChunk(chunkText, normalizedTargetLang);
+            },
+            this.chunkSize
+          );
+          translatedChunks.push(translatedChunk);
+        }
+        
+        // Восстанавливаем текст с сохранением ссылок
+        const translatedText = restoreTextWithLinks(translatedChunks, links);
+        
+        return {
+          text: translatedText,
+          sourceLanguage: undefined, // Google определяет язык автоматически
+          provider: this.provider,
+        };
+      } else {
+        // Обычный перевод без защиты тегов
+        const { chunks, links } = chunkWithLinks(text, this.chunkSize);
 
-      for (const chunk of chunks) {
-        if (chunk.trim().length === 0) {
-          continue;
+        const translatedChunks: string[] = [];
+
+        for (const chunk of chunks) {
+          if (chunk.trim().length === 0) {
+            continue;
+          }
+
+          const translatedChunk = await this.translateChunk(chunk, normalizedTargetLang);
+          translatedChunks.push(translatedChunk);
         }
 
-        const translatedChunk = await this.translateChunk(chunk, normalizedTargetLang);
-        translatedChunks.push(translatedChunk);
+        // Восстанавливаем текст с сохранением ссылок
+        const translatedText = restoreTextWithLinks(translatedChunks, links);
+
+        return {
+          text: translatedText,
+          sourceLanguage: undefined, // Google определяет язык автоматически
+          provider: this.provider,
+        };
       }
-
-      // Восстанавливаем текст с сохранением ссылок
-      const translatedText = restoreTextWithLinks(translatedChunks, links);
-
-      return {
-        text: translatedText,
-        sourceLanguage: undefined, // Google определяет язык автоматически
-        provider: this.provider,
-      };
     } catch (error) {
       if (error instanceof TranslationError) {
         throw error;
