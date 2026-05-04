@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
-import { extractStatusBar } from '../../utils/statusBar';
+import { extractStatusBar, normalizeStatusBarPosition } from '../../utils/statusBar';
 import { StatusBar } from './StatusBar';
 
 // ==================== Обработка кавычек ====================
@@ -120,9 +120,18 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
   children,
 }) => {
   const { statusBar, processedContent } = useMemo(() => {
-    const { statusBar: parsedStatusBar, content: extractedContent } = extractStatusBar(children);
+    // Сначала нормализуем позицию статус-блоков (переносим в начало если нужно)
+    const { content: normalizedContent, allParsed } = normalizeStatusBarPosition(children);
+    
+    // Затем извлекаем статус-бар из начала нормализованного текста
+    const { statusBar: mainStatusBar, content: extractedContent } = extractStatusBar(normalizedContent);
+    
+    // allParsed содержит все распаршенные блоки - они уже обработаны и удалены из текста
+    // (используется для внутренней логики, визуальное отображение только основного блока)
+    void allParsed;
+    
     const withSpan = wrapQuotesWithSpan(extractedContent);
-    return { statusBar: parsedStatusBar, processedContent: withSpan };
+    return { statusBar: mainStatusBar, processedContent: withSpan };
   }, [children]);
 
   return (
