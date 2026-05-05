@@ -319,9 +319,10 @@ function formatMessagesForQwenInternal(
 
     if (block && block.is_compressed === 1) {
       // Если это первое сообщение блока (start_message_id), добавляем summary
+      // Используем role: 'user' вместо 'system', т.к. system сообщение должно быть первым
       if (msg.id === block.start_message_id) {
         messages.push({
-          role: 'system',
+          role: 'user',
           content: `[Сжатая история: ${block.title}]\n${block.summary}`
         });
       }
