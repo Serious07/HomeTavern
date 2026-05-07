@@ -69,35 +69,56 @@ export class TranslationService {
   }
 
   /**
-   * Определение языка текста
+   * Определение языка текста на основе большинства слов
    * @param text - Текст для анализа
    * @returns Код языка ('ru', 'en' или другой)
    */
   async detectLanguage(text: string): Promise<string> {
-    // Простая эвристика для определения языка
     const trimmedText = text.trim();
     if (!trimmedText) {
       console.log('[TranslationService] detectLanguage: empty text, returning "en"');
       return 'en';
     }
 
-    // Если есть кириллица - скорее всего русский
-    const hasCyrillic = /[а-яА-ЯёЁ]/.test(trimmedText);
-    if (hasCyrillic) {
-      console.log('[TranslationService] detectLanguage: detected Russian (cyrillic)');
-      return 'ru';
+    // Извлекаем только текстовое содержимое, игнорируя теги (<narration>, <speech>, [Calendar:], и т.д.)
+    const plainText = trimmedText
+      .replace(/<[^>]+>/g, ' ')       // Убираем угловые теги
+      .replace(/\[.*?\]/g, ' ')        // Убираем текст в квадратных скобках целиком
+      .replace(/[|]/g, ' ')            // Убираем вертикальные черты
+      .replace(/—/g, ' ')              // Убираем тире
+      .trim();
+
+    // Разбиваем на слова (последовательности букв)
+    const russianWords = plainText.match(/[а-яА-ЯёЁ]+/g) || [];
+    const englishWords = plainText.match(/[a-zA-Z]+/g) || [];
+
+    const ruCount = russianWords.length;
+    const enCount = englishWords.length;
+    const total = ruCount + enCount;
+
+    if (total === 0) {
+      // Нет ни русских, ни английских слов — проверяем наличие кириллицы как fallback
+      const hasCyrillic = /[а-яА-ЯёЁ]/.test(trimmedText);
+      console.log(`[TranslationService] detectLanguage: no word tokens found, hasCyrillic=${hasCyrillic}, returning "${hasCyrillic ? 'ru' : 'en'}"`);
+      return hasCyrillic ? 'ru' : 'en';
     }
 
-    // Если есть только латиница - английский
-    const hasLatin = /[a-zA-Z]/.test(trimmedText);
-    if (hasLatin) {
-      console.log('[TranslationService] detectLanguage: detected English (latin)');
-      return 'en';
+    const ruRatio = ruCount / total;
+    const enRatio = enCount / total;
+
+    let detected: string;
+    if (enRatio > ruRatio) {
+      detected = 'en';
+    } else if (ruRatio > enRatio) {
+      detected = 'ru';
+    } else {
+      // При равенстве — смотрим на абсолютные числа
+      // Если слов немного (короткая фраза), по умолчанию считаем русским (так как русские слова чаще содержат спецсимволы)
+      detected = total > 4 ? 'ru' : 'en';
     }
 
-    // По умолчанию английский
-    console.log('[TranslationService] detectLanguage: defaulting to English');
-    return 'en';
+    console.log(`[TranslationService] detectLanguage: ruWords=${ruCount}, enWords=${enCount}, total=${total}, ruRatio=${ruRatio.toFixed(2)}, enRatio=${enRatio.toFixed(2)}, detected="${detected}"`);
+    return detected;
   }
 
   /**
