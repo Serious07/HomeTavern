@@ -35,6 +35,12 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   // Ref для отслеживания того, что reasoningContent был получен (чтобы показывать кнопку если есть мысли)
   const hasReasoningContentRef = useRef(false);
   
+  // Ref для отслеживания ошибки (чтобы eventSource.onerror мог видеть обновлённое значение)
+  const errorRef = useRef<string | null>(null);
+  useEffect(() => {
+    errorRef.current = error;
+  }, [error]);
+  
   // Ref для скролла к стриминговому сообщению и к концу контента
   const streamingMessageRef = useRef<HTMLDivElement>(null);
   const contentEndRef = useRef<HTMLDivElement>(null);
@@ -126,6 +132,26 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       }
     });
 
+    eventSource.addEventListener('error', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.error('[SSE error] Server reported error:', data.message);
+        const errorMessage = data.message || 'Ошибка генерации ответа на сервере';
+        setError(errorMessage);
+        setIsStreaming(false);
+        eventSource.close();
+        eventSourceRef.current = null;
+
+        // Notify parent of the error
+        if (onError) {
+          onError(errorMessage);
+        }
+      } catch (err) {
+        // If we can't parse the error event, treat it as a connection error
+        console.error('[SSE error] Error parsing error event or connection error:', err);
+      }
+    });
+
     eventSource.addEventListener('done', (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
@@ -156,19 +182,22 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
     });
 
     eventSource.onerror = (err) => {
-      console.error('SSE Connection Error:', err);
-      console.error('EventSource readyState:', eventSource.readyState);
-      console.error('EventSource url:', eventSource.url);
-      
-      setIsStreaming(false);
-      eventSource.close();
-      eventSourceRef.current = null;
+      // Only handle as connection error if we haven't already received a server error
+      if (!errorRef.current) {
+        console.error('SSE Connection Error:', err);
+        console.error('EventSource readyState:', eventSource.readyState);
+        console.error('EventSource url:', eventSource.url);
+        
+        setIsStreaming(false);
+        eventSource.close();
+        eventSourceRef.current = null;
 
-      const errorMessage = 'Ошибка соединения с потоком ответа. Проверьте консоль сервера.';
-      setError(errorMessage);
+        const errorMessage = 'Ошибка соединения с потоком ответа. Проверьте консоль сервера.';
+        setError(errorMessage);
 
-      if (onError) {
-        onError(errorMessage);
+        if (onError) {
+          onError(errorMessage);
+        }
       }
     };
 
@@ -290,6 +319,133 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       {error && (
         <div className="mt-3 p-3 bg-red-900/30 border border-red-700 rounded-lg">
           <p className="text-red-400 text-sm">{error}</p>
+          <button
+            onClick={() => {
+              // Перезапускаем SSE подключение для повторной попытки
+              setError(null);
+              setIsStreaming(true);
+              
+              const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+              const url = token 
+                ? `/api/chats/${chatId}/stream?token=${token}`
+                : `/api/chats/${chatId}/stream`;
+              
+              const retrySource = new EventSource(url);
+              eventSourceRef.current = retrySource;
+
+              // Повторная подписка на события
+              retrySource.addEventListener('reasoning_token', (event: MessageEvent) => {
+                try {
+                  const data = JSON.parse(event.data);
+                  setReasoningContent((prev) => {
+                    const newValue = prev + data.token;
+                    reasoningContentRef.current = newValue;
+                    hasReasoningContentRef.current = true;
+                    return newValue;
+                  });
+                } catch (err) {
+                  // Ignore parse errors
+                }
+              });
+
+              retrySource.addEventListener('content_token', (event: MessageEvent) => {
+                try {
+                  const data = JSON.parse(event.data);
+                  setContent((prev) => {
+                    const newValue = prev + data.token;
+                    contentRef.current = newValue;
+                    return newValue;
+                  });
+                } catch (err) {
+                  // Ignore parse errors
+                }
+              });
+
+              retrySource.addEventListener('message_id', (event: MessageEvent) => {
+                try {
+                  const data = JSON.parse(event.data);
+                  messageIdRef.current = data.messageId;
+                } catch (err) {
+                  // Ignore parse errors
+                }
+              });
+
+              retrySource.addEventListener('translation', (event: MessageEvent) => {
+                try {
+                  const data = JSON.parse(event.data);
+                  if (data.translatedText) {
+                    translatedTextRef.current = data.translatedText;
+                  }
+                } catch (err) {
+                  // Ignore parse errors
+                }
+              });
+
+              retrySource.addEventListener('done', (event: MessageEvent) => {
+                try {
+                  const data = JSON.parse(event.data);
+                  setIsStreaming(false);
+                  retrySource.close();
+                  eventSourceRef.current = null;
+
+                  if (onComplete) {
+                    onComplete({
+                      id: messageIdRef.current || (data.messageId ? parseInt(data.messageId) : 0),
+                      chat_id: chatId,
+                      user_id: 0,
+                      content: contentRef.current,
+                      role: 'assistant',
+                      reasoning_content: reasoningContentRef.current,
+                      translated_content: translatedTextRef.current || data.translatedText || null,
+                      created_at: new Date().toISOString(),
+                    } as Message);
+                  }
+                } catch (err) {
+                  // Ignore parse errors
+                }
+              });
+
+              retrySource.addEventListener('error', (event: MessageEvent) => {
+                try {
+                  const data = JSON.parse(event.data);
+                  console.error('[SSE error retry] Server reported error:', data.message);
+                  const errorMessage = data.message || 'Ошибка генерации ответа на сервере';
+                  setError(errorMessage);
+                  setIsStreaming(false);
+                  retrySource.close();
+                  eventSourceRef.current = null;
+
+                  if (onError) {
+                    onError(errorMessage);
+                  }
+                } catch (err) {
+                  console.error('[SSE error retry] Error parsing error event:', err);
+                }
+              });
+
+              retrySource.onerror = (err) => {
+                if (!errorRef.current) {
+                  console.error('SSE Connection Error (retry):', err);
+                  setIsStreaming(false);
+                  retrySource.close();
+                  eventSourceRef.current = null;
+
+                  const errorMessage = 'Ошибка соединения с потоком ответа. Проверьте консоль сервера.';
+                  setError(errorMessage);
+
+                  if (onError) {
+                    onError(errorMessage);
+                  }
+                }
+              };
+            }}
+            className="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm text-white transition flex items-center gap-1"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Повторить
+          </button>
         </div>
       )}
 

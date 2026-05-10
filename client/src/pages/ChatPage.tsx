@@ -246,12 +246,13 @@ const ChatPage: React.FC = () => {
     }, 100);
   }, [fetchMessages, syncDuringGeneration, syncContextStats, soundEnabled]);
 
-  const handleStreamingError = useCallback(async (error: string) => {
-    console.error('[ChatPage] Streaming error:', error);
-    await fetchMessages(false);
+  const handleStreamingError = useCallback(async (errorMessage: string) => {
+    console.error('[ChatPage] Streaming error:', errorMessage);
+    // Не вызываем fetchMessages здесь - ошибка должна оставаться видимой
+    // Сообщения из БД не будут затерты, так как при ошибке LLM новое сообщение не создаётся
     setIsStreaming(false);
     setIsSending(false);
-  }, [fetchMessages]);
+  }, []);
 
   const handleStreamingStop = useCallback(async () => {
     await fetchMessages(false);
