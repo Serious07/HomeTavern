@@ -391,19 +391,72 @@ export class LLMService {
   private currentConnectionId: number | null = null;
 
   constructor() {
-    // Load from database first, fallback to .env
+    // Load from database first (active connection), fallback to .env
     this.baseURL = process.env.LLM_BASE_URL || 'http://localhost:1234/v1';
     this.apiKey = process.env.LLM_API_KEY || 'local-model-key';
     this.model = process.env.LLM_MODEL || 'qwen-3.5';
     this.maxTokens = parseInt(process.env.LLM_MAX_TOKENS || '') || 64000;
 
+    // Try to load active connection from database on startup
+    this._loadActiveConnectionFromDB();
+
     // Debug logging
     console.log('[LLMService] LLM_BASE_URL:', this.baseURL);
     console.log('[LLMService] LLM_MODEL:', this.model);
     console.log('[LLMService] LLM_API_KEY:', this.apiKey ? '***SET***' : 'NOT SET');
+    console.log('[LLMService] Active connection ID:', this.currentConnectionId);
 
     // Try to initialize LLMClient
     this._initLLMClient();
+  }
+
+  /**
+   * Load the active LLM connection from database for the first admin user
+   * This ensures the correct connection is used after server restart
+   */
+  private _loadActiveConnectionFromDB(): void {
+    try {
+      // Get all users to find the first admin user
+      const users = userRepository.getAllUsers();
+      const adminUser = users.find((u: any) => u.role === 'admin');
+      
+      if (!adminUser) {
+        console.log('[LLMService] No admin user found, using .env settings');
+        return;
+      }
+
+      // Get the active connection for this user
+      const activeConn = llmConnectionRepository.getActiveByUserId(adminUser.id);
+      
+      if (!activeConn) {
+        console.log('[LLMService] No active LLM connection found in database, using .env settings');
+        return;
+      }
+
+      // Get decrypted key
+      const decryptedConn = llmConnectionRepository.getByIdWithDecryptedKey(activeConn.id);
+      if (!decryptedConn) {
+        console.log('[LLMService] Could not decrypt connection, using .env settings');
+        return;
+      }
+
+      // Update LLM service settings from database connection
+      this.currentConnectionId = activeConn.id;
+      this.baseURL = decryptedConn.base_url;
+      this.apiKey = decryptedConn.api_key_decrypted;
+      this.model = decryptedConn.model;
+      this.maxTokens = decryptedConn.max_tokens;
+
+      console.log('[LLMService] Loaded active connection from database:', decryptedConn.name);
+      console.log('[LLMService] Connection ID:', activeConn.id);
+      console.log('[LLMService] BASE_URL:', this.baseURL);
+      console.log('[LLMService] MODEL:', this.model);
+
+      // Reinitialize client with database settings
+      this._initLLMClient();
+    } catch (error) {
+      console.warn('[LLMService] Failed to load active connection from DB, using .env settings:', error);
+    }
   }
 
   /**
