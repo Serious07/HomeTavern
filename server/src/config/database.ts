@@ -98,6 +98,20 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  -- Character Greetings table - stores multiple greeting messages per character
+  CREATE TABLE IF NOT EXISTS character_greetings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_id INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  );
+
+  -- Index for fast queries on character_greetings
+  CREATE INDEX IF NOT EXISTS idx_character_greetings_character_id ON character_greetings(character_id);
+
   -- Index for fast queries on user_id and is_active
   CREATE INDEX IF NOT EXISTS idx_system_prompts_user_active ON system_prompts(user_id, is_active);
 
@@ -208,6 +222,99 @@ try {
     console.log('[Database] Column short_description already exists');
   } else {
     console.error('[Database] short_description migration error:', error);
+  }
+}
+
+// Миграция: Добавление колонки current_greeting_index в таблицу characters
+try {
+  const charsTableInfo = db.prepare("PRAGMA table_info(characters)").all() as any[];
+  const charColumnNames = charsTableInfo.map((col: any) => col.name);
+  
+  if (!charColumnNames.includes('current_greeting_index')) {
+    db.exec(`
+      ALTER TABLE characters ADD COLUMN current_greeting_index INTEGER DEFAULT NULL;
+    `);
+    console.log('[Database] Added column: current_greeting_index');
+  } else {
+    console.log('[Database] Column current_greeting_index already exists');
+  }
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate column')) {
+    console.log('[Database] Column current_greeting_index already exists');
+  } else {
+    console.error('[Database] current_greeting_index migration error:', error);
+  }
+}
+
+// Миграция: Создание таблицы character_greetings для существующих баз
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS character_greetings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL,
+      message TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+    );
+  `);
+  
+  // Создаём индекс если его нет
+  try {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_character_greetings_character_id ON character_greetings(character_id);
+    `);
+  } catch (indexError) {
+    console.log('[Database] Index already exists or creation skipped');
+  }
+  
+  console.log('[Database] character_greetings table migration completed successfully');
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate')) {
+    console.log('[Database] character_greetings table already exists');
+  } else {
+    console.error('[Database] character_greetings migration error:', error);
+  }
+}
+
+// Миграция: Перенос existing first_message как первого приветствия для существующих персонажей
+try {
+  // Проверяем, нужно ли выполнять миграцию (таблица greetings пуста и есть персонажи с first_message)
+  const greetingsCount = db.prepare("SELECT COUNT(*) as count FROM character_greetings").get() as { count: number };
+  const charactersWithFirstMessage = db.prepare(
+    "SELECT id, first_message FROM characters WHERE first_message IS NOT NULL AND first_message != ''"
+  ).all();
+  
+  if ((greetingsCount as any).count === 0 && charactersWithFirstMessage.length > 0) {
+    const insertStmt = db.prepare(
+      `INSERT INTO character_greetings (character_id, message, sort_order)
+       VALUES (?, ?, 0)`
+    );
+    
+    const insertMany = db.transaction((chars: Array<{id: number; first_message: string}>) => {
+      for (const char of chars) {
+        try {
+          insertStmt.run(char.id, char.first_message);
+        } catch (e) {
+          // Skip characters that already have greetings
+        }
+      }
+    });
+    
+    insertMany(charactersWithFirstMessage);
+    console.log(`[Database] Migration: Created initial greetings for ${charactersWithFirstMessage.length} characters`);
+  } else {
+    console.log('[Database] Greeting migration skipped (either table not empty or no characters with first_message)');
+  }
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate')) {
+    console.log('[Database] Greeting data migration already done');
+  } else {
+    console.error('[Database] Greeting data migration error:', error);
   }
 }
 

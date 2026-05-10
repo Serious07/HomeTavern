@@ -1,12 +1,24 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { charactersApi, chatsApi } from '../services/api';
-import { Character } from '../types';
+import { Character, CharacterGreeting } from '../types';
 import CharacterEditor from '../components/characters/CharacterEditor';
+import GreetingSelector from '../components/characters/GreetingSelector';
+import GreetingsManager from '../components/characters/GreetingsManager';
 import AppHeader from '../components/common/AppHeader';
 
 const CharactersPage: React.FC = () => {
   const navigate = useNavigate();
+
+  // Russian pluralization helper for "приветствие"
+  const getGreetingRusPlural = (count: number): string => {
+    const abs = Math.abs(count) % 100;
+    const lastDigit = abs % 10;
+    if (abs > 10 && abs < 20) return 'ов';
+    if (lastDigit === 1) return 'е';
+    if (lastDigit >= 2 && lastDigit <= 4) return 'я';
+    return 'ов';
+  };
   
   const [characters, setCharacters] = useState<Character[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -15,6 +27,16 @@ const CharactersPage: React.FC = () => {
   const [editingCharacter, setEditingCharacter] = useState<Character | undefined>(undefined);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [characterToDelete, setCharacterToDelete] = useState<number | null>(null);
+
+  // Greeting selection state
+  const [greetingSelectionCharId, setGreetingSelectionCharId] = useState<number | null>(null);
+  const [greetingSelectionGreetings, setGreetingSelectionGreetings] = useState<CharacterGreeting[]>([]);
+  const [greetingSelectionLoading, setGreetingSelectionLoading] = useState(false);
+
+  // Greetings manager state
+  const [showGreetingsManager, setShowGreetingsManager] = useState(false);
+  const [managerCharId, setManagerCharId] = useState<number | null>(null);
+  const [managerGreetings, setManagerGreetings] = useState<CharacterGreeting[]>([]);
 
   const fetchCharacters = useCallback(async () => {
     try {
@@ -70,10 +92,8 @@ const CharactersPage: React.FC = () => {
   const handleSave = async (characterData: Omit<Character, 'id' | 'created_at' | 'updated_at'>) => {
     try {
       if (editingCharacter?.id) {
-        // Update existing character
         await charactersApi.update(editingCharacter.id, characterData);
       } else {
-        // Create new character
         await charactersApi.create(characterData);
       }
       setShowEditor(false);
@@ -89,9 +109,89 @@ const CharactersPage: React.FC = () => {
     setEditingCharacter(undefined);
   };
 
+  // Greeting selection handlers
+  const handleChatClick = async (character: Character) => {
+    if (!character.id) return;
+
+    try {
+      setGreetingSelectionLoading(true);
+      const response = await charactersApi.getGreetings(character.id);
+      const greetings = response.data;
+
+      if (greetings.length <= 1) {
+        // Only one greeting - create chat immediately
+        await createChat(character.id!, undefined);
+      } else {
+        // Multiple greetings - show selector
+        setGreetingSelectionCharId(character.id!);
+        setGreetingSelectionGreetings(greetings);
+      }
+    } catch (err: any) {
+      console.error('Error fetching greetings:', err);
+      // Fallback: create chat without greeting selection
+      await createChat(character.id!, undefined);
+    } finally {
+      setGreetingSelectionLoading(false);
+    }
+  };
+
+  const createChat = async (characterId: number, greetingIndex?: number) => {
+    try {
+      const body: any = {
+        character_id: characterId,
+        title: `Чат с ${characters.find(c => c.id === characterId)?.name || 'персонажа'}`,
+      };
+      if (greetingIndex !== undefined) {
+        body.greeting_index = greetingIndex;
+      }
+
+      const response = await chatsApi.create(body);
+      navigate(`/chats/${response.data.id}`);
+    } catch (err: any) {
+      console.error('Error creating chat:', err);
+      alert(err.response?.data?.message || 'Ошибка при создании чата');
+    }
+  };
+
+  const handleGreetingSelect = async (greetingIndex: number) => {
+    if (greetingSelectionCharId) {
+      await createChat(greetingSelectionCharId, greetingIndex);
+      setGreetingSelectionCharId(null);
+      setGreetingSelectionGreetings([]);
+    }
+  };
+
+  const handleGreetingCancel = () => {
+    setGreetingSelectionCharId(null);
+    setGreetingSelectionGreetings([]);
+  };
+
+  // Greetings manager handlers
+  const handleManageGreetings = async (character: Character) => {
+    if (!character.id) return;
+
+    try {
+      const response = await charactersApi.getGreetings(character.id);
+      setManagerCharId(character.id);
+      setManagerGreetings(response.data);
+      setShowGreetingsManager(true);
+    } catch (err: any) {
+      console.error('Error fetching greetings:', err);
+      // If error is 404 (no greetings), start with empty list
+      setManagerCharId(character.id);
+      setManagerGreetings([]);
+      setShowGreetingsManager(true);
+    }
+  };
+
+  const handleGreetingsSave = async (updatedGreetings: CharacterGreeting[]) => {
+    setManagerGreetings(updatedGreetings);
+    // Refresh characters to update any cached data
+    fetchCharacters();
+  };
+
   const handleImportFromSillyTavern = () => {
     console.log('[handleImportFromSillyTavern] ENTER');
-    // Create a file input for importing
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
@@ -106,18 +206,16 @@ const CharactersPage: React.FC = () => {
             name: data.name,
             has_first_mes: !!data.first_mes,
             first_mes_preview: data.first_mes?.substring(0, 50),
-            has_greeting: !!data.greeting,
-            has_first_message: !!data.first_message,
+            alternate_greetings_count: data.alternate_greetings?.length || 0,
           });
           
-          // Map SillyTavern format to our format
-          // SillyTavern uses "first_mes" not "first_message" or "greeting"
           const characterData = {
             name: data.name || 'Unknown Character',
             description: data.description || '',
             personality: data.personality || '',
             first_message: data.first_mes || data.first_message || data.greeting || '',
             system_prompt: '',
+            greetings: data.alternate_greetings ? [data.first_mes, ...data.alternate_greetings].filter(Boolean) : undefined,
           };
           
           console.log('[handleImportFromSillyTavern] Character data to create:', characterData);
@@ -231,30 +329,42 @@ const CharactersPage: React.FC = () => {
                 </div>
               </div>
 
+              {/* Greetings count badge */}
+              <div className="px-4 pb-2">
+                <div className="flex items-center gap-2">
+                  <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                  <span className="text-xs text-gray-500">
+                    {(character.greeting_count || 0) > 0 
+                      ? `${character.greeting_count!} приветстви${getGreetingRusPlural(character.greeting_count!)}` 
+                      : 'Нет приветствий'}
+                  </span>
+                </div>
+              </div>
+
               {/* Card actions */}
               <div className="mt-auto px-4 py-3 bg-gray-800/80 border-t border-gray-700 flex items-center justify-between">
                 <button
-                  onClick={async () => {
-                    if (!character.id) return;
-                    try {
-                      const response = await chatsApi.create({
-                        character_id: character.id,
-                        title: `Чат с ${character.name}`,
-                      });
-                      navigate(`/chats/${response.data.id}`);
-                    } catch (err: any) {
-                      console.error('Error creating chat:', err);
-                      alert(err.response?.data?.message || 'Ошибка при создании чата');
-                    }
-                  }}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-white text-sm font-medium transition"
+                  onClick={() => handleChatClick(character)}
+                  disabled={greetingSelectionLoading}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-white text-sm font-medium transition disabled:opacity-50"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h13M8 12l-4-4m4 4l4-4m-4 4v10m-4-10H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-4" />
                   </svg>
                   Чат
                 </button>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleManageGreetings(character)}
+                    className="p-2 text-gray-400 hover:text-cyan-400 hover:bg-cyan-900/30 rounded-lg transition"
+                    title="Управление приветствиями"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                  </button>
                   <button
                     onClick={() => handleEditClick(character)}
                     className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
@@ -286,6 +396,29 @@ const CharactersPage: React.FC = () => {
           character={editingCharacter}
           onSave={handleSave}
           onCancel={handleCancel}
+        />
+      )}
+
+      {/* Greeting selection modal */}
+      {greetingSelectionCharId && greetingSelectionGreetings.length > 0 && (
+        <GreetingSelector
+          greetings={greetingSelectionGreetings}
+          onSelect={handleGreetingSelect}
+          onCancel={handleGreetingCancel}
+        />
+      )}
+
+      {/* Greetings manager modal */}
+      {showGreetingsManager && managerCharId && (
+        <GreetingsManager
+          characterId={managerCharId}
+          greetings={managerGreetings}
+          onSave={handleGreetingsSave}
+          onClose={() => {
+            setShowGreetingsManager(false);
+            setManagerCharId(null);
+            setManagerGreetings([]);
+          }}
         />
       )}
 

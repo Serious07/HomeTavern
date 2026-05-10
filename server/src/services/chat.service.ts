@@ -35,9 +35,10 @@ export class ChatService {
   }
 
   /**
-   * Создание чата
+   * Создание чата с возможностью выбора приветствия
+   * @param greetingIndex - индекс активного приветствия (0-based), если не указан используется первое
    */
-  async createChat(userId: number, characterId: number, title?: string): Promise<Chat> {
+  async createChat(userId: number, characterId: number, title?: string, greetingIndex?: number): Promise<Chat> {
     // Проверка существования пользователя
     const user = userRepository.findUserById(userId);
     if (!user) {
@@ -59,12 +60,14 @@ export class ChatService {
     const chat = chatRepository.createChat(userId, characterId, title);
     console.log('[ChatService] Created chat', chat.id, 'with updated_at:', chat.updated_at);
 
-    // Если у персонажа есть first_message, добавляем его как первое сообщение с переводом
-    if (character.first_message) {
-      console.log('[ChatService] Creating chat with first_message:', character.first_message.substring(0, 50) + '...');
+    // Получаем активное приветствие (из greetings или из first_message)
+    const effectiveFirstMessage = characterRepository.getActiveFirstMessage(characterId, greetingIndex ?? character.current_greeting_index ?? null);
+    
+    if (effectiveFirstMessage && effectiveFirstMessage.trim().length > 0) {
+      console.log('[ChatService] Creating chat with first_message:', effectiveFirstMessage.substring(0, 50) + '...');
       
       // Проверяем язык first_message
-      const detectedLang = await translationService.detectLanguage(character.first_message);
+      const detectedLang = await translationService.detectLanguage(effectiveFirstMessage);
       console.log('[ChatService] Detected language for first_message:', detectedLang);
       
       let translatedContent: string | undefined = undefined;
@@ -72,7 +75,7 @@ export class ChatService {
       // Если сообщение на английском, переводим на русский
       if (detectedLang === 'en') {
         console.log('[ChatService] Translating first_message from English to Russian...');
-        translatedContent = await translationService.translateToRussian(character.first_message);
+        translatedContent = await translationService.translateToRussian(effectiveFirstMessage);
         console.log('[ChatService] Translated first_message:', translatedContent?.substring(0, 50) + '...');
       }
       
@@ -80,7 +83,7 @@ export class ChatService {
       messageRepository.createMessage(
         chat.id,
         'assistant',
-        character.first_message,
+        effectiveFirstMessage,
         translatedContent
       );
     }

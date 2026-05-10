@@ -54,10 +54,7 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
       newErrors.description = 'Описание обязательно';
     }
 
-    if (!formData.first_message.trim()) {
-      newErrors.first_message = 'Первое сообщение обязательно';
-    }
-
+    // first_message теперь опционален - можно управлять через greetings
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -308,7 +305,7 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
           {/* First message field */}
           <div>
             <label htmlFor="first_message" className="block text-sm font-medium text-gray-300 mb-2">
-              Первое сообщение *
+              Первое сообщение <span className="text-gray-500">(опционально)</span>
             </label>
             <textarea
               id="first_message"
@@ -319,10 +316,13 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
               className={`w-full px-4 py-3 bg-gray-700/50 border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 transition resize-none ${
                 errors.first_message ? 'border-red-500' : 'border-gray-600'
             } text-white placeholder-gray-500`}
-              placeholder="Приветственное сообщение персонажа..."
+              placeholder="Приветственное сообщение персонажа (или управляйте через альтернативные приветствия)..."
               disabled={isLoading}
             />
             {errors.first_message && <p className="mt-1 text-sm text-red-400">{errors.first_message}</p>}
+            <p className="mt-1 text-xs text-gray-500">
+              💡 Вы можете управлять несколькими приветствиями через кнопку "Управление приветствиями" на странице персонажей
+            </p>
           </div>
 
           {/* Action buttons */}

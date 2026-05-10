@@ -1,5 +1,5 @@
 import db from '../config/database';
-import { Character, CreateCharacterInput, UpdateCharacterInput, SillyTavernCharacter } from '../types';
+import { Character, CreateCharacterInput, UpdateCharacterInput, SillyTavernCharacter, CharacterGreeting } from '../types';
 
 export const characterRepository = {
   /**
@@ -164,5 +164,154 @@ export const characterRepository = {
     const stmt = db.prepare('SELECT id FROM characters WHERE id = ? AND user_id = ?');
     const result = stmt.get(characterId, userId) as { id: number } | undefined;
     return result !== undefined;
+  },
+
+  // ==================== Character Greetings Methods ====================
+
+  /**
+   * Получение всех приветствий персонажа
+   */
+  getAllGreetings: (characterId: number): CharacterGreeting[] => {
+    const stmt = db.prepare(
+      'SELECT * FROM character_greetings WHERE character_id = ? ORDER BY sort_order ASC, id ASC'
+    );
+    return stmt.all(characterId) as CharacterGreeting[];
+  },
+
+  /**
+   * Получение конкретного приветствия
+   */
+  getGreetingById: (id: number): CharacterGreeting | undefined => {
+    const stmt = db.prepare('SELECT * FROM character_greetings WHERE id = ?');
+    return stmt.get(id) as CharacterGreeting | undefined;
+  },
+
+  /**
+   * Получение приветствия по индексу (sort_order)
+   */
+  getGreetingByOrder: (characterId: number, sortOrder: number): CharacterGreeting | undefined => {
+    const stmt = db.prepare(
+      'SELECT * FROM character_greetings WHERE character_id = ? AND sort_order = ? ORDER BY id ASC LIMIT 1'
+    );
+    return stmt.get(characterId, sortOrder) as CharacterGreeting | undefined;
+  },
+
+  /**
+   * Создание нового приветствия
+   */
+  createGreeting: (data: { character_id: number; message: string; sort_order: number }): CharacterGreeting => {
+    const stmt = db.prepare(
+      `INSERT INTO character_greetings (character_id, message, sort_order)
+       VALUES (?, ?, ?)`
+    );
+    const result = stmt.run(data.character_id, data.message, data.sort_order);
+    const greeting = characterRepository.getGreetingById(result.lastInsertRowid as number);
+    if (!greeting) {
+      throw new Error('Failed to create greeting');
+    }
+    return greeting;
+  },
+
+  /**
+   * Обновление приветствия
+   */
+  updateGreeting: (id: number, data: { message?: string; sort_order?: number }): CharacterGreeting | undefined => {
+    const existing = characterRepository.getGreetingById(id);
+    if (!existing) {
+      return undefined;
+    }
+
+    const stmt = db.prepare(
+      `UPDATE character_greetings
+       SET message = COALESCE(?, message),
+           sort_order = COALESCE(?, sort_order),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    );
+    stmt.run(data.message, data.sort_order !== undefined ? data.sort_order : existing.sort_order, id);
+    return characterRepository.getGreetingById(id);
+  },
+
+  /**
+   * Удаление приветствия
+   */
+  deleteGreeting: (id: number): boolean => {
+    const stmt = db.prepare('DELETE FROM character_greetings WHERE id = ?');
+    const result = stmt.run(id);
+    return result.changes > 0;
+  },
+
+  /**
+   * Удаление всех приветствий персонажа
+   */
+  deleteGreetingsByCharacterId: (characterId: number): boolean => {
+    const stmt = db.prepare('DELETE FROM character_greetings WHERE character_id = ?');
+    const result = stmt.run(characterId);
+    return result.changes > 0;
+  },
+
+  /**
+   * Upsert всех приветствий персонажа (удаляет старые, создаёт новые)
+   * Используется при импорте из SillyTavern или обновлении через редактор
+   */
+  upsertAllGreetings: (characterId: number, greetings: Array<{ message: string; sort_order: number }>): void => {
+    // Сначала удаляем все существующие приветствия персонажа
+    characterRepository.deleteGreetingsByCharacterId(characterId);
+
+    // Затем создаём новые
+    if (greetings.length === 0) return;
+
+    const insertStmt = db.prepare(
+      `INSERT INTO character_greetings (character_id, message, sort_order)
+       VALUES (?, ?, ?)`
+    );
+
+    const insertMany = db.transaction((data: Array<{ character_id: number; message: string; sort_order: number }>) => {
+      for (const g of data) {
+        insertStmt.run(g.character_id, g.message, g.sort_order);
+      }
+    });
+
+    insertMany(greetings.map(g => ({ character_id: characterId, message: g.message, sort_order: g.sort_order })));
+  },
+
+  /**
+   * Получение первого сообщения персонажа (из greetings по индексу или из first_message)
+   */
+  getActiveFirstMessage: (characterId: number, greetingIndex: number | null): string | null => {
+    if (greetingIndex !== null && greetingIndex >= 0) {
+      const greeting = characterRepository.getGreetingByOrder(characterId, greetingIndex);
+      if (greeting) {
+        return greeting.message;
+      }
+    }
+    // Fallback: используем first_message
+    const character = characterRepository.getCharacterById(characterId);
+    return character?.first_message || null;
+  },
+
+  /**
+   * Обновление количества приветствий в кэше персонажа (для первого сообщения)
+   */
+  updateFirstMessageFromGreetings: (characterId: number): void => {
+    const activeGreeting = db.prepare(
+      `SELECT message FROM character_greetings WHERE character_id = ? ORDER BY sort_order ASC, id ASC LIMIT 1`
+    ).get(characterId) as { message: string } | undefined;
+
+    if (activeGreeting) {
+      db.prepare('UPDATE characters SET first_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+        activeGreeting.message,
+        characterId
+      );
+    }
+  },
+
+  /**
+   * Получение количества приветствий персонажа (для отображения в списке)
+   */
+  getGreetingCountByCharacterId: (characterId: number): number => {
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM character_greetings WHERE character_id = ?');
+    const result = stmt.get(characterId) as { count: number };
+    return result.count;
   },
 };

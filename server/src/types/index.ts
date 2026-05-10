@@ -18,6 +18,27 @@ export interface CreateUserInput {
   role?: UserRole;
 }
 
+// Character Greetings types
+export interface CharacterGreeting {
+  id: number;
+  character_id: number;
+  message: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateCharacterGreetingInput {
+  character_id: number;
+  message: string;
+  sort_order?: number;
+}
+
+export interface UpdateCharacterGreetingInput {
+  message?: string;
+  sort_order?: number;
+}
+
 // Character types
 export interface Character {
   id: number;
@@ -28,6 +49,7 @@ export interface Character {
   personality: string | null;
   first_message: string | null;
   avatar: string | null;
+  current_greeting_index: number | null;  // Index of the currently active greeting (0-based)
   created_at: string;
   updated_at: string;
 }
@@ -40,6 +62,7 @@ export interface CreateCharacterInput {
   personality?: string;
   first_message?: string;
   avatar?: string;
+  greetings?: string[];  // Array of greeting messages (optional)
 }
 
 export interface UpdateCharacterInput {
@@ -49,6 +72,7 @@ export interface UpdateCharacterInput {
   personality?: string;
   first_message?: string;
   avatar?: string;
+  current_greeting_index?: number | null;
 }
 
 // SillyTavern import types

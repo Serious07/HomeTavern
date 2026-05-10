@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Character, Chat, Message, Hero, SystemPrompt } from '../types';
+import { Character, CharacterGreeting, Chat, Message, Hero, SystemPrompt } from '../types';
 import { STORAGE_KEYS } from '../constants/storage';
 
 // Context API types
@@ -74,6 +74,20 @@ export const charactersApi = {
   update: (id: number, data: Partial<Character>) =>
     api.put<Character>(`/characters/${id}`, data),
   delete: (id: number) => api.delete(`/characters/${id}`),
+  // Greeting management endpoints
+  getGreetings: (characterId: number) => api.get<CharacterGreeting[]>(`/characters/${characterId}/greetings`),
+  setGreetings: (characterId: number, greetings: string[]) =>
+    api.post<CharacterGreeting[]>(`/characters/${characterId}/greetings`, { greetings }),
+  addGreeting: (characterId: number, message: string) =>
+    api.post<CharacterGreeting>(`/characters/${characterId}/greetings/add`, { message }),
+  updateGreeting: (greetingId: number, data: { message?: string }) =>
+    api.put<CharacterGreeting>(`/characters/greetings/${greetingId}`, data),
+  deleteGreeting: (greetingId: number) =>
+    api.delete(`/characters/greetings/${greetingId}`),
+  setActiveGreeting: (characterId: number, sortOrder: number) =>
+    api.put<Character>(`/characters/${characterId}/active-greeting`, { sort_order: sortOrder }),
+  moveGreeting: (greetingId: number, sortOrder: number) =>
+    api.put<CharacterGreeting>(`/characters/greetings/${greetingId}/move`, { sort_order: sortOrder }),
 };
 
 // Chats API

@@ -1,3 +1,12 @@
+export interface CharacterGreeting {
+  id: number;
+  character_id: number;
+  message: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Character {
   id?: number;
   name: string;
@@ -6,6 +15,9 @@ export interface Character {
   personality?: string;
   first_message: string;
   avatar?: string;
+  current_greeting_index?: number | null;
+  greetings?: CharacterGreeting[];
+  greeting_count?: number;
   created_at?: string;
   updated_at?: string;
 }

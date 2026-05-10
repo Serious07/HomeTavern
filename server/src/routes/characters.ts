@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { characterService } from '../services/character.service';
-import { CreateCharacterInput, UpdateCharacterInput, SillyTavernCharacter } from '../types';
+import { characterRepository } from '../repositories/character.repository';
+import { CreateCharacterInput, UpdateCharacterInput, SillyTavernCharacter, CharacterGreeting } from '../types';
 import { llmService } from '../services/llm.service';
 
 const router = Router();
@@ -17,7 +18,14 @@ router.get('/', (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
     const characters = characterService.getAllCharacters(userId);
-    res.status(200).json(characters);
+    
+    // Добавляем количество приветствий к каждому персонажу
+    const charactersWithGreetings = characters.map(character => ({
+      ...character,
+      greeting_count: characterRepository.getGreetingCountByCharacterId(character.id),
+    }));
+    
+    res.status(200).json(charactersWithGreetings);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -163,6 +171,189 @@ router.post('/import', (req: AuthenticatedRequest, res: Response) => {
     console.log('[characters.import] Error caught:', error_);
     const statusCode = error_.statusCode || 400;
     res.status(statusCode).json({ error: error_.message });
+  }
+});
+
+// ==================== Character Greetings Routes ====================
+
+/**
+ * GET /api/characters/:id/greetings
+ * Получение всех приветствий персонажа
+ */
+router.get('/:id/greetings', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const characterId = parseInt(req.params.id, 10);
+    
+    if (isNaN(characterId)) {
+      return res.status(400).json({ error: 'Invalid character ID' });
+    }
+    
+    const greetings = characterService.getAllGreetings(characterId, userId);
+    res.status(200).json(greetings);
+  } catch (error) {
+    const error_ = error as Error & { statusCode?: number };
+    res.status((error_ as any).statusCode || 400).json({ error: (error_ as Error).message });
+  }
+});
+
+/**
+ * POST /api/characters/:id/greetings
+ * Установка (создание/обновление) всех приветствий персонажа
+ * Body: { greetings: string[] }
+ */
+router.post('/:id/greetings', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const characterId = parseInt(req.params.id, 10);
+    const { greetings } = req.body;
+    
+    if (isNaN(characterId)) {
+      return res.status(400).json({ error: 'Invalid character ID' });
+    }
+    
+    if (!greetings || !Array.isArray(greetings)) {
+      return res.status(400).json({ error: 'greetings array is required' });
+    }
+    
+    const result = characterService.setGreetings(characterId, userId, greetings);
+    res.status(200).json(result);
+  } catch (error) {
+    const error_ = error as Error & { statusCode?: number };
+    res.status((error_ as any).statusCode || 400).json({ error: (error_ as Error).message });
+  }
+});
+
+/**
+ * POST /api/characters/:id/greetings/add
+ * Добавление нового приветствия
+ * Body: { message: string }
+ */
+router.post('/:id/greetings/add', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const characterId = parseInt(req.params.id, 10);
+    const { message } = req.body;
+    
+    if (isNaN(characterId)) {
+      return res.status(400).json({ error: 'Invalid character ID' });
+    }
+    
+    if (!message) {
+      return res.status(400).json({ error: 'message is required' });
+    }
+    
+    const result = characterService.addGreeting(characterId, userId, message);
+    res.status(201).json(result);
+  } catch (error) {
+    const error_ = error as Error & { statusCode?: number };
+    res.status((error_ as any).statusCode || 400).json({ error: (error_ as Error).message });
+  }
+});
+
+/**
+ * PUT /api/characters/greetings/:greetingId
+ * Обновление конкретного приветствия
+ * Body: { message: string }
+ */
+router.put('/greetings/:greetingId', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const greetingId = parseInt(req.params.greetingId, 10);
+    const { message } = req.body;
+    
+    const result = characterService.updateGreeting(greetingId, userId, { message });
+    
+    if (!result) {
+      return res.status(404).json({ error: 'Greeting not found' });
+    }
+    
+    res.status(200).json(result);
+  } catch (error) {
+    const error_ = error as Error & { statusCode?: number };
+    res.status((error_ as any).statusCode || 400).json({ error: (error_ as Error).message });
+  }
+});
+
+/**
+ * DELETE /api/characters/greetings/:greetingId
+ * Удаление конкретного приветствия
+ */
+router.delete('/greetings/:greetingId', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const greetingId = parseInt(req.params.greetingId, 10);
+    
+    const deleted = characterService.deleteGreeting(greetingId, userId);
+    
+    if (!deleted) {
+      return res.status(404).json({ error: 'Greeting not found' });
+    }
+    
+    res.status(200).json({ message: 'Greeting deleted successfully' });
+  } catch (error) {
+    const error_ = error as Error & { statusCode?: number };
+    res.status((error_ as any).statusCode || 400).json({ error: (error_ as Error).message });
+  }
+});
+
+/**
+ * PUT /api/characters/:id/active-greeting
+ * Установка активного приветствия (по sort_order индексу)
+ * Body: { sort_order: number }
+ */
+router.put('/:id/active-greeting', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const characterId = parseInt(req.params.id, 10);
+    const { sort_order } = req.body;
+    
+    if (isNaN(characterId)) {
+      return res.status(400).json({ error: 'Invalid character ID' });
+    }
+    
+    if (sort_order === undefined) {
+      return res.status(400).json({ error: 'sort_order is required' });
+    }
+    
+    const result = characterService.setActiveGreeting(characterId, userId, sort_order);
+    
+    if (!result) {
+      return res.status(404).json({ error: 'Greeting not found or character access denied' });
+    }
+    
+    res.status(200).json(result);
+  } catch (error) {
+    const error_ = error as Error & { statusCode?: number };
+    res.status((error_ as any).statusCode || 400).json({ error: (error_ as Error).message });
+  }
+});
+
+/**
+ * PUT /api/characters/greetings/:greetingId/move
+ * Перемещение приветствия (изменение sort_order)
+ * Body: { sort_order: number }
+ */
+router.put('/greetings/:greetingId/move', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const greetingId = parseInt(req.params.greetingId, 10);
+    const { sort_order } = req.body;
+    
+    if (sort_order === undefined) {
+      return res.status(400).json({ error: 'sort_order is required' });
+    }
+    
+    const result = characterService.moveGreeting(greetingId, userId, sort_order);
+    
+    if (!result) {
+      return res.status(404).json({ error: 'Greeting not found' });
+    }
+    
+    res.status(200).json(result);
+  } catch (error) {
+    const error_ = error as Error & { statusCode?: number };
+    res.status((error_ as any).statusCode || 400).json({ error: (error_ as Error).message });
   }
 });
 

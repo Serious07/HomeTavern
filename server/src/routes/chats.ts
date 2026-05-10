@@ -303,18 +303,18 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
 /**
  * POST /api/chats
  * Создание чата
- * Body: { character_id: number, title?: string }
+ * Body: { character_id: number, title?: string, greeting_index?: number }
  */
 router.post('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { character_id, title } = req.body;
+    const { character_id, title, greeting_index } = req.body;
 
     if (!character_id) {
       return res.status(400).json({ error: 'character_id is required' });
     }
 
-    const chat = await chatService.createChat(userId, character_id, title);
+    const chat = await chatService.createChat(userId, character_id, title, greeting_index);
     res.status(201).json(chat);
   } catch (error) {
     const error_ = error as Error & { statusCode?: number };
