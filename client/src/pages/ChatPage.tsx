@@ -101,6 +101,9 @@ const ChatPage: React.FC = () => {
   // State для мобильного модального окна ввода
   const [showMobileInputModal, setShowMobileInputModal] = useState(false);
   
+  // Значение текста из основного поля ввода при открытии модального окна
+  const [mobileModalValue, setMobileModalValue] = useState('');
+  
   // Принудительный ре-рендер для обновления StreamingResponse при переключении showThinking
   const [, forceUpdate] = useState(0);
   
@@ -304,6 +307,13 @@ const ChatPage: React.FC = () => {
 
   // Ref для хранения текущего значения ввода (для handleSendMessage)
   const currentInputRef = useRef<string>('');
+  
+  // Обработчик открытия мобильного модального окна — копирует текущий текст из основного поля
+  const handleOpenMobileInputModal = useCallback(() => {
+    // Копируем текущее значение из основного поля ввода в состояние модального окна
+    setMobileModalValue(currentInputRef.current);
+    setShowMobileInputModal(true);
+  }, []);
   
   // State для управления очисткой поля ввода и фокусом
   const [inputClearKey, setInputClearKey] = useState(0);
@@ -858,7 +868,7 @@ const ChatPage: React.FC = () => {
             disabled={isSending || isStreaming || !currentChat}
             placeholder="Введите сообщение..."
             showMobileModal={true}
-            onOpenMobileModal={() => setShowMobileInputModal(true)}
+            onOpenMobileModal={handleOpenMobileInputModal}
             autoFocus={inputAutoFocus}
           />
         </div>
@@ -910,8 +920,11 @@ const ChatPage: React.FC = () => {
       {/* Mobile message input modal */}
       <MobileMessageInputModal
         isOpen={showMobileInputModal}
-        value=""
-        onChange={() => {}}
+        value={mobileModalValue}
+        onChange={(val) => {
+          // Обновляем текущее значение ввода из модального окна
+          currentInputRef.current = val;
+        }}
         onSend={handleSendMessage}
         onClose={() => setShowMobileInputModal(false)}
         placeholder="Введите сообщение..."
