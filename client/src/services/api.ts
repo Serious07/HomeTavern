@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Character, CharacterGreeting, Chat, Message, Hero, SystemPrompt } from '../types';
+import { Character, CharacterGreeting, Chat, Message, Hero, SystemPrompt, LlmConnection, LlmConnectionCreate, LlmConnectionUpdate, LlmTestResult } from '../types';
 import { STORAGE_KEYS } from '../constants/storage';
 
 // Context API types
@@ -164,6 +164,22 @@ export const settingsApi = {
   getAll: () => api.get<Record<string, string>>('/settings'),
   update: (key: string, value: string) => api.put('/settings', { key, value }),
   delete: (key: string) => api.delete(`/settings?key=${encodeURIComponent(key)}`),
+};
+
+// LLM Connections API
+export const llmConnectionsApi = {
+  getAll: () => api.get<LlmConnection[]>('/llm-connections'),
+  getById: (id: number) => api.get<LlmConnection>(`/llm-connections/${id}`),
+  getActive: () => api.get<LlmConnection>('/llm-connections/active'),
+  getDecrypted: (id: number) => api.get<LlmConnection>(`/llm-connections/${id}/decrypt`),
+  showKey: (id: number) => api.get<{ api_key_decrypted: string }>(`/llm-connections/${id}/show-key`),
+  create: (data: LlmConnectionCreate) => api.post<LlmConnection>('/llm-connections', data),
+  update: (id: number, data: LlmConnectionUpdate) => api.put<LlmConnection>(`/llm-connections/${id}`, data),
+  activate: (id: number) => api.put<LlmConnection>(`/llm-connections/${id}/activate`),
+  delete: (id: number) => api.delete(`/llm-connections/${id}`),
+  switch: (connectionId: number) => api.post<{ success: boolean; connection: any }>('/llm-connections/switch', { connection_id: connectionId }),
+  test: (data: { base_url: string; api_key: string; model: string }) => 
+    api.post<LlmTestResult>('/llm-connections/test', data),
 };
 
 export default api;

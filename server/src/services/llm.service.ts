@@ -11,6 +11,7 @@ import { contextRepository } from '../repositories/context.repository';
 import { chatBlockRepository, ChatBlock } from '../repositories/chat-block.repository';
 import { compressionService } from './compression.service';
 import { systemPromptService } from './system-prompt.service';
+import { llmConnectionRepository } from '../repositories/llm-connection.repository';
 
 // Типы для LLM
 export interface LLMMessage {
@@ -384,22 +385,32 @@ export class LLMService {
   private baseURL: string;
   private apiKey: string;
   private model: string;
+  private maxTokens: number;
   private client: any; // LLMClient instance
   private activeAbortControllers: Map<number, AbortController> = new Map();
+  private currentConnectionId: number | null = null;
 
   constructor() {
+    // Load from database first, fallback to .env
     this.baseURL = process.env.LLM_BASE_URL || 'http://localhost:1234/v1';
     this.apiKey = process.env.LLM_API_KEY || 'local-model-key';
     this.model = process.env.LLM_MODEL || 'qwen-3.5';
+    this.maxTokens = parseInt(process.env.LLM_MAX_TOKENS || '') || 64000;
 
     // Debug logging
     console.log('[LLMService] LLM_BASE_URL:', this.baseURL);
     console.log('[LLMService] LLM_MODEL:', this.model);
     console.log('[LLMService] LLM_API_KEY:', this.apiKey ? '***SET***' : 'NOT SET');
 
-    // Инициализация LLMClient (предполагается, что llm-client установлен)
+    // Try to initialize LLMClient
+    this._initLLMClient();
+  }
+
+  /**
+   * Initialize/reinitialize the LLMClient with current connection settings
+   */
+  private _initLLMClient(): void {
     try {
-      // Динамический импорт llm-client
       const { LLMClient } = require('llm-client');
       this.client = new LLMClient({
          baseURL: this.baseURL,
@@ -412,6 +423,72 @@ export class LLMService {
       console.warn('[LLMService] Error:', error);
       this.client = null;
     }
+  }
+
+  /**
+   * Switch to a database connection by ID
+   * Returns the connection details or null if not found
+   */
+  switchToConnection(userId: number, connectionId: number): Promise<{
+    success: boolean;
+    connection?: any;
+    error?: string;
+  }> {
+    try {
+      const conn = llmConnectionRepository.getByIdWithDecryptedKey(connectionId);
+      if (!conn || conn.user_id !== userId) {
+        return Promise.resolve({ success: false, error: 'Connection not found' });
+      }
+
+      this.currentConnectionId = connectionId;
+      this.baseURL = conn.base_url;
+      this.apiKey = conn.api_key_decrypted;
+      this.model = conn.model;
+      this.maxTokens = conn.max_tokens;
+
+      // Reinitialize client with new settings
+      this._initLLMClient();
+
+      console.log('[LLMService] Switched to connection:', conn.name);
+      console.log('[LLMService] New BASE_URL:', this.baseURL);
+      console.log('[LLMService] New MODEL:', this.model);
+
+      return Promise.resolve({
+        success: true,
+        connection: {
+          id: conn.id,
+          name: conn.name,
+          base_url: conn.base_url,
+          model: conn.model,
+        }
+      });
+    } catch (error) {
+      console.error('[LLMService] Error switching connection:', error);
+      return Promise.resolve({ success: false, error: 'Internal error' });
+    }
+  }
+
+  /**
+   * Get the currently active connection for a user
+   */
+  getActiveConnection(userId: number): any {
+    const conn = llmConnectionRepository.getActiveByUserId(userId);
+    if (!conn) return null;
+
+    const decrypted = llmConnectionRepository.getByIdWithDecryptedKey(conn.id);
+    return decrypted;
+  }
+
+  /**
+   * Get current connection info (without API key)
+   */
+  getConnectionInfo() {
+    return {
+      baseURL: this.baseURL,
+      model: this.model,
+      maxTokens: this.maxTokens,
+      connectionId: this.currentConnectionId,
+    };
   }
 
   /**

@@ -23,6 +23,8 @@ import compressionRoutes from './routes/compression';
 import translateRoutes from './routes/translate';
 import systemPromptsRoutes from './routes/system-prompts';
 import settingsRoutes from './routes/settings';
+import llmConnectionsRoutes from './routes/llm-connections';
+import { initLlmConnectionsTable, seedConnectionsFromEnv } from './utils/llm-connections-init';
 
 const app: Application = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -75,6 +77,12 @@ app.use('/api/system-prompts', systemPromptsRoutes);
 // Settings routes
 app.use('/api/settings', settingsRoutes);
 
+// LLM Connections routes
+app.use('/api/llm-connections', llmConnectionsRoutes);
+
+// Initialize LLM connections table
+initLlmConnectionsTable();
+
 // Автоматическое создание администратора при первом запуске
 const initializeAdminUser = async () => {
   try {
@@ -92,9 +100,19 @@ const initializeAdminUser = async () => {
       console.log(`  Логин: ${admin.username}`);
       console.log(`  Пароль: ${adminPassword}`);
       console.log('='.repeat(50));
-    } else {
-      const adminCount = allUsers.filter(u => u.role === 'admin').length;
-      console.log(`В системе уже есть ${adminCount} администратор(ов)`);
+    }
+
+    // Seed LLM connections from .env for the first admin user
+    const firstAdmin = allUsers.find((u: any) => u.role === 'admin');
+    if (firstAdmin) {
+      try {
+        const createdIds = seedConnectionsFromEnv(firstAdmin.id);
+        if (createdIds.length > 0) {
+          console.log(`[LLM Connections] Seeded ${createdIds.length} connection(s) from .env`);
+        }
+      } catch (seedError) {
+        console.warn('[LLM Connections] Seeding from .env failed (table may not exist yet):', seedError);
+      }
     }
   } catch (error) {
     console.error('Ошибка при создании администратора:', error);

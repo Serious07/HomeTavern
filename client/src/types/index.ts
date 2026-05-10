@@ -85,3 +85,46 @@ export interface SystemPrompt {
   created_at: string;
   updated_at: string;
 }
+
+// LLM Connection types
+export interface LlmConnection {
+  id: number;
+  user_id: number;
+  name: string;
+  base_url: string;
+  api_key_encrypted: string | null;
+  model: string;
+  max_tokens: number;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  api_key_masked?: string | null;
+  has_api_key?: boolean;
+  api_key_decrypted?: string;
+}
+
+export interface LlmConnectionCreate {
+  name: string;
+  base_url: string;
+  api_key: string;
+  model: string;
+  max_tokens: number;
+}
+
+export interface LlmConnectionUpdate {
+  name?: string;
+  base_url?: string;
+  api_key?: string;
+  model?: string;
+  max_tokens?: number;
+}
+
+export interface LlmTestResult {
+  success: boolean;
+  message: string;
+  response_time_ms: number;
+  model_response?: string;
+  server_status?: number;
+  server_error?: string;
+  error?: string;
+}

@@ -6,6 +6,7 @@ import ChatPage from './pages/ChatPage';
 import HeroPage from './pages/HeroPage';
 import SettingsPage from './pages/SettingsPage';
 import SystemPromptsPage from './pages/SystemPromptsPage';
+import LlmConnectionsPage from './pages/LlmConnectionsPage';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import { EcoModeProvider } from './contexts/EcoModeContext';
 
@@ -71,6 +72,14 @@ function App() {
         element={
           <ProtectedRoute>
             <SystemPromptsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/llm-connections"
+        element={
+          <ProtectedRoute>
+            <LlmConnectionsPage />
           </ProtectedRoute>
         }
       />
