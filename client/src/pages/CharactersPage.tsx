@@ -4,7 +4,6 @@ import { charactersApi, chatsApi } from '../services/api';
 import { Character, CharacterGreeting } from '../types';
 import CharacterEditor from '../components/characters/CharacterEditor';
 import GreetingSelector from '../components/characters/GreetingSelector';
-import GreetingsManager from '../components/characters/GreetingsManager';
 import AppHeader from '../components/common/AppHeader';
 
 const CharactersPage: React.FC = () => {
@@ -32,11 +31,6 @@ const CharactersPage: React.FC = () => {
   const [greetingSelectionCharId, setGreetingSelectionCharId] = useState<number | null>(null);
   const [greetingSelectionGreetings, setGreetingSelectionGreetings] = useState<CharacterGreeting[]>([]);
   const [greetingSelectionLoading, setGreetingSelectionLoading] = useState(false);
-
-  // Greetings manager state
-  const [showGreetingsManager, setShowGreetingsManager] = useState(false);
-  const [managerCharId, setManagerCharId] = useState<number | null>(null);
-  const [managerGreetings, setManagerGreetings] = useState<CharacterGreeting[]>([]);
 
   const fetchCharacters = useCallback(async () => {
     try {
@@ -164,30 +158,6 @@ const CharactersPage: React.FC = () => {
   const handleGreetingCancel = () => {
     setGreetingSelectionCharId(null);
     setGreetingSelectionGreetings([]);
-  };
-
-  // Greetings manager handlers
-  const handleManageGreetings = async (character: Character) => {
-    if (!character.id) return;
-
-    try {
-      const response = await charactersApi.getGreetings(character.id);
-      setManagerCharId(character.id);
-      setManagerGreetings(response.data);
-      setShowGreetingsManager(true);
-    } catch (err: any) {
-      console.error('Error fetching greetings:', err);
-      // If error is 404 (no greetings), start with empty list
-      setManagerCharId(character.id);
-      setManagerGreetings([]);
-      setShowGreetingsManager(true);
-    }
-  };
-
-  const handleGreetingsSave = async (updatedGreetings: CharacterGreeting[]) => {
-    setManagerGreetings(updatedGreetings);
-    // Refresh characters to update any cached data
-    fetchCharacters();
   };
 
   const handleImportFromSillyTavern = () => {
@@ -357,15 +327,6 @@ const CharactersPage: React.FC = () => {
                 </button>
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => handleManageGreetings(character)}
-                    className="p-2 text-gray-400 hover:text-cyan-400 hover:bg-cyan-900/30 rounded-lg transition"
-                    title="Управление приветствиями"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                    </svg>
-                  </button>
-                  <button
                     onClick={() => handleEditClick(character)}
                     className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
                     title="Редактировать"
@@ -405,20 +366,6 @@ const CharactersPage: React.FC = () => {
           greetings={greetingSelectionGreetings}
           onSelect={handleGreetingSelect}
           onCancel={handleGreetingCancel}
-        />
-      )}
-
-      {/* Greetings manager modal */}
-      {showGreetingsManager && managerCharId && (
-        <GreetingsManager
-          characterId={managerCharId}
-          greetings={managerGreetings}
-          onSave={handleGreetingsSave}
-          onClose={() => {
-            setShowGreetingsManager(false);
-            setManagerCharId(null);
-            setManagerGreetings([]);
-          }}
         />
       )}
 
