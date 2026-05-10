@@ -35,6 +35,7 @@ interface MessageListProps {
   onToggleThinking?: (messageId: number) => void;
   translatingMessageId?: number | null;
   onTranslate?: (messageId: number) => void;
+  translationEnabled?: boolean;
   blocks?: ChatBlockWithParsedIds[];
   onEditBlock?: (blockId: number, updates: { title?: string; summary?: string }) => void;
   onToggleBlockCompression?: (blockId: number, isCompressed: boolean) => void;
@@ -67,6 +68,7 @@ const MessageItem = memo(({
   onToggleThinking,
   translatingMessageId,
   onTranslate,
+  translationEnabled,
   isLastAssistantMessage,
   messageIndex,
   isSelectionMode,
@@ -81,6 +83,7 @@ const MessageItem = memo(({
   onToggleThinking?: (messageId: number) => void;
   translatingMessageId?: number | null;
   onTranslate?: (messageId: number) => void;
+  translationEnabled: boolean;
   isLastAssistantMessage: boolean;
   messageIndex: number;
   isSelectionMode?: boolean;
@@ -307,60 +310,64 @@ const MessageItem = memo(({
 
           {!isEditing && (
             <div className="flex items-center gap-1">
-              {message.role === 'assistant' && translatingMessageId === message.id && (
-                <span className="text-xs text-gray-400">Перевод...</span>
-              )}
-              
-              {message.role === 'assistant' && message.translated_content && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleOriginal();
-                  }}
-                  className="p-1 px-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs font-medium bg-gray-800/50"
-                  title={showOriginal ? 'Показать перевод' : 'Показать оригинал'}
-                >
-                  {showOriginal ? 'RU' : 'EN'}
-                </button>
-              )}
-              
-              {message.role === 'assistant' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onTranslate(message.id);
-                  }}
-                  className="p-1 px-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition text-xs font-medium bg-gray-800/50"
-                  title="Перевести на русский"
-                >
-                  RU
-                </button>
-              )}
-              
-              {message.role === 'user' && message.translated_content && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleOriginal();
-                  }}
-                  className="p-1 px-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs font-medium bg-gray-800/50"
-                  title={showOriginal ? 'Показать перевод (EN)' : 'Показать оригинал (RU)'}
-                >
-                  {showOriginal ? 'EN' : 'RU'}
-                </button>
-              )}
-              
-              {message.role === 'user' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onTranslate(message.id);
-                  }}
-                  className="p-1 px-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition text-xs font-medium bg-gray-800/50"
-                  title="Перевести на английский"
-                >
-                  EN
-                </button>
+              {translationEnabled && (
+                <>
+                  {message.role === 'assistant' && translatingMessageId === message.id && (
+                    <span className="text-xs text-gray-400">Перевод...</span>
+                  )}
+                  
+                  {message.role === 'assistant' && message.translated_content && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleOriginal();
+                      }}
+                      className="p-1 px-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs font-medium bg-gray-800/50"
+                      title={showOriginal ? 'Показать перевод' : 'Показать оригинал'}
+                    >
+                      {showOriginal ? 'RU' : 'EN'}
+                    </button>
+                  )}
+                  
+                  {message.role === 'assistant' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTranslate(message.id);
+                      }}
+                      className="p-1 px-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition text-xs font-medium bg-gray-800/50"
+                      title="Перевести на русский"
+                    >
+                      RU
+                    </button>
+                  )}
+                  
+                  {message.role === 'user' && message.translated_content && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleOriginal();
+                      }}
+                      className="p-1 px-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs font-medium bg-gray-800/50"
+                      title={showOriginal ? 'Показать перевод (EN)' : 'Показать оригинал (RU)'}
+                    >
+                      {showOriginal ? 'EN' : 'RU'}
+                    </button>
+                  )}
+                  
+                  {message.role === 'user' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTranslate(message.id);
+                      }}
+                      className="p-1 px-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition text-xs font-medium bg-gray-800/50"
+                      title="Перевести на английский"
+                    >
+                      EN
+                    </button>
+                  )}
+                </>
               )}
               
               <button
@@ -450,6 +457,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onToggleThinking,
   translatingMessageId = null,
   onTranslate,
+  translationEnabled = true,
   blocks = [],
   onEditBlock,
   onToggleBlockCompression,
@@ -662,6 +670,7 @@ const MessageList: React.FC<MessageListProps> = ({
                     onToggleThinking={onToggleThinking}
                     translatingMessageId={translatingMessageId}
                     onTranslate={onTranslate}
+                    translationEnabled={translationEnabled}
                     isLastAssistantMessage={false}
                     messageIndex={messages.findIndex(m => m.id === msg.id)}
                   />
@@ -694,6 +703,7 @@ const MessageList: React.FC<MessageListProps> = ({
           onToggleThinking={onToggleThinking}
           translatingMessageId={translatingMessageId}
           onTranslate={onTranslate}
+          translationEnabled={translationEnabled}
           isLastAssistantMessage={isLastAssistantMessage}
           messageIndex={actualMessageIndex}
           isSelectionMode={isSelectionMode}
@@ -702,7 +712,7 @@ const MessageList: React.FC<MessageListProps> = ({
         />
       );
     }
-  }, [expandedBlockMessages, lastAssistantIndex, isSelectionMode, selectionStart, selectionEnd, onEditBlock, onToggleBlockCompression, onDeleteBlock, handleExpandBlock, onBlockUpdate, handleCollapseBlock, onRegenerate, onEdit, onDelete, showThinking, onToggleThinking, translatingMessageId, onTranslate, handleSelectionClick]);
+  }, [expandedBlockMessages, lastAssistantIndex, translationEnabled, isSelectionMode, selectionStart, selectionEnd, onEditBlock, onToggleBlockCompression, onDeleteBlock, handleExpandBlock, onBlockUpdate, handleCollapseBlock, onRegenerate, onEdit, onDelete, showThinking, onToggleThinking, translatingMessageId, onTranslate, handleSelectionClick]);
 
   const hasMoreMessages = totalItemCount > displayCount;
 

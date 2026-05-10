@@ -95,6 +95,9 @@ const ChatPage: React.FC = () => {
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [notificationVolume, setNotificationVolume] = useState<number>(70);
   
+  // Translation setting
+  const [translationEnabled, setTranslationEnabled] = useState<boolean>(true);
+  
   // Ref для хранения состояния showThinking для стримингового сообщения
   const streamingMessageThinkingRef = useRef<boolean>(false);
   
@@ -297,6 +300,9 @@ const ChatPage: React.FC = () => {
         }
         if (data.notification_volume !== undefined) {
           setNotificationVolume(parseInt(data.notification_volume) || 70);
+        }
+        if (data.translation_enabled !== undefined) {
+          setTranslationEnabled(data.translation_enabled === 'true');
         }
       } catch (err) {
         console.error('Error loading settings:', err);
@@ -827,6 +833,7 @@ const ChatPage: React.FC = () => {
                   onToggleThinking={handleToggleThinking}
                   translatingMessageId={translatingMessageId}
                   onTranslate={handleTranslateMessage}
+                  translationEnabled={translationEnabled}
                   // Пропсы для сжатия истории
                   blocks={blocks}
                   onEditBlock={handleEditBlock}
