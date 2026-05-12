@@ -13,6 +13,156 @@ import { compressionService } from './compression.service';
 import { systemPromptService } from './system-prompt.service';
 import { llmConnectionRepository } from '../repositories/llm-connection.repository';
 
+/**
+ * Оценивает количество токенов в тексте.
+ * На основе данных из ошибки: 56266 токенов для 77923 символов = 1.385 символов на токен.
+ * Добавляем запас ~20% на структуру сообщений, role tokens и separators.
+ * Итого: 1 токен ≈ 1.17 символов (делим на 1.17 чтобы получить conservative оценку)
+ */
+function estimateTokenCount(text: string): number {
+  if (!text || text.length === 0) return 0;
+  const chars = text.length;
+  // 1.385 символов на токен + 20% запас = делим на ~1.17
+  return Math.ceil(chars / 1.17);
+}
+
+/**
+ * Обрезает историю сообщений, чтобы уложиться в лимит контекста.
+ * Возвращает обрезанный массив сообщений, сохраняя самые последние.
+ */
+function truncateHistoryToFitContext(
+  historyMessages: Message[],
+  compressedBlocks: ChatBlock[] | null,
+  systemContent: string,
+  characterProfileContent: string,
+  heroProfileContent: string | null,
+  currentMessage: string,
+  heroName: string | null,
+  maxInputTokens: number
+): { truncatedHistory: Message[], usedCompression: boolean } {
+  
+  // Создаем маппинг message_id -> block для быстрого поиска
+  const messageToBlock = new Map<number, ChatBlock>();
+  const compressedBlockSummaries: Array<{ msg: Message, block: ChatBlock }> = [];
+  
+  if (compressedBlocks) {
+    for (const block of compressedBlocks) {
+      const messageIds = JSON.parse(block.original_message_ids || '[]') as number[];
+      messageIds.forEach(msgId => {
+        messageToBlock.set(msgId, block);
+      });
+      // Находим первое сообщение блока для summary
+      const firstMsgId = block.start_message_id;
+      const firstMsg = historyMessages.find(m => m.id === firstMsgId);
+      if (firstMsg) {
+        compressedBlockSummaries.push({ msg: firstMsg, block });
+      }
+    }
+  }
+
+  // Функция оценки общего количества токенов
+  function estimateTotalTokens(historyToUse: Message[]): number {
+    let total = 0;
+    // System prompt + formatting instruction + character profile
+    total += estimateTokenCount(systemContent);
+    total += estimateTokenCount(characterProfileContent);
+    if (heroProfileContent) {
+      total += estimateTokenCount(heroProfileContent);
+    }
+    // Current message
+    total += estimateTokenCount(currentMessage);
+    
+    // History messages
+    for (const msg of historyToUse) {
+      if (msg.hidden) continue;
+      const block = messageToBlock.get(msg.id);
+      if (block && block.is_compressed === 1 && msg.id === block.start_message_id) {
+        // Summary for compressed block
+        const summary = `[Сжатая история: ${block.title}]\n${block.summary}`;
+        total += estimateTokenCount(summary);
+      } else if (!block || block.is_compressed !== 1) {
+        const content = msg.role === 'user'
+          ? (msg.translated_content || msg.content)
+          : msg.content;
+        total += estimateTokenCount(content);
+      }
+    }
+    
+    // Добавляем токены за структуру сообщений (role tokens, separators)
+    // Примерно 4 токена на сообщение
+    total += historyToUse.length * 4;
+    
+    return total;
+  }
+
+  // Если сжатие уже используется, проверяем, укладываемся ли мы
+  const totalTokensWithCompression = estimateTotalTokens(historyMessages);
+  if (totalTokensWithCompression <= maxInputTokens) {
+    return { truncatedHistory: historyMessages, usedCompression: true };
+  }
+
+  // Если сжатие не используется, пробуем обрезать историю
+  let effectiveHistory: Message[] = historyMessages;
+  
+  if (compressedBlocks && compressedBlocks.length > 0) {
+    // Сжатие уже используется - удаляем несжатые сообщения из начала истории
+    // Оставляем только последние N сообщений, которые помещаются в контекст
+    let left = 0;
+    let right = effectiveHistory.length;
+    
+    while (left < right) {
+      const mid = Math.floor((left + right) / 2);
+      const testHistory = effectiveHistory.slice(mid);
+      const tokens = estimateTotalTokens(testHistory);
+      
+      if (tokens <= maxInputTokens) {
+        // Проверяем, можно ли добавить ещё
+        if (mid > 0) {
+          const testHistory2 = effectiveHistory.slice(mid - 1);
+          const tokens2 = estimateTotalTokens(testHistory2);
+          if (tokens2 <= maxInputTokens) {
+            left = mid;
+          } else {
+            right = mid;
+            break;
+          }
+        } else {
+          break;
+        }
+      } else {
+        left = mid + 1;
+      }
+    }
+    
+    // Находим минимальный срез, который укладывается
+    for (let i = 0; i < effectiveHistory.length; i++) {
+      const testHistory = effectiveHistory.slice(i);
+      const tokens = estimateTotalTokens(testHistory);
+      if (tokens <= maxInputTokens) {
+        effectiveHistory = testHistory;
+        // Пробуем добавить ещё одно сообщение
+        if (i > 0) {
+          const testHistory2 = effectiveHistory.slice(-effectiveHistory.length - 1);
+          const tokens2 = estimateTotalTokens(testHistory2);
+          if (tokens2 <= maxInputTokens) {
+            effectiveHistory = historyMessages.slice(i - 1);
+          }
+        }
+        break;
+      }
+    }
+  } else {
+    // Сжатие не используется - нужно предложить сжатие
+    // Возвращаем пустую историю, чтобы клиент предложил сжатие
+    return { truncatedHistory: [], usedCompression: false };
+  }
+
+  const finalTokens = estimateTotalTokens(effectiveHistory);
+  console.log(`[LLMService] History truncated: ${historyMessages.length} -> ${effectiveHistory.length} messages (${finalTokens} tokens)`);
+  
+  return { truncatedHistory: effectiveHistory, usedCompression: true };
+}
+
 // Типы для LLM
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant';
@@ -248,114 +398,115 @@ export function formatMessagesForQwen(
   return messages;
 }
 
-/**
- * Внутренняя функция форматирования с поддержкой сжатых блоков
- */
-function formatMessagesForQwenInternal(
-  userId: number,
-  character: any,
-  heroProfile: string | null,
-  heroName: string | null,
-  historyMessages: Message[],
-  currentMessage: string,
-  compressedBlocks: ChatBlock[] | null  // Сжатые блоки (null = без сжатия)
-): LLMMessage[] {
-  const messages: LLMMessage[] = [];
+  /**
+   * Внутренняя функция форматирования с поддержкой сжатых блоков
+   * historyMessages уже обрезана снаружи
+   */
+  function formatMessagesForQwenInternal(
+    userId: number,
+    character: any,
+    heroProfile: string | null,
+    heroName: string | null,
+    historyMessages: Message[],
+    currentMessage: string,
+    compressedBlocks: ChatBlock[] | null  // Сжатые блоки (null = без сжатия)
+  ): LLMMessage[] {
+    const messages: LLMMessage[] = [];
 
-  // 1. Получаем активный системный промпт пользователя
-  const systemParts: string[] = [];
-  
-  const activePrompt = systemPromptService.getActiveSystemPrompt(userId);
-  if (activePrompt?.prompt_text) {
-    const processedSystemPrompt = replaceUserPlaceholders(activePrompt.prompt_text, heroName);
-    systemParts.push(processedSystemPrompt);
-  }
+    // 1. Получаем активный системный промпт пользователя
+    const systemParts: string[] = [];
+    
+    const activePrompt = systemPromptService.getActiveSystemPrompt(userId);
+    if (activePrompt?.prompt_text) {
+      const processedSystemPrompt = replaceUserPlaceholders(activePrompt.prompt_text, heroName);
+      systemParts.push(processedSystemPrompt);
+    }
 
-  // Добавляем инструкцию по форматированию текста
-  systemParts.push(LLM_FORMATTING_INSTRUCTION.trim());
+    // Добавляем инструкцию по форматированию текста
+    systemParts.push(LLM_FORMATTING_INSTRUCTION.trim());
 
-  // 2. Описание персонажа (Character profile)
-  const characterProfileParts: string[] = [];
-  characterProfileParts.push(`Name: ${character.name}`);
-  if (character.description) {
-    characterProfileParts.push(`Description: ${character.description}`);
-  }
-  if (character.personality) {
-    characterProfileParts.push(`Personality: ${character.personality}`);
-  }
-  if (characterProfileParts.length > 0) {
-    systemParts.push(`Character:\n${characterProfileParts.join('\n')}`);
-  }
+    // 2. Описание персонажа (Character profile)
+    const characterProfileParts: string[] = [];
+    characterProfileParts.push(`Name: ${character.name}`);
+    if (character.description) {
+      characterProfileParts.push(`Description: ${character.description}`);
+    }
+    if (character.personality) {
+      characterProfileParts.push(`Personality: ${character.personality}`);
+    }
+    if (characterProfileParts.length > 0) {
+      systemParts.push(`Character:\n${characterProfileParts.join('\n')}`);
+    }
 
-  // 3. Профиль героя (Hero profile)
-  if (heroProfile) {
-    systemParts.push(`Hero Profile:\n${heroProfile}`);
-  }
+    // 3. Профиль героя (Hero profile)
+    if (heroProfile) {
+      systemParts.push(`Hero Profile:\n${heroProfile}`);
+    }
 
-  // Добавляем одно системное сообщение только если есть что-то
-  if (systemParts.length > 0) {
-    messages.push({
-      role: 'system',
-      content: systemParts.join('\n\n')
-    });
-  }
-
-  // Создаем маппинг message_id -> block для быстрого поиска
-  const messageToBlock = new Map<number, ChatBlock>();
-  if (compressedBlocks) {
-    for (const block of compressedBlocks) {
-      const messageIds = JSON.parse(block.original_message_ids || '[]') as number[];
-      messageIds.forEach(msgId => {
-        messageToBlock.set(msgId, block);
+    // Добавляем одно системное сообщение только если есть что-то
+    if (systemParts.length > 0) {
+      messages.push({
+        role: 'system',
+        content: systemParts.join('\n\n')
       });
     }
-  }
 
-  // 4. История сообщений (с учётом hidden и сжатых блоков)
-  for (const msg of historyMessages) {
-    if (msg.hidden) continue; // Пропускаем скрытые сообщения
-
-    // Проверяем, входит ли сообщение в сжатый блок
-    const block = messageToBlock.get(msg.id);
-
-    if (block && block.is_compressed === 1) {
-      // Если это первое сообщение блока (start_message_id), добавляем summary
-      // Используем role: 'user' вместо 'system', т.к. system сообщение должно быть первым
-      if (msg.id === block.start_message_id) {
-        messages.push({
-          role: 'user',
-          content: `[Сжатая история: ${block.title}]\n${block.summary}`
+    // Создаем маппинг message_id -> block для быстрого поиска
+    const messageToBlock = new Map<number, ChatBlock>();
+    if (compressedBlocks) {
+      for (const block of compressedBlocks) {
+        const messageIds = JSON.parse(block.original_message_ids || '[]') as number[];
+        messageIds.forEach(msgId => {
+          messageToBlock.set(msgId, block);
         });
       }
-      // Пропускаем остальные сообщения блока (они уже в summary)
-      continue;
     }
 
-    // Если сообщение не в блоке или сжатие отключено, добавляем как обычно
-    const role = msg.role === 'user' ? 'user' : 'assistant';
-    
-    // Для LLM всегда используем английский текст:
-    // - user сообщения: translated_content (перевод с русского на английский)
-    // - assistant сообщения: content (оригинал на английском)
-    const contentForLLM = msg.role === 'user'
-      ? (msg.translated_content || msg.content)  // Если есть перевод, используем его
-      : msg.content;  // Для assistant используем оригинал (уже на английском)
-    
+    // 4. История сообщений (с учётом hidden и сжатых блоков)
+    for (const msg of historyMessages) {
+      if (msg.hidden) continue; // Пропускаем скрытые сообщения
+
+      // Проверяем, входит ли сообщение в сжатый блок
+      const block = messageToBlock.get(msg.id);
+
+      if (block && block.is_compressed === 1) {
+        // Если это первое сообщение блока (start_message_id), добавляем summary
+        // Используем role: 'user' вместо 'system', т.к. system сообщение должно быть первым
+        if (msg.id === block.start_message_id) {
+          messages.push({
+            role: 'user',
+            content: `[Сжатая история: ${block.title}]\n${block.summary}`
+          });
+        }
+        // Пропускаем остальные сообщения блока (они уже в summary)
+        continue;
+      }
+
+      // Если сообщение не в блоке или сжатие отключено, добавляем как обычно
+      const role = msg.role === 'user' ? 'user' : 'assistant';
+      
+      // Для LLM всегда используем английский текст:
+      // - user сообщения: translated_content (перевод с русского на английский)
+      // - assistant сообщения: content (оригинал на английском)
+      const contentForLLM = msg.role === 'user'
+        ? (msg.translated_content || msg.content)  // Если есть перевод, используем его
+        : msg.content;  // Для assistant используем оригинал (уже на английском)
+      
+      messages.push({
+        role,
+        content: contentForLLM
+      });
+    }
+
+    // 5. Текущее сообщение пользователя (также заменяем плейсхолдеры)
+    const processedCurrentMessage = replaceUserPlaceholders(currentMessage, heroName);
     messages.push({
-      role,
-      content: contentForLLM
+      role: 'user',
+      content: processedCurrentMessage
     });
+
+    return messages;
   }
-
-  // 5. Текущее сообщение пользователя (также заменяем плейсхолдеры)
-  const processedCurrentMessage = replaceUserPlaceholders(currentMessage, heroName);
-  messages.push({
-    role: 'user',
-    content: processedCurrentMessage
-  });
-
-  return messages;
-}
 
 /**
  * Форматирование истории с учётом сжатых блоков
@@ -390,12 +541,48 @@ export class LLMService {
   private activeAbortControllers: Map<number, AbortController> = new Map();
   private currentConnectionId: number | null = null;
 
+  /**
+   * Максимальный контекст модели (вход + выход)
+   * По умолчанию 131072 для большинства современных моделей
+   */
+  private maxContextLength: number = 131072;
+  /**
+   * Максимальный вывод (response tokens)
+   * По умолчанию 32000 (не 64000!) чтобы оставить больше места для входа
+   */
+  private maxOutputTokens: number = 32000;
+  /**
+   * Использовать ли лимиты контекста.
+   * true для cloud провайдеров (OpenRouter, z.ai) — у них есть жёсткий лимит 131072
+   * false для локальных серверов (llama.cpp, vllm) — у них нет такого лимита
+   */
+  private useContextLimits: boolean = false;
+
+  /**
+   * Определяет, является ли провайдер облачным (с лимитом контекста)
+   */
+  private _isCloudProvider(): boolean {
+    const url = this.baseURL.toLowerCase();
+    // OpenRouter, z.ai и другие cloud провайдеры имеют жёсткий лимит контекста
+    return url.includes('openrouter') || 
+           url.includes('z.ai') || 
+           url.includes('together') ||
+           url.includes('perplexity') ||
+           url.includes('fireworks') ||
+           url.includes('anyscale');
+  }
+
   constructor() {
     // Load from database first (active connection), fallback to .env
     this.baseURL = process.env.LLM_BASE_URL || 'http://localhost:1234/v1';
     this.apiKey = process.env.LLM_API_KEY || 'local-model-key';
     this.model = process.env.LLM_MODEL || 'qwen-3.5';
     this.maxTokens = parseInt(process.env.LLM_MAX_TOKENS || '') || 64000;
+    this.maxOutputTokens = this.maxTokens; // По умолчанию = maxTokens
+    // Максимальный входной контекст = maxContextLength - maxTokens (оставляем место для вывода)
+    this.maxContextLength = parseInt(process.env.LLM_MAX_CONTEXT_LENGTH || '') || 131072;
+    // Флаг: используем ли лимиты контекста (true для OpenRouter/z.ai, false для локальных серверов)
+    this.useContextLimits = this._isCloudProvider();
 
     // Try to load active connection from database on startup
     this._loadActiveConnectionFromDB();
@@ -446,6 +633,8 @@ export class LLMService {
       this.apiKey = decryptedConn.api_key_decrypted;
       this.model = decryptedConn.model;
       this.maxTokens = decryptedConn.max_tokens;
+      // Пересчитываем флаг cloud провайдера
+      this.useContextLimits = this._isCloudProvider();
 
       console.log('[LLMService] Loaded active connection from database:', decryptedConn.name);
       console.log('[LLMService] Connection ID:', activeConn.id);
@@ -498,6 +687,8 @@ export class LLMService {
       this.apiKey = conn.api_key_decrypted;
       this.model = conn.model;
       this.maxTokens = conn.max_tokens;
+      // Пересчитываем флаг cloud провайдера
+      this.useContextLimits = this._isCloudProvider();
 
       // Reinitialize client with new settings
       this._initLLMClient();
@@ -652,14 +843,41 @@ export class LLMService {
       // Получаем сжатые блоки для чата
       const compressedBlocks = chatBlockRepository.getBlocksByChatId(chatId);
       
+      // Рассчитываем лимиты вывода
+      // Для cloud провайдеров (OpenRouter, z.ai) ограничиваем output до 25% контекста
+      // Для локальных серверов (llama.cpp) используем полный maxTokens
+      let effectiveMaxOutput: number;
+      if (this.useContextLimits) {
+        effectiveMaxOutput = Math.min(this.maxOutputTokens, Math.floor(this.maxContextLength * 0.25));
+        console.log(`[LLMService] Cloud provider detected: context=${this.maxContextLength}, limiting output to 25% = ${effectiveMaxOutput}`);
+      } else {
+        effectiveMaxOutput = this.maxTokens;
+        console.log(`[LLMService] Local server detected: using full maxTokens = ${effectiveMaxOutput}`);
+      }
+      
+      // Используем ВСЮ историю (без обрезки) — сжатые блоки уже уменьшают объём
+      // Обрезка нужна только если сжатие активно, но остались несжатые сообщения
+      let effectiveHistory = historyMessages;
+      
+      if (compressedBlocks && compressedBlocks.length > 0) {
+        // Сжатие уже используется — фильтруем только сообщения, не входящие в сжатые блоки
+        const compressedMsgIds = new Set<number>();
+        for (const block of compressedBlocks) {
+          const messageIds = JSON.parse(block.original_message_ids || '[]') as number[];
+          messageIds.forEach(id => compressedMsgIds.add(id));
+        }
+        effectiveHistory = historyMessages.filter(m => !compressedMsgIds.has(m.id) || m.hidden);
+        console.log(`[LLMService] Using compressed history: ${effectiveHistory.length} messages (${compressedBlocks.length} blocks compressed)`);
+      }
+      
       // Формируем историю сообщений для Qwen 3.5 с учётом сжатых блоков
-      const messages = compressedBlocks.length > 0
+      const messages = compressedBlocks && compressedBlocks.length > 0
         ? formatMessagesForQwenWithCompression(
             userId,
             character,
             heroProfile,
             heroName,
-            historyMessages,
+            effectiveHistory,
             userMessage,
             compressedBlocks
           )
@@ -668,12 +886,15 @@ export class LLMService {
             character,
             heroProfile,
             heroName,
-            historyMessages,
+            effectiveHistory,
             userMessage
           );
 
       // Debug: логирование сформированной истории
-      console.log('[LLMService] Messages to LLM:', JSON.stringify(messages, null, 2).substring(0, 500));
+      const allMsgContent = messages.map(m => m.content).join('\n');
+      const msgTokenEstimate = estimateTokenCount(allMsgContent);
+      const msgTotalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+      console.log(`[LLMService] Final messages to LLM: ${messages.length} messages, ~${msgTokenEstimate} tokens, ${msgTotalChars} chars`);
 
       // Проверяем наличие клиента
       if (!this.client) {
@@ -685,12 +906,21 @@ export class LLMService {
 
       // Отправляем запрос к LLM с stream: true
       // Передаем abortSignal если есть (для отмены генерации)
+      
+      // Ограничиваем max_output
+      // Для cloud провайдеров — оставляем запас 10%
+      // Для локальных серверов — используем полный лимит
+      const finalMaxOutput = this.useContextLimits 
+        ? Math.floor(effectiveMaxOutput * 0.9)
+        : effectiveMaxOutput;
+      console.log(`[LLMService] Sending request: max_tokens=${finalMaxOutput}, useContextLimits=${this.useContextLimits}`);
+      
       const stream = await this.client.chatCompletionsCreate({
         model: this.model,
         messages: messages,
         stream: true,
         temperature: 0.7,
-        max_tokens: parseInt(process.env.LLM_MAX_TOKENS || '') || 64000, // Установлено для совместимости с OpenRouter (max 131072 контекст)
+        max_tokens: finalMaxOutput,
       }, { signal: abortSignal });
 
       // Обрабатываем поток
