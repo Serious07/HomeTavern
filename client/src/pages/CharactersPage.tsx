@@ -98,6 +98,33 @@ const CharactersPage: React.FC = () => {
     }
   };
 
+  const handleGreetingsSave = async (greetings: string[]) => {
+    try {
+      if (editingCharacter !== undefined && editingCharacter.id !== undefined) {
+        // Existing character: save greetings via API
+        await charactersApi.setGreetings(editingCharacter.id, greetings);
+      } else {
+        // New character: create character first, then save greetings
+        const characterData: Omit<Character, 'id' | 'created_at' | 'updated_at'> = {
+          name: editingCharacter?.name || '',
+          description: editingCharacter?.description || '',
+          short_description: editingCharacter?.short_description || '',
+          personality: editingCharacter?.personality || '',
+          first_message: editingCharacter?.first_message || '',
+          avatar: editingCharacter?.avatar || '',
+        };
+        const createResponse = await charactersApi.create(characterData);
+        // Now save greetings via the setGreetings endpoint
+        await charactersApi.setGreetings(createResponse.data.id!, greetings);
+      }
+      setShowEditor(false);
+      setEditingCharacter(undefined);
+      fetchCharacters();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Ошибка при сохранении приветствий');
+    }
+  };
+
   const handleCancel = () => {
     setShowEditor(false);
     setEditingCharacter(undefined);
@@ -356,6 +383,7 @@ const CharactersPage: React.FC = () => {
         <CharacterEditor
           character={editingCharacter}
           onSave={handleSave}
+          onGreetingsSave={handleGreetingsSave}
           onCancel={handleCancel}
         />
       )}

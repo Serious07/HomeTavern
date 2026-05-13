@@ -5,6 +5,7 @@ import { charactersApi } from '../../services/api';
 interface CharacterEditorProps {
   character?: Character;
   onSave: (character: Omit<Character, 'id' | 'created_at' | 'updated_at'>) => void;
+  onGreetingsSave: (greetings: string[]) => void;
   onCancel: () => void;
 }
 
@@ -13,6 +14,7 @@ type TabId = 'identity' | 'appearance' | 'description' | 'personality' | 'greeti
 const CharacterEditor: React.FC<CharacterEditorProps> = ({
   character,
   onSave,
+  onGreetingsSave,
   onCancel,
 }) => {
   const isEditing = !!character?.id;
@@ -61,6 +63,11 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
       loadGreetings();
     }
   }, [activeTab, character?.id]);
+
+  // Notify parent when greetings change (reserved for future use)
+  useEffect(() => {
+    // Greetings state is tracked locally and saved via handleGreetingsSave
+  }, [messages, activeTab]);
 
   const loadGreetings = async () => {
     if (!character?.id) return;
@@ -212,33 +219,6 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
     setMessages(updated);
   };
 
-  const handleGreetingsSave = async () => {
-    // Filter empty messages
-    const nonEmptyMessages = messages.map(m => m.trim()).filter(m => m.length > 0);
-    
-    if (nonEmptyMessages.length === 0) {
-      setGreetingsError('Добавьте хотя бы одно приветствие');
-      return;
-    }
-
-    setGreetingsLoading(true);
-    setGreetingsError(null);
-    try {
-      if (character?.id) {
-        const result = await charactersApi.setGreetings(character.id, nonEmptyMessages);
-        setGreetings(result.data as CharacterGreeting[]);
-        // Update local messages to reflect saved state
-        const savedMessages = (result.data as CharacterGreeting[]).map(g => g.message);
-        if (savedMessages.length > 0) {
-          setMessages(savedMessages);
-        }
-      }
-    } catch (error: any) {
-      setGreetingsError('Ошибка при сохранении: ' + (error.response?.data?.error || error.message));
-    } finally {
-      setGreetingsLoading(false);
-    }
-  };
 
   const getPreview = (message: string, maxLength: number = 120): string => {
     if (message.length <= maxLength) return message;
@@ -251,6 +231,11 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
     if (!validateFields()) return;
     
     onSave(formData);
+  };
+
+  // Get current non-empty greetings from messages
+  const getCurrentGreetings = (): string[] => {
+    return messages.map(m => m.trim()).filter(m => m.length > 0);
   };
 
   // Close on Escape key
@@ -543,6 +528,7 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
               </div>
               {messages.length < 50 && (
                 <button
+                  type="button"
                   onClick={addMessage}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600/80 hover:bg-blue-500 rounded-lg text-sm font-medium text-white transition"
                 >
@@ -664,6 +650,7 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
                 {/* Add button */}
                 {messages.length < 50 && (
                   <button
+                    type="button"
                     onClick={addMessage}
                     className="w-full p-4 border-2 border-dashed border-gray-600 hover:border-blue-500 rounded-lg text-gray-400 hover:text-white transition flex items-center justify-center gap-2"
                   >
@@ -678,7 +665,34 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
 
             {/* Save greetings button */}
             <button
-              onClick={handleGreetingsSave}
+              type="button"
+              onClick={async () => {
+                const nonEmptyMessages = getCurrentGreetings();
+                if (nonEmptyMessages.length === 0) {
+                  setGreetingsError('Добавьте хотя бы одно приветствие');
+                  return;
+                }
+                if (character?.id) {
+                  // Existing character: save via API directly
+                  setGreetingsLoading(true);
+                  setGreetingsError(null);
+                  try {
+                    const result = await charactersApi.setGreetings(character.id, nonEmptyMessages);
+                    setGreetings(result.data as CharacterGreeting[]);
+                    const savedMessages = (result.data as CharacterGreeting[]).map(g => g.message);
+                    if (savedMessages.length > 0) {
+                      setMessages(savedMessages);
+                    }
+                  } catch (error: any) {
+                    setGreetingsError('Ошибка при сохранении: ' + (error.response?.data?.error || error.message));
+                  } finally {
+                    setGreetingsLoading(false);
+                  }
+                } else {
+                  // New character: pass greetings to parent to save with character
+                  onGreetingsSave(nonEmptyMessages);
+                }
+              }}
               disabled={greetingsLoading || messages.every(m => !m.trim())}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg font-semibold text-white transition shadow-lg"
             >
