@@ -12,6 +12,21 @@ import { chatBlockRepository, ChatBlock } from '../repositories/chat-block.repos
 import { compressionService } from './compression.service';
 import { systemPromptService } from './system-prompt.service';
 import { llmConnectionRepository } from '../repositories/llm-connection.repository';
+import db from '../config/database';
+
+/**
+ * Проверяет, включена ли генерация тегов подсветки диалогов для пользователя.
+ * По умолчанию возвращает true (теги включены).
+ */
+function isDialogTaggingEnabled(userId: number): boolean {
+  try {
+    const setting = db.prepare('SELECT value FROM settings WHERE user_id = ? AND key = ?').get(userId, 'dialog_tagging_enabled');
+    // По умолчанию true — если настройки нет, теги генерируются
+    return setting?.value !== 'false';
+  } catch {
+    return true;
+  }
+}
 
 /**
  * Оценивает количество токенов в тексте.
@@ -340,8 +355,10 @@ export function formatMessagesForQwen(
     systemParts.push(processedSystemPrompt);
   }
 
-  // Добавляем инструкцию по форматированию текста
-  systemParts.push(LLM_FORMATTING_INSTRUCTION.trim());
+  // Добавляем инструкцию по форматированию текста (если включена настройка)
+  if (isDialogTaggingEnabled(userId)) {
+    systemParts.push(LLM_FORMATTING_INSTRUCTION.trim());
+  }
 
   // 2. Описание персонажа (Character profile)
   const characterProfileParts: string[] = [];
@@ -422,8 +439,10 @@ export function formatMessagesForQwen(
       systemParts.push(processedSystemPrompt);
     }
 
-    // Добавляем инструкцию по форматированию текста
-    systemParts.push(LLM_FORMATTING_INSTRUCTION.trim());
+    // Добавляем инструкцию по форматированию текста (если включена настройка)
+    if (isDialogTaggingEnabled(userId)) {
+      systemParts.push(LLM_FORMATTING_INSTRUCTION.trim());
+    }
 
     // 2. Описание персонажа (Character profile)
     const characterProfileParts: string[] = [];

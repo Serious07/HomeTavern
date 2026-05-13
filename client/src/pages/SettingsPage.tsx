@@ -20,6 +20,8 @@ const SettingsPage: React.FC = () => {
   const [notificationVolume, setNotificationVolume] = useState<number>(70);
   const [translationEnabled, setTranslationEnabled] = useState<boolean>(true);
   const [translationLoading, setTranslationLoading] = useState<boolean>(false);
+  const [dialogTaggingEnabled, setDialogTaggingEnabled] = useState<boolean>(true);
+  const [dialogTaggingLoading, setDialogTaggingLoading] = useState<boolean>(false);
   
   useEffect(() => {
     setLimitInput(String(visibleMessageLimit));
@@ -39,6 +41,9 @@ const SettingsPage: React.FC = () => {
         if (data?.translation_enabled !== undefined) {
           setTranslationEnabled(data.translation_enabled === 'true');
         }
+        if (data?.dialog_tagging_enabled !== undefined) {
+          setDialogTaggingEnabled(data.dialog_tagging_enabled === 'true');
+        }
       } catch (error) {
         console.error('Failed to load settings:', error);
       }
@@ -57,6 +62,20 @@ const SettingsPage: React.FC = () => {
       setTranslationEnabled(!newValue); // Revert on error
     } finally {
       setTranslationLoading(false);
+    }
+  };
+
+  const handleDialogTaggingToggle = async () => {
+    const newValue = !dialogTaggingEnabled;
+    setDialogTaggingEnabled(newValue);
+    setDialogTaggingLoading(true);
+    try {
+      await api.put('/settings', { key: 'dialog_tagging_enabled', value: String(newValue) });
+    } catch (error) {
+      console.error('Failed to save dialog tagging setting:', error);
+      setDialogTaggingEnabled(!newValue); // Revert on error
+    } finally {
+      setDialogTaggingLoading(false);
     }
   };
   
@@ -305,6 +324,36 @@ const SettingsPage: React.FC = () => {
               </div>
             </div>
           </div>
+
+            {/* Dialog Tagging section */}
+            <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
+              <h2 className="text-xl font-bold text-white mb-6">Подсветка диалогов</h2>
+              
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-300 font-medium">Генерация тегов подсветки</p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    Автоматически генерировать теги {'<speech>'}, {'<narration>'}, {'<monologue>'} для стилизованного отображения диалогов. Отключение экономит токены.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDialogTaggingToggle}
+                  disabled={dialogTaggingLoading}
+                  className={`${
+                    dialogTaggingEnabled ? 'bg-blue-600' : 'bg-gray-400'
+                  } relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900`}
+                  role="switch"
+                  aria-checked={dialogTaggingEnabled}
+                >
+                  <span
+                    className={`${
+                      dialogTaggingEnabled ? 'translate-x-5' : 'translate-x-0'
+                    } inline-block h-6 w-6 transform rounded-full bg-white shadow transition duration-200 ease-in-out`}
+                  />
+                </button>
+              </div>
+            </div>
 
             {/* Translation section */}
             <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
