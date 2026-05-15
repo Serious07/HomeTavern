@@ -45,6 +45,8 @@ export const characterRepository = {
 
   /**
    * Обновление персонажа
+   * Обновляет только поля, которые содержат непустые значения.
+   * Пустые строки и undefined игнорируются, чтобы не перезаписывать существующие данные.
    */
   updateCharacter: (id: number, data: UpdateCharacterInput): Character | undefined => {
     const existing = characterRepository.getCharacterById(id);
@@ -52,26 +54,46 @@ export const characterRepository = {
       return undefined;
     }
 
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    // Обновляем поле только если оно существует и не является пустой строкой
+    if (data.name !== undefined && data.name.trim() !== '') {
+      fields.push('name = ?');
+      values.push(data.name.trim());
+    }
+    if (data.description !== undefined && data.description.trim() !== '') {
+      fields.push('description = ?');
+      values.push(data.description);
+    }
+    if (data.short_description !== undefined && data.short_description.trim() !== '') {
+      fields.push('short_description = ?');
+      values.push(data.short_description);
+    }
+    if (data.personality !== undefined && data.personality.trim() !== '') {
+      fields.push('personality = ?');
+      values.push(data.personality);
+    }
+    if (data.first_message !== undefined && data.first_message.trim() !== '') {
+      fields.push('first_message = ?');
+      values.push(data.first_message);
+    }
+    if (data.avatar !== undefined && data.avatar.trim() !== '') {
+      fields.push('avatar = ?');
+      values.push(data.avatar);
+    }
+    if (data.current_greeting_index !== undefined) {
+      fields.push('current_greeting_index = ?');
+      values.push(data.current_greeting_index);
+    }
+
+    // Всегда обновляем updated_at
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+
     const stmt = db.prepare(
-      `UPDATE characters
-       SET name = COALESCE(?, name),
-           description = COALESCE(?, description),
-           short_description = COALESCE(?, short_description),
-           personality = COALESCE(?, personality),
-           first_message = COALESCE(?, first_message),
-           avatar = COALESCE(?, avatar),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
+      `UPDATE characters SET ${fields.join(', ')} WHERE id = ?`
     );
-    stmt.run(
-      data.name,
-      data.description,
-      data.short_description,
-      data.personality,
-      data.first_message,
-      data.avatar,
-      id
-    );
+    stmt.run(...values, id);
     
     return characterRepository.getCharacterById(id);
   },

@@ -803,7 +803,8 @@ const CharacterEditor: React.FC<CharacterEditorProps> = ({
             {/* Save button - Green (only show on non-greetings tab) */}
             {activeTab !== 'greetings' && (
               <button
-                type="submit"
+                type="button"
+                onClick={handleSubmit}
                 disabled={isLoading || greetingsLoading}
                 className="flex-1 flex items-center justify-center gap-2 py-3.5 px-4 bg-emerald-600/90 hover:bg-emerald-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg font-bold text-white transition shadow-lg shadow-emerald-900/30"
               >
