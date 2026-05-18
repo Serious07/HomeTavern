@@ -147,7 +147,9 @@ export const contextApi = {
 // Compression API
 export const compressionApi = {
   getBlocks: (chatId: number) => api.get<any[]>(`/compression/blocks/${chatId}`),
-  compress: (chatId: number) => api.post<any>(`/compression/compress/${chatId}`),
+  compress: (chatId: number, method?: 'fixed' | 'semantic') => 
+    api.post<any>(`/compression/compress/${chatId}`, {}, { params: method ? { method } : undefined }),
+  compressSemantic: (chatId: number) => api.post<any>(`/compression/compress/${chatId}`, {}, { params: { method: 'semantic' } }),
   compressSelected: (chatId: number, data: { startMessageId: number; endMessageId: number }) =>
     api.post<any>(`/compression/compress-selected/${chatId}`, data),
   updateBlock: (blockId: number, data: { title?: string; summary?: string; is_compressed?: boolean }) =>

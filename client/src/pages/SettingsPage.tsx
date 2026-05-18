@@ -4,6 +4,28 @@ import { useAuthContext } from '../contexts/AuthContext';
 import { api } from '../services/api';
 import AppHeader from '../components/common/AppHeader';
 import { getVisibleMessageLimit, setVisibleMessageLimit } from '../components/chat/MessageList';
+import { CompressionMethod } from '../types/compression';
+
+export const DEFAULT_COMPRESSION_INSTRUCTIONS = `Ты — опытный редактор и летописец. Твоя задача — создавать структурированные, информативные краткие пересказы диалогов и событий.
+
+ПРАВИЛА ФОРМАТИРОВАНИЯ ПЕРЕСКАЗА:
+- Пиши пересказ в формате с тегами-категориями: [Действия] ... [Диалоги] ... [Изменения] ... [Детали] ...
+- Если какой-то категории нет — просто пропусти её
+- Пиши фактами, без эмоциональных описаний, запахов, атмосферы
+- Сохраняй имена персонажей, названия мест, предметы, концепции
+- Описывай конкретные события и их последствия
+- Сохраняй информацию о решениях, обещаниях, открытиях персонажей
+- Если персонаж получил новый предмет/навык/информацию — обязательно укажи
+- Если отношения между персонажами изменились — укажи
+
+СТРУКТУРА КАЖДОЙ КАТЕГОРИИ:
+[Действия] — что конкретно сделали персонажи, куда пошли, что предприняли
+[Диалоги] — ключевые реплики и их смысл (не дословно, а по сути)
+[Изменения] — что изменилось: отношения, локации, статус, знания персонажей
+[Детали] — важные сюжетные детали, упоминания будущих событий, загадочные элементы
+
+ПРИМЕР ХОРОШЕГО ПЕРЕСКАЗА:
+[Действия] Аэрин и Торин вошли в таверну "Пьяный грифон". Аэрин подошла к стойке и заказала эль, затем подошла к старику-торговцу в углу. [Диалоги] Торговец подтвердил слухи о нападениях на северной дороге и упомянул странные огни над горами. [Изменения] Герои узнали о новой преграде на пути в Северные земли. [Детали] Старик шепнул про "огненных стражей" и предложил 50 золотых за провожатого.`;
 
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -22,7 +44,16 @@ const SettingsPage: React.FC = () => {
   const [translationLoading, setTranslationLoading] = useState<boolean>(false);
   const [dialogTaggingEnabled, setDialogTaggingEnabled] = useState<boolean>(true);
   const [dialogTaggingLoading, setDialogTaggingLoading] = useState<boolean>(false);
+
+  // Compression settings
+  const [compressionInstructions, setCompressionInstructions] = useState<string>('');
+  const [compressionLoading, setCompressionLoading] = useState<boolean>(false);
+  const [compressionSaved, setCompressionSaved] = useState<boolean>(false);
   
+  // Compression method setting
+  const [compressionMethod, setCompressionMethod] = useState<CompressionMethod>('fixed');
+  const [compressionMethodLoading, setCompressionMethodLoading] = useState<boolean>(false);
+
   useEffect(() => {
     setLimitInput(String(visibleMessageLimit));
   }, [visibleMessageLimit]);
@@ -43,6 +74,12 @@ const SettingsPage: React.FC = () => {
         }
         if (data?.dialog_tagging_enabled !== undefined) {
           setDialogTaggingEnabled(data.dialog_tagging_enabled === 'true');
+        }
+        if (data?.compression_system_instructions !== undefined) {
+          setCompressionInstructions(data.compression_system_instructions || '');
+        }
+        if (data?.compression_method !== undefined) {
+          setCompressionMethod(data.compression_method as CompressionMethod);
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
@@ -76,6 +113,62 @@ const SettingsPage: React.FC = () => {
       setDialogTaggingEnabled(!newValue); // Revert on error
     } finally {
       setDialogTaggingLoading(false);
+    }
+  };
+
+  // Compression instructions handlers
+  const handleSaveCompressionInstructions = async () => {
+    setCompressionLoading(true);
+    setCompressionSaved(false);
+    try {
+      await api.put('/settings', {
+        key: 'compression_system_instructions',
+        value: compressionInstructions,
+      });
+      setCompressionSaved(true);
+      setTimeout(() => setCompressionSaved(false), 3000);
+    } catch (error) {
+      console.error('Failed to save compression instructions:', error);
+    } finally {
+      setCompressionLoading(false);
+    }
+  };
+
+  const handleResetCompressionInstructions = async () => {
+    if (confirm('Сбросить на стандартные инструкции? Ваши изменения будут удалены.')) {
+      setCompressionLoading(true);
+      try {
+        await api.delete('/settings?key=compression_system_instructions');
+        setCompressionInstructions(DEFAULT_COMPRESSION_INSTRUCTIONS);
+        setCompressionSaved(true);
+        setTimeout(() => setCompressionSaved(false), 3000);
+      } catch (error: any) {
+        // 404 means the setting doesn't exist (already reset) - treat as success
+        if (error.response?.status === 404) {
+          setCompressionInstructions(DEFAULT_COMPRESSION_INSTRUCTIONS);
+          setCompressionSaved(true);
+          setTimeout(() => setCompressionSaved(false), 3000);
+        } else {
+          console.error('Failed to reset compression instructions:', error);
+        }
+      } finally {
+        setCompressionLoading(false);
+      }
+    }
+  };
+
+  // Compression method handler
+  const handleCompressionMethodChange = async (method: CompressionMethod) => {
+    setCompressionMethod(method);
+    setCompressionMethodLoading(true);
+    try {
+      await api.put('/settings', { key: 'compression_method', value: method });
+    } catch (error) {
+      console.error('Failed to save compression method:', error);
+      // Revert on error
+      setCompressionMethod(method === 'fixed' ? 'semantic' : 'fixed');
+    } finally {
+      setCompressionMethodLoading(false);
     }
   };
   
@@ -382,6 +475,131 @@ const SettingsPage: React.FC = () => {
                     } inline-block h-6 w-6 transform rounded-full bg-white shadow transition duration-200 ease-in-out`}
                   />
                 </button>
+              </div>
+            </div>
+
+            {/* Compression section */}
+            <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
+              <h2 className="text-xl font-bold text-white mb-6">Сжатие истории</h2>
+
+              {/* Compression method selector */}
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-white mb-3">Метод разбиения на блоки</h3>
+                <p className="text-sm text-gray-400 mb-4">
+                  Выберите способ автоматического разбиения истории на блоки при сжатии.
+                </p>
+                
+                <div className="space-y-3">
+                  {/* Fixed method */}
+                  <button
+                    type="button"
+                    onClick={() => !compressionMethodLoading && handleCompressionMethodChange('fixed')}
+                    disabled={compressionMethodLoading}
+                    className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+                      compressionMethod === 'fixed'
+                        ? 'border-blue-500 bg-blue-900/20'
+                        : 'border-gray-600 bg-gray-700/30 hover:border-gray-500'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                        compressionMethod === 'fixed' ? 'border-blue-500' : 'border-gray-500'
+                      }`}>
+                        {compressionMethod === 'fixed' && (
+                          <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+                        )}
+                      </div>
+                      <span className={`font-semibold ${
+                        compressionMethod === 'fixed' ? 'text-blue-400' : 'text-gray-300'
+                      }`}>
+                        Фиксированный (по 20 сообщений)
+                      </span>
+                    </div>
+                    <div className="ml-8 space-y-1">
+                      <p className="text-xs text-gray-400">
+                        <span className="text-green-400">✓ Быстрая обработка</span> — минимальное количество токенов для промпта
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        <span className="text-yellow-400">⚠ Разрыв логики</span> — история дробится на случайные куски, разрывая повествование
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* Semantic method */}
+                  <button
+                    type="button"
+                    onClick={() => !compressionMethodLoading && handleCompressionMethodChange('semantic')}
+                    disabled={compressionMethodLoading}
+                    className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+                      compressionMethod === 'semantic'
+                        ? 'border-blue-500 bg-blue-900/20'
+                        : 'border-gray-600 bg-gray-700/30 hover:border-gray-500'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                        compressionMethod === 'semantic' ? 'border-blue-500' : 'border-gray-500'
+                      }`}>
+                        {compressionMethod === 'semantic' && (
+                          <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+                        )}
+                      </div>
+                      <span className={`font-semibold ${
+                        compressionMethod === 'semantic' ? 'text-blue-400' : 'text-gray-300'
+                      }`}>
+                        Смысловые главы (через LLM)
+                      </span>
+                    </div>
+                    <div className="ml-8 space-y-1">
+                      <p className="text-xs text-gray-400">
+                        <span className="text-green-400">✓ Сохранение смысла</span> — главы соответствуют логическим границам сюжета
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        <span className="text-yellow-400">⚠ Больше токенов</span> — требуется дополнительный запрос LLM для анализа и разбивки
+                      </p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-gray-400 mb-3">
+                    Настройте инструкции для формирования кратких пересказов при сжатии истории диалога.
+                    Эти инструкции будут использованы LLM вместо стандартных. Формат вывода (ЗАГОЛОВОК + ПЕРЕСКАЗ) остаётся неизменным.
+                  </p>
+                  <textarea
+                    value={compressionInstructions}
+                    onChange={(e) => setCompressionInstructions(e.target.value)}
+                    rows={12}
+                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500 resize-y font-mono text-sm"
+                    placeholder={DEFAULT_COMPRESSION_INSTRUCTIONS}
+                  />
+                  <p className="text-xs text-gray-500 mt-2">
+                    Используйте теги [Действия], [Диалоги], [Изменения], [Детали] для структурирования пересказа.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleSaveCompressionInstructions}
+                    disabled={compressionLoading}
+                    className="py-3 px-6 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg font-semibold text-white transition"
+                  >
+                    {compressionLoading ? 'Сохранение...' : 'Сохранить'}
+                  </button>
+                  <button
+                    onClick={handleResetCompressionInstructions}
+                    disabled={compressionLoading}
+                    className="py-3 px-6 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded-lg font-semibold text-gray-300 transition"
+                  >
+                    Сбросить
+                  </button>
+                </div>
+
+                {compressionSaved && (
+                  <div className="text-green-400 text-sm">✓ Настройки успешно сохранены</div>
+                )}
               </div>
             </div>
 

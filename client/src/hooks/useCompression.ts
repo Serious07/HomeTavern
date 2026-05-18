@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { ChatBlock, ChatBlockWithParsedIds, CompressionResult, CompressionSelectedResult, NeedsCompressionResponse, UndoResponse, EditBlockParams, CompressionCompleteEvent, CompressionErrorEvent } from '../types/compression';
+import { ChatBlock, ChatBlockWithParsedIds, CompressionResult, CompressionSelectedResult, NeedsCompressionResponse, UndoResponse, EditBlockParams, CompressionCompleteEvent, CompressionErrorEvent, CompressionMethod } from '../types/compression';
 import { STORAGE_KEYS } from '../constants/storage';
 
 // Вспомогательная функция для получения заголовков с токеном
@@ -21,6 +21,8 @@ export interface CompressionProgressState {
   totalBlocks: number;
   status: string;
   title?: string;
+  startPosition?: number;  // Порядковый номер первого сообщения в блоке (1-based)
+  endPosition?: number;    // Порядковый номер последнего сообщения в блоке (1-based)
 }
 
 export function useCompression(chatId: number | null) {
@@ -56,8 +58,9 @@ export function useCompression(chatId: number | null) {
 
   /**
    * Запустить автоматическое сжатие через SSE (с прогрессом)
+   * @param method - метод сжатия: 'fixed' (по умолчанию) или 'semantic'
    */
-  const compress = useCallback(async (): Promise<CompressionResult | null> => {
+  const compress = useCallback(async (method?: CompressionMethod): Promise<CompressionResult | null> => {
     if (!chatId) return null;
     
     setIsCompressing(true);
@@ -68,9 +71,10 @@ export function useCompression(chatId: number | null) {
       const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
       
       // Создаём SSE соединение для отслеживания прогресса с токеном в query
+      const methodParam = method ? `&method=${method}` : '';
       const sseUrl = token 
-        ? `/api/compression/compress-stream/${chatId}?token=${token}`
-        : `/api/compression/compress-stream/${chatId}`;
+        ? `/api/compression/compress-stream/${chatId}?token=${token}${methodParam}`
+        : `/api/compression/compress-stream/${chatId}${methodParam}`;
       
       // Закрываем предыдущее соединение если есть
       if (eventSourceRef.current) {
@@ -99,6 +103,8 @@ export function useCompression(chatId: number | null) {
                 totalBlocks: data.totalBlocks,
                 status: data.status,
                 title: data.title,
+                startPosition: data.startPosition,
+                endPosition: data.endPosition,
               });
             } else if (data.type === 'complete') {
               // Сжатие завершено
@@ -200,6 +206,8 @@ export function useCompression(chatId: number | null) {
                 totalBlocks: data.totalBlocks,
                 status: data.status,
                 title: data.title,
+                startPosition: data.startPosition,
+                endPosition: data.endPosition,
               });
             } else if (data.type === 'complete') {
               const parsedBlock: ChatBlockWithParsedIds = {

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { chatsApi, charactersApi, settingsApi } from '../services/api';
 import { compressionApi } from '../services/api';
 import { Chat, Message, Character } from '../types';
+import { CompressionMethod } from '../types/compression';
 import { playNotificationSound } from '../utils/notificationSound';
 import MessageList from '../components/chat/MessageList';
 import StreamingResponse from '../components/chat/StreamingResponse';
@@ -97,6 +98,9 @@ const ChatPage: React.FC = () => {
   
   // Translation setting
   const [translationEnabled, setTranslationEnabled] = useState<boolean>(true);
+  
+  // Compression method setting
+  const [compressionMethod, setCompressionMethod] = useState<CompressionMethod>('fixed');
   
   // Ref для хранения состояния showThinking для стримингового сообщения
   const streamingMessageThinkingRef = useRef<boolean>(false);
@@ -304,6 +308,9 @@ const ChatPage: React.FC = () => {
         }
         if (data.translation_enabled !== undefined) {
           setTranslationEnabled(data.translation_enabled === 'true');
+        }
+        if (data.compression_method !== undefined) {
+          setCompressionMethod(data.compression_method as CompressionMethod);
         }
       } catch (err) {
         console.error('Error loading settings:', err);
@@ -529,12 +536,12 @@ const ChatPage: React.FC = () => {
   const handleManualCompressConfirm = useCallback(async () => {
     setShowCompressionConfirm(false);
     if (!currentChatId) return;
-    const result = await compress();
+    const result = await compress(compressionMethod);
     // После сжатия обновляем сообщения без показа загрузки
     if (result) {
       await fetchMessages(false);
     }
-  }, [currentChatId, compress, fetchMessages]);
+  }, [currentChatId, compress, fetchMessages, compressionMethod]);
 
   const handleManualCompressCancel = useCallback(() => {
     setShowCompressionConfirm(false);

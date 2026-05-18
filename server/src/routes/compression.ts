@@ -17,6 +17,7 @@ router.use(authenticate);
 /**
  * POST /api/compression/compress/:chatId
  * Запустить сжатие истории для чата (автоматический режим)
+ * Query: method=fixed|semantic (опционально, по умолчанию fixed)
  * Response: { success: boolean, blocks: ChatBlock[], originalCount: number, compressedCount: number, tokenSavings: number }
  */
 router.post('/compress/:chatId', async (req: AuthenticatedRequest, res: Response) => {
@@ -28,7 +29,11 @@ router.post('/compress/:chatId', async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ error: 'Invalid chatId' });
     }
 
-    const result = await compressionService.compressChat(chatId, userId);
+    const method = req.query.method as 'fixed' | 'semantic' | undefined;
+
+    const result = await compressionService.compressChat(chatId, userId, {
+      compressionMethod: method || 'fixed'
+    });
 
     res.status(200).json({
       success: true,
@@ -39,7 +44,7 @@ router.post('/compress/:chatId', async (req: AuthenticatedRequest, res: Response
     });
   } catch (error) {
     console.error('[CompressionRoute] Error compressing chat:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Internal server error' });
   }
 });
 
@@ -127,7 +132,8 @@ router.get('/compress-stream/:chatId', async (req: AuthenticatedRequest, res: Re
   try {
     console.log('[CompressStream] >>> Starting compression service...');
     // Запускаем сжатие с callback для прогресса
-    const result = await compressionService.compressChat(chatId, userId, { onProgress });
+    const method = req.query.method as 'fixed' | 'semantic' | undefined;
+    const result = await compressionService.compressChat(chatId, userId, { compressionMethod: method || 'fixed', onProgress });
 
     // Отправляем финальное событие
     finishStream({

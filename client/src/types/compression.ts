@@ -2,6 +2,8 @@
  * Types for Smart History Compression feature
  */
 
+export type CompressionMethod = 'fixed' | 'semantic';
+
 export interface ChatBlock {
   id: number;
   chat_id: number;
