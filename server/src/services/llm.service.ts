@@ -15,6 +15,18 @@ import { llmConnectionRepository } from '../repositories/llm-connection.reposito
 import db from '../config/database';
 
 /**
+ * Экранирует спецсимволы для безопасного использования в XML/HTML
+ */
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, String.fromCharCode(38) + 'amp;')
+    .replace(/</g, String.fromCharCode(60) + 'lt;')
+    .replace(/>/g, String.fromCharCode(62) + 'gt;')
+    .replace(/"/g, String.fromCharCode(34) + 'quot;')
+    .replace(/'/g, String.fromCharCode(39) + '#39;');
+}
+
+/**
  * Проверяет, включена ли генерация тегов подсветки диалогов для пользователя.
  * По умолчанию возвращает true (теги включены).
  */
@@ -491,10 +503,13 @@ export function formatMessagesForQwen(
       if (block && block.is_compressed === 1) {
         // Если это первое сообщение блока (start_message_id), добавляем summary
         // Используем role: 'user' вместо 'system', т.к. system сообщение должно быть первым
+        // ВАЖНО: summary оборачивается в XML-теги, чтобы LLM могла чётко отличить
+        // сжатый блок от реального сообщения в истории
         if (msg.id === block.start_message_id) {
+          const summaryText = block.summary_translation || block.summary;
           messages.push({
             role: 'user',
-            content: `[Сжатая история: ${block.title}]\n${block.summary}`
+            content: `<compressed_history_block>\n<block_title>${escapeXml(block.title)}</block_title>\n<block_summary>${escapeXml(summaryText)}</block_summary>\n<original_message_count>${JSON.parse(block.original_message_ids || '[]').length} messages compressed</original_message_count>\n</compressed_history_block>`
           });
         }
         // Пропускаем остальные сообщения блока (они уже в summary)
@@ -880,12 +895,20 @@ export class LLMService {
       
       if (compressedBlocks && compressedBlocks.length > 0) {
         // Сжатие уже используется — фильтруем только сообщения, не входящие в сжатые блоки
+        // ВАЖНО: сохраняем start_message_id каждого блока, чтобы formatMessagesForQwenInternal
+        // мог добавить summary для сжатого блока
         const compressedMsgIds = new Set<number>();
+        const startMessageIds = new Set<number>();
         for (const block of compressedBlocks) {
           const messageIds = JSON.parse(block.original_message_ids || '[]') as number[];
           messageIds.forEach(id => compressedMsgIds.add(id));
+          // Сохраняем start_message_id отдельно (проверяем на null)
+          if (block.start_message_id !== null) {
+            startMessageIds.add(block.start_message_id);
+          }
         }
-        effectiveHistory = historyMessages.filter(m => !compressedMsgIds.has(m.id) || m.hidden);
+        // Фильтруем: исключаем сообщения из сжатых блоков, НО сохраняем start_message_id
+        effectiveHistory = historyMessages.filter(m => !compressedMsgIds.has(m.id) || m.hidden || startMessageIds.has(m.id));
         console.log(`[LLMService] Using compressed history: ${effectiveHistory.length} messages (${compressedBlocks.length} blocks compressed)`);
       }
       
