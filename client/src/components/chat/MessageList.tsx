@@ -299,69 +299,67 @@ const MessageItem = memo(({
           />
         )}
 
-        <div
-          className={`flex items-center gap-2 mt-1 ${
-            isUser ? 'flex-row-reverse' : 'flex-row'
-          }`}
-        >
-          <span className="text-xs text-gray-500">
-            {formatMessageTime(message.created_at)}
-          </span>
+        {/* Время отправки + кнопки действий */}
+        <div className={`flex items-center gap-2 mt-1 flex-wrap ${isUser ? 'justify-end' : 'justify-start'}`}>
+          {/* Время отправки - только для user сообщений, т.к. у assistant время уже есть в MessageStatsPanel */}
+          {message.role === 'user' && (
+            <span className="text-[10px] text-gray-500 whitespace-nowrap">{formatMessageTime(message.created_at)}</span>
+          )}
 
           {!isEditing && (
-            <div className="flex items-center gap-1">
+            <>
               {translationEnabled && (
                 <>
                   {message.role === 'assistant' && translatingMessageId === message.id && (
                     <span className="text-xs text-gray-400">Перевод...</span>
                   )}
-                  
+
                   {message.role === 'assistant' && message.translated_content && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleOriginal();
                       }}
-                      className="p-1 px-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs font-medium bg-gray-800/50"
+                      className="p-1 text-[10px] leading-none text-gray-400 hover:text-white hover:bg-gray-700 rounded transition bg-gray-800/50"
                       title={showOriginal ? 'Показать перевод' : 'Показать оригинал'}
                     >
                       {showOriginal ? 'RU' : 'EN'}
                     </button>
                   )}
-                  
+
                   {message.role === 'assistant' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         onTranslate(message.id);
                       }}
-                      className="p-1 px-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition text-xs font-medium bg-gray-800/50"
+                      className="p-1 text-[10px] leading-none text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition bg-gray-800/50"
                       title="Перевести на русский"
                     >
                       RU
                     </button>
                   )}
-                  
+
                   {message.role === 'user' && message.translated_content && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleOriginal();
                       }}
-                      className="p-1 px-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs font-medium bg-gray-800/50"
+                      className="p-1 text-[10px] leading-none text-gray-400 hover:text-white hover:bg-gray-700 rounded transition bg-gray-800/50"
                       title={showOriginal ? 'Показать перевод (EN)' : 'Показать оригинал (RU)'}
                     >
                       {showOriginal ? 'EN' : 'RU'}
                     </button>
                   )}
-                  
+
                   {message.role === 'user' && !message.translated_content && onTranslate && translatingMessageId !== message.id && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         onTranslate(message.id);
                       }}
-                      className="p-1 px-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition text-xs font-medium bg-gray-800/50"
+                      className="p-1 text-[10px] leading-none text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition bg-gray-800/50"
                       title="Перевести на английский"
                     >
                       EN
@@ -369,13 +367,13 @@ const MessageItem = memo(({
                   )}
                 </>
               )}
-              
+
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   handleCopy();
                 }}
-                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition active:scale-110"
+                className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition active:scale-110"
                 title="Копировать"
               >
                 {copied ? (
@@ -388,14 +386,14 @@ const MessageItem = memo(({
                   </svg>
                 )}
               </button>
-              
+
               {(isUser || message.role === 'assistant') && onEdit && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     handleEditStart();
                   }}
-                  className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition"
+                  className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition"
                   title="Редактировать"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -403,14 +401,14 @@ const MessageItem = memo(({
                   </svg>
                 </button>
               )}
-              
+
               {onRegenerate && isLastAssistantMessage && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     onRegenerate(message.id);
                   }}
-                  className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded-full transition"
+                  className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-full transition"
                   title="Перегенерировать"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -419,14 +417,14 @@ const MessageItem = memo(({
                   </svg>
                 </button>
               )}
-              
+
               {onDelete && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     onDelete(message.id);
                   }}
-                  className="p-1 text-gray-400 hover:text-red-400 hover:bg-red-900/30 rounded transition"
+                  className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-900/30 rounded transition"
                   title="Удалить"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -434,7 +432,7 @@ const MessageItem = memo(({
                   </svg>
                 </button>
               )}
-            </div>
+            </>
           )}
         </div>
       </div>

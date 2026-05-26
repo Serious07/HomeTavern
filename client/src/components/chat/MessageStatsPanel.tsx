@@ -40,32 +40,32 @@ export const MessageStatsPanel: React.FC<MessageStatsPanelProps> = ({
   const totalTokens = contentTokens + reasoningTokens;
   
   return (
-    <div className="mt-2 pt-2 border-t border-gray-600/50">
-      <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
+    <div className="mt-1">
+      <div className="flex items-center gap-2 text-[10px] text-gray-500">
         {/* Порядковый номер */}
-        <span className="font-medium text-gray-400">#{messageNumber}</span>
+        <span className="font-medium text-gray-400 whitespace-nowrap">#{messageNumber}</span>
         
         {/* Время отправки */}
-        <span>🕐 {sendTime}</span>
+        <span className="whitespace-nowrap">{sendTime}</span>
         
         {/* Количество токенов - показываем отдельно reasoning если есть */}
         {reasoningTokens > 0 && (
-          <span title={`Reasoning: ${reasoningTokens}, Content: ${contentTokens}`}>
-            📝 {totalTokens} ток. ({reasoningTokens} reasoning)
+          <span title={`Reasoning: ${reasoningTokens}, Content: ${contentTokens}`} className="whitespace-nowrap">
+            🧠 {totalTokens}т. ({reasoningTokens}🤔)
           </span>
         )}
         {reasoningTokens === 0 && contentTokens > 0 && (
-          <span>📝 {contentTokens} ток.</span>
+          <span className="whitespace-nowrap">🧠 {contentTokens}т.</span>
         )}
         
         {/* Скорость генерации */}
         {message.tokens_per_sec !== undefined && message.tokens_per_sec !== null && (
-          <span>⚡ {message.tokens_per_sec.toFixed(1)} ток/сек</span>
+          <span className="whitespace-nowrap">⚡{message.tokens_per_sec.toFixed(1)}т/с</span>
         )}
         
         {/* Время генерации */}
         {hasGenerationTime && (
-          <span>⏱️ {generationTime}с</span>
+          <span className="whitespace-nowrap">⏱{generationTime}с</span>
         )}
       </div>
     </div>
