@@ -138,7 +138,7 @@ const MessageItem = memo(({
     setShowOriginal((prev) => !prev);
   };
 
-  const handleCopy = () => {
+  const handleCopy = useCallback(() => {
     let textToCopy = message.content;
     if (message.translated_content) {
       if (message.role === 'assistant') {
@@ -147,42 +147,76 @@ const MessageItem = memo(({
         textToCopy = showOriginal ? message.translated_content : message.content;
       }
     }
-    
+
     const getDisplayDuration = () => {
       const mediaQuery = window.matchMedia('(pointer: coarse)');
       return mediaQuery.matches ? 3000 : 2000;
     };
 
-    const tryClipboardCopy = (): Promise<boolean> => {
-      return navigator.clipboard.writeText(textToCopy)
-        .then(() => true)
-        .catch(() => false);
-    };
-
-    const fallbackCopy = (): boolean => {
-      const textarea = document.createElement('textarea');
-      textarea.value = textToCopy;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      
-      try {
-        const success = document.execCommand('copy');
-        document.body.removeChild(textarea);
-        return success;
-      } catch (err) {
-        document.body.removeChild(textarea);
-        return false;
-      }
-    };
-
+    // Основной метод: Clipboard API с прямым await внутри onClick (сохраняет жест пользователя)
     const performCopy = async () => {
       let success = false;
-      success = await tryClipboardCopy();
-      if (!success) {
-        success = fallbackCopy();
+
+      // Сначала пробуем современный Clipboard API с await (не .then!)
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(textToCopy);
+          success = true;
+        } catch {
+          // Fallback ниже
+        }
       }
+
+      // Fallback для мобильных браузеров и не-HTTPS контекстов
+      if (!success) {
+        try {
+          // Удаляем старые временные элементы копирования (если есть)
+          const oldElements = document.querySelectorAll('[data-copy-temp="true"]');
+          oldElements.forEach(el => el.remove());
+
+          // Создаем невидимый contenteditable элемент
+          const tempDiv = document.createElement('div');
+          tempDiv.contentEditable = 'true';
+          tempDiv.spellcheck = false;
+          tempDiv.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;';
+          tempDiv.setAttribute('data-copy-temp', 'true');
+          tempDiv.setAttribute('aria-hidden', 'true');
+
+          // Вставляем текст через textContent (безопасно от XSS)
+          const textNode = document.createTextNode(textToCopy);
+          tempDiv.appendChild(textNode);
+
+          document.body.appendChild(tempDiv);
+
+          // Фокус на contenteditable элемент
+          tempDiv.focus();
+
+          // Создаем range и выделяем весь контент
+          const range = document.createRange();
+          range.selectNodeContents(tempDiv);
+
+          const selection = window.getSelection();
+          if (selection) {
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+
+          // Копируем
+          success = document.execCommand('copy');
+          
+          // Немедленно удаляем временный элемент
+          document.body.removeChild(tempDiv);
+
+          if (!success) {
+            console.warn('execCommand copy returned false');
+          }
+        } catch (err) {
+          console.error('Copy fallback failed:', err);
+          success = false;
+        }
+      }
+
+      // Обновляем UI после успешного копирования
       if (success) {
         setCopied(true);
         setTimeout(() => setCopied(false), getDisplayDuration());
@@ -192,8 +226,9 @@ const MessageItem = memo(({
       }
     };
 
+    // Запускаем асинхронное копирование — await внутри onClick сохраняет контекст жеста
     performCopy();
-  };
+  }, [message.content, message.translated_content, message.role, showOriginal]);
 
   const getTextToRender = (): string => {
     if (message.role === 'assistant' && message.translated_content) {
