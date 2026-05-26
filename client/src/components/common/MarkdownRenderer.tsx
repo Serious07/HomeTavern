@@ -134,14 +134,37 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
     return { statusBar: mainStatusBar, processedContent: withSpan };
   }, [children]);
 
+  // Рекурсивно обходим детей и сбрасываем margin/padding у всех React-элементов
+  const resetMarginsInChildren = (children: React.ReactNode): React.ReactNode => {
+    return React.Children.map(children, (child) => {
+      if (!React.isValidElement(child)) return child;
+      
+      // Пропускаем style атрибут для span (кавычки), em, strong — у них свои стили
+      const currentStyle = (child.props.style as React.CSSProperties) || {};
+      const newStyle: React.CSSProperties = {
+        ...currentStyle,
+        marginTop: 0,
+        marginBottom: 0,
+        paddingTop: 0,
+        paddingBottom: 0,
+      };
+      
+      return React.cloneElement(
+        child,
+        { style: newStyle },
+        resetMarginsInChildren(child.props.children)
+      );
+    });
+  };
+
   return (
     <div className="markdown-content">
-      {statusBar && <StatusBar {...statusBar} />}
+      {/* Inline styles for list formatting */}
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight, rehypeRaw]}
         components={{
-          p: ({ children }) => <p className="mb-4">{children}</p>,
+          p: ({ children }: React.HTMLAttributes<HTMLParagraphElement>) => <p>{children}</p>,
           code: ({ className, children, ...props }) => {
             const match = /language-(\w+)/.exec(className || '');
             return match ? (
@@ -160,9 +183,52 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
           h2: ({ children }) => <h2 className="text-xl font-bold mb-3 mt-5">{children}</h2>,
           h3: ({ children }) => <h3 className="text-lg font-bold mb-2 mt-4">{children}</h3>,
           h4: ({ children }) => <h4 className="text-base font-bold mb-2 mt-4">{children}</h4>,
-          ul: ({ children }) => <ul className="list-disc list-inside mb-4 ml-4">{children}</ul>,
-          ol: ({ children }) => <ol className="list-decimal list-inside mb-4 ml-4">{children}</ol>,
-          li: ({ children }) => <li className="mb-1">{children}</li>,
+          ul: ({ children }: { children?: React.ReactNode }) => (
+            <ul
+              className="markdown-ul"
+              style={{
+                listStyleType: 'disc',
+                listStylePosition: 'outside' as const,
+                listStyleImage: 'none',
+                marginBottom: 0,
+                marginLeft: '1.5rem',
+                paddingTop: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                marginTop: 0,
+              }}
+            >{children}</ul>
+          ),
+          ol: ({ children }: { children?: React.ReactNode }) => (
+            <ol
+              className="markdown-ol"
+              style={{
+                listStyleType: 'decimal',
+                listStylePosition: 'outside' as const,
+                marginBottom: 0,
+                marginLeft: '1.5rem',
+                paddingTop: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                marginTop: 0,
+              }}
+            >{children}</ol>
+          ),
+          li: ({ children, ...props }: React.LiHTMLAttributes<HTMLLIElement>) => (
+            <li
+              className="markdown-li"
+              style={{
+                lineHeight: '1.5',
+                // marginBottom управляется через CSS класс .markdown-li (0.375rem)
+                marginTop: 0,
+                paddingTop: 0,
+                paddingBottom: 0,
+                margin: 0,
+                padding: 0,
+                display: 'list-item',
+              }}
+            >{resetMarginsInChildren(children)}</li>
+          ),
           table: ({ children }) => (
             <div className="overflow-x-auto my-4">
               <table className="min-w-full border border-gray-700">{children}</table>

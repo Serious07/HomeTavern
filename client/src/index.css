@@ -252,10 +252,38 @@ body {
 
 .markdown-content {
   @apply text-white;
+  /* Переопределяем whitespace-pre-wrap родителя — markdown сам управляет переносами */
+  white-space: normal !important;
+}
+
+/* Но сохраняем pre-wrap для параграфов чтобы текст форматировался естественно */
+.markdown-content p {
+  white-space: normal !important;
 }
 
 .markdown-content p {
-  @apply mb-4 last:mb-0;
+  margin-bottom: 1rem;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* Параграфы внутри элементов списка — НУЛЕВЫЕ отступы, перебиваем всё */
+div.markdown-content ul li p,
+div.markdown-content ol li p,
+div.markdown-content > ul > li > p,
+div.markdown-content > ol > li > p {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+/* Отступ только между consecutive параграфами внутри одного li */
+div.markdown-content ul li p + p,
+div.markdown-content ol li p + p {
+  margin-top: 0.25rem !important;
 }
 
 .markdown-content code {
@@ -291,15 +319,106 @@ body {
 }
 
 .markdown-content ul {
-  @apply list-disc list-inside mb-4 ml-4;
+  list-style-position: inside;
+  margin-bottom: 1rem;
+  margin-left: 0.5rem;
 }
 
 .markdown-content ol {
-  @apply list-decimal list-inside mb-4 ml-4;
+  list-style-position: inside;
+  margin-bottom: 1rem;
+  margin-left: 0.5rem;
 }
 
 .markdown-content li {
-  @apply mb-1;
+  line-height: 1.625;
+  margin-bottom: 0;
+  padding-bottom: 0.125rem;
+}
+
+/* Принудительно убираем все отступы у параграфов внутри li */
+.markdown-content li p,
+.markdown-content li > p {
+  margin-bottom: 0 !important;
+  margin-top: 0 !important;
+}
+
+/* Минимальный отступ между consecutive параграфами в одном li */
+.markdown-content li p + p {
+  margin-top: 0.25rem !important;
+}
+
+/* Сброс отступов для заголовков внутри списков */
+.markdown-content li h1,
+.markdown-content li h2,
+.markdown-content li h3,
+.markdown-content li h4,
+.markdown-content li h5,
+.markdown-content li h6 {
+  margin-bottom: 0 !important;
+  margin-top: 0 !important;
+}
+
+/* ========================================
+   Специфичные классы для списков (MarkdownRenderer)
+   ======================================== */
+
+div.markdown-content ul.markdown-ul,
+div.markdown-content ol.markdown-ol {
+  list-style-type: disc !important;
+  list-style-position: outside !important;
+  list-style-image: none !important;
+  list-style-color: initial !important;
+  margin-bottom: 0.5rem !important;
+  margin-left: 1.25rem !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  padding-left: 0 !important;
+}
+
+div.markdown-content ol.markdown-ol {
+  list-style-type: decimal !important;
+}
+
+div.markdown-content li.markdown-li {
+  line-height: 1.5 !important;
+  margin-bottom: 0.375rem !important;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+/* Агрессивный сброс ВСЕХ отступов для p внутри li */
+div.markdown-content li.markdown-li > p,
+div.markdown-content li.markdown-li p {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+/* Принудительное обнуление для любых вложенных элементов */
+div.markdown-content li.markdown-li *,
+div.markdown-content li.markdown-li > span,
+div.markdown-content li.markdown-li > em,
+div.markdown-content li.markdown-li > strong {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+/* Сброс для h1-h6 внутри списков */
+div.markdown-content li.markdown-li h1,
+div.markdown-content li.markdown-li h2,
+div.markdown-content li.markdown-li h3,
+div.markdown-content li.markdown-li h4,
+div.markdown-content li.markdown-li pre,
+div.markdown-content li.markdown-li blockquote {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
 }
 
 .markdown-content table {
