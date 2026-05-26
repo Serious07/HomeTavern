@@ -208,6 +208,15 @@ export interface StreamChunk {
   token: string;
 }
 
+/**
+ * Context object passed through the stream to communicate timing back to caller.
+ * firstTokenTime is set when the first token (reasoning or content) is received,
+ * so that speed calculation excludes preprocessing time.
+ */
+export interface StreamTimingContext {
+  firstTokenTime: number;
+}
+
 export interface GenerationStats {
   startTime: number;
   endTime: number;
@@ -841,19 +850,21 @@ export class LLMService {
   }
 
   /**
-    * Генерация потока ответа от LLM
-    * @param userId - ID пользователя
-    * @param chatId - ID чата
-    * @param userMessage - Сообщение пользователя
-    * @param abortSignal - Signal для отмены генерации
-    * @returns Асинхронный итератор с чанками (reasoning_token и content_token)
-    */
-   async *generateStream(
-     userId: number,
-     chatId: number,
-     userMessage: string,
-     abortSignal?: AbortSignal
-   ): AsyncGenerator<StreamChunk> {
+     * Генерация потока ответа от LLM
+     * @param userId - ID пользователя
+     * @param chatId - ID чата
+     * @param userMessage - Сообщение пользователя
+     * @param abortSignal - Signal для отмены генерации
+     * @param timingContext - Optional context to track first token timing (excludes preprocessing from speed calc)
+     * @returns Асинхронный итератор с чанками (reasoning_token и content_token)
+     */
+    async *generateStream(
+      userId: number,
+      chatId: number,
+      userMessage: string,
+      abortSignal?: AbortSignal,
+      timingContext?: StreamTimingContext
+    ): AsyncGenerator<StreamChunk> {
     const timeoutMs = 900000; // 15 минут таймаут
     const startTime = Date.now();
     let contentTokenCount = 0;
@@ -946,10 +957,14 @@ export class LLMService {
         return;
       }
 
-      // Отправляем запрос к LLM с stream: true
-      // Передаем abortSignal если есть (для отмены генерации)
-      
-      // Ограничиваем max_output
+       // Записываем время начала генерации ТОЛЬКО при получении первого токена.
+        // Это исключает время предпроцессинга (получение контекста, форматирование сообщений) из расчёта скорости.
+        // timingContext.firstTokenTime будет установлен в первом же yield.
+
+       // Отправляем запрос к LLM с stream: true
+        // Передаем abortSignal если есть (для отмены генерации)
+        
+        // Ограничиваем max_output
       // Для cloud провайдеров — оставляем запас 10%
       // Для локальных серверов — используем полный лимит
       const finalMaxOutput = this.useContextLimits 
@@ -957,16 +972,23 @@ export class LLMService {
         : effectiveMaxOutput;
       console.log(`[LLMService] Sending request: max_tokens=${finalMaxOutput}, useContextLimits=${this.useContextLimits}`);
       
-      const stream = await this.client.chatCompletionsCreate({
-        model: this.model,
-        messages: messages,
-        stream: true,
-        temperature: 0.7,
-        max_tokens: finalMaxOutput,
-      }, { signal: abortSignal });
+        const stream = await this.client.chatCompletionsCreate({
+          model: this.model,
+          messages: messages,
+          stream: true,
+          temperature: 0.7,
+          max_tokens: finalMaxOutput,
+        }, { signal: abortSignal });
 
-      // Обрабатываем поток
-      for await (const chunk of stream) {
+        // Обрабатываем поток
+        for await (const chunk of stream) {
+          // Устанавливаем время первого токена (если ещё не установлено)
+          // Это включает как reasoning tokens, так и content tokens - первый полученный токен считается
+          if (timingContext && timingContext.firstTokenTime === 0) {
+            timingContext.firstTokenTime = Date.now();
+            console.log('[LLMService] First token received at:', new Date().toISOString());
+          }
+
         // Проверяем наличие usage в чанке (приходит в последнем чанке)
         if (chunk.usage) {
           lastUsage = chunk.usage;

@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { chatService } from '../services/chat.service';
 import { messageService } from '../services/message.service';
-import { llmService } from '../services/llm.service';
+import { llmService, StreamTimingContext } from '../services/llm.service';
 import { translationService } from '../services/translation.service';
 import { messageRepository } from '../repositories/message.repository';
 import { chatRepository } from '../repositories/chat.repository';
@@ -83,12 +83,17 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
   res.setHeader('X-Accel-Buffering', 'no');
 
   let fullContent = '';
-  let translatedText = '';
-  let startTime = 0;
-  let contentTokenCount = 0;
-  let reasoningTokenCount = 0;
+   let translatedText = '';
+   let startTime = 0;
+   let contentTokenCount = 0;
+   let reasoningTokenCount = 0;
 
-  try {
+   // Контекст для отслеживания времени первого токена.
+   // firstTokenTime устанавливается при получении первого токена от LLM,
+   // что исключает время предпроцессинга из расчёта скорости генерации.
+   const timingContext: StreamTimingContext = { firstTokenTime: 0 };
+
+   try {
     // 1. Проверяем доступ к чату
     const chat = await chatService.getChatWithMessages(chatId, userId);
     if (!chat) {
@@ -140,21 +145,19 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
       console.log('[ChatsRoute] Translation disabled, using original content for LLM:', messageText);
     }
 
-    // 4. Записываем время начала генерации
-    startTime = Date.now();
-    const createdAt = new Date().toISOString();  // Сохраняем время создания в UTC ISO 8601
-    
-    // 5. Создаём AbortController для возможности отмены генерации
-    const abortController = new AbortController();
-    
-    // Сохраняем AbortController в LLMService для возможности отмены
-    llmService.setAbortController(chatId, abortController);
-    
-    // 5. Генерируем поток ответа от LLM
-    console.log('[ChatsRoute] Sending to LLM:', messageInEnglish);
-    const stream = llmService.generateStream(userId, chatId, messageInEnglish, abortController.signal);
+    // 4. Создаём AbortController для возможности отмены генерации
+     const abortController = new AbortController();
+     
+     // Сохраняю AbortController в LLMService для возможности отмены
+     llmService.setAbortController(chatId, abortController);
+     
+     // 5. Генерируем поток ответа от LLM (timingContext передаётся для точного измерения скорости)
+     console.log('[ChatsRoute] Sending to LLM:', messageInEnglish);
+     const stream = llmService.generateStream(userId, chatId, messageInEnglish, abortController.signal, timingContext);
 
     // 5. Создаем сообщение ассистента в БД ПЕРЕД потоком (чтобы получить ID)
+     const createdAt = new Date().toISOString();  // Сохраняем время создания в UTC ISO 8601
+     startTime = Date.now();  // Для fallback если timingContext не сработал
     const tempMessage = messageRepository.createMessage(
       chatId,
       'assistant',
@@ -181,8 +184,11 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     }
 
     // 7. Вычисляем метрики генерации
-    const endTime = Date.now();
-    const durationSecs = startTime > 0 ? (endTime - startTime) / 1000 : 0;
+     // ВАЖНО: используем timingContext.firstTokenTime вместо startTime,
+     // чтобы исключить время предпроцессинга из расчёта скорости.
+     const endTime = Date.now();
+     const firstTokenTimestamp = timingContext.firstTokenTime > 0 ? timingContext.firstTokenTime : startTime;
+     const durationSecs = firstTokenTimestamp > 0 ? (endTime - firstTokenTimestamp) / 1000 : 0;
     
     // Рассчитываем общую скорость (content + reasoning)
     const totalTokenCount = contentTokenCount + reasoningTokenCount;
@@ -462,11 +468,11 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
       createdAt
     );
 
-    // 4. Записываем время начала генерации
-    genStartTime = Date.now();
-    
-    // 5. Генерируем поток ответа от LLM
-    const stream = llmService.generateStream(userId, chatIdNum, messageInEnglish);
+    // 4. Создаём контекст для отслеживания времени первого токена
+     const genTimingContext: StreamTimingContext = { firstTokenTime: 0 };
+     
+     // 5. Генерируем поток ответа от LLM (timingContext передаётся для точного измерения скорости)
+     const stream = llmService.generateStream(userId, chatIdNum, messageInEnglish, undefined, genTimingContext);
 
     // 6. Обрабатываем поток
     for await (const chunk of stream) {
@@ -481,8 +487,11 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // 7. Вычисляем метрики генерации
-    const genEndTime = Date.now();
-    const genDurationSecs = genStartTime > 0 ? (genEndTime - genStartTime) / 1000 : 0;
+     // ВАЖНО: используем genTimingContext.firstTokenTime вместо genStartTime,
+     // чтобы исключить время предпроцессинга из расчёта скорости.
+     const genEndTime = Date.now();
+     const genFirstTokenTimestamp = genTimingContext.firstTokenTime > 0 ? genTimingContext.firstTokenTime : genStartTime;
+     const genDurationSecs = genFirstTokenTimestamp > 0 ? (genEndTime - genFirstTokenTimestamp) / 1000 : 0;
     
     // Рассчитываем общую скорость (content + reasoning)
     const genTotalTokenCount = genContentTokenCount + genReasoningTokenCount;
