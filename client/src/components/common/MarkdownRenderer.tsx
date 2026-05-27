@@ -1,6 +1,7 @@
 import React, { memo, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import { extractStatusBar, normalizeStatusBarPosition } from '../../utils/statusBar';
@@ -161,7 +162,7 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
     <div className="markdown-content">
       {/* Inline styles for list formatting */}
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={[rehypeHighlight, rehypeRaw]}
         components={{
           p: ({ children }: React.HTMLAttributes<HTMLParagraphElement>) => <p>{children}</p>,
