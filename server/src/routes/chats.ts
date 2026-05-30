@@ -151,11 +151,21 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
      // Сохраняю AbortController в LLMService для возможности отмены
      llmService.setAbortController(chatId, abortController);
      
-     // 5. Генерируем поток ответа от LLM (timingContext передаётся для точного измерения скорости)
+     // 4.5. Фильтруем последнее сообщение пользователя из истории, чтобы избежать дублирования
+     // т.к. currentMessage (messageInEnglish) будет добавлен отдельно в formatMessagesForQwen
+     const allUserMessages = chat.messages.filter((m: any) => m.role === 'user');
+     let filteredHistory: any[] = chat.messages;
+     if (allUserMessages.length > 0) {
+       const lastUserMsgId = allUserMessages[allUserMessages.length - 1].id;
+       filteredHistory = chat.messages.filter((m: any) => m.id !== lastUserMsgId);
+       console.log(`[ChatsRoute] Filtered out last user message (id=${lastUserMsgId}) from history to prevent duplication`);
+     }
+     
+     // 5. Генерируем поток ответа от LLM с отфильтрованной историей (timingContext передаётся для точного измерения скорости)
      console.log('[ChatsRoute] Sending to LLM:', messageInEnglish);
-     const stream = llmService.generateStream(userId, chatId, messageInEnglish, abortController.signal, timingContext);
+     const stream = llmService.generateStream(userId, chatId, messageInEnglish, abortController.signal, timingContext, filteredHistory);
 
-    // 5. Создаем сообщение ассистента в БД ПЕРЕД потоком (чтобы получить ID)
+    // 5. Создаем сообщение ассистента в БДО НЕ перед потоком (чтобы получить ID)
      const createdAt = new Date().toISOString();  // Сохраняем время создания в UTC ISO 8601
      startTime = Date.now();  // Для fallback если timingContext не сработал
     const tempMessage = messageRepository.createMessage(
@@ -467,12 +477,27 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
       undefined,
       createdAt
     );
+    const savedUserMessageId = userMessage.id;
+
+    // 3.5. Перезагружаем историю из БД после сохранения пользовательского сообщения
+    // и фильтруем последнее user сообщение чтобы избежать дублирования
+    // т.к. currentMessage (messageInEnglish) будет добавлен отдельно в formatMessagesForQwen
+    const refreshedChat = chatRepository.getChatWithMessages(chatIdNum);
+    let filteredHistory: any[] = refreshedChat?.messages || [];
+    if (refreshedChat && refreshedChat.messages.length > 0) {
+      const allUserMsgs = refreshedChat.messages.filter((m: any) => m.role === 'user');
+      if (allUserMsgs.length > 0) {
+        const lastUserMsgId = allUserMsgs[allUserMsgs.length - 1].id;
+        filteredHistory = refreshedChat.messages.filter((m: any) => m.id !== lastUserMsgId);
+        console.log(`[ChatsRoute /generate] Filtered out last user message (id=${lastUserMsgId}) from history to prevent duplication`);
+      }
+    }
 
     // 4. Создаём контекст для отслеживания времени первого токена
      const genTimingContext: StreamTimingContext = { firstTokenTime: 0 };
      
-     // 5. Генерируем поток ответа от LLM (timingContext передаётся для точного измерения скорости)
-     const stream = llmService.generateStream(userId, chatIdNum, messageInEnglish, undefined, genTimingContext);
+     // 5. Генерируем поток ответа от LLM с отфильтрованной историей (timingContext передаётся для точного измерения скорости)
+     const stream = llmService.generateStream(userId, chatIdNum, messageInEnglish, undefined, genTimingContext, filteredHistory);
 
     // 6. Обрабатываем поток
     for await (const chunk of stream) {

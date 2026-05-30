@@ -15,6 +15,18 @@ import { llmConnectionRepository } from '../repositories/llm-connection.reposito
 import db from '../config/database';
 import { debugPrompt, resetPromptHashCache } from './prompt-debug';
 
+// File system utilities for logging (using dynamic import to avoid ESM/CJS conflicts)
+let fs: any = null;
+let pathLib: any = null;
+
+async function getFsUtils() {
+  if (!fs) {
+    fs = await import('fs').then(m => m.default || m);
+    pathLib = await import('path').then(m => m.default || m);
+  }
+  return { fs, pathLib };
+}
+
 /**
  * Экранирует спецсимволы для безопасного использования в XML/HTML
  */
@@ -854,9 +866,10 @@ export class LLMService {
      * Генерация потока ответа от LLM
      * @param userId - ID пользователя
      * @param chatId - ID чата
-     * @param userMessage - Сообщение пользователя
+     * @param userMessage - Сообщение пользователя (добавляется отдельно, не дублируется из history)
      * @param abortSignal - Signal для отмены генерации
      * @param timingContext - Optional context to track first token timing (excludes preprocessing from speed calc)
+     * @param preFilteredHistory - Optional pre-filtered history (last user message already removed)
      * @returns Асинхронный итератор с чанками (reasoning_token и content_token)
      */
     async *generateStream(
@@ -864,8 +877,14 @@ export class LLMService {
       chatId: number,
       userMessage: string,
       abortSignal?: AbortSignal,
-      timingContext?: StreamTimingContext
+      timingContext?: StreamTimingContext,
+      preFilteredHistory?: any[]
     ): AsyncGenerator<StreamChunk> {
+    // ============================================================================
+    // 🔍 РАННЕЕ ЛОГИРОВАНИЕ — САМОЕ ПЕРВОЕ что срабатывает в generateStream
+    // ============================================================================
+    console.log(`[LLMService.generateStream] ENTERED: userId=${userId}, chatId=${chatId}, userMessageLen=${userMessage.length}`);
+    
     const timeoutMs = 900000; // 15 минут таймаут
     const startTime = Date.now();
     let contentTokenCount = 0;
@@ -873,6 +892,8 @@ export class LLMService {
     let lastUsage: Usage | undefined;
 
     try {
+      console.log(`[LLMService.generateStream] Getting chat context...`);
+      
       // Получаем контекст чата
       const context = await this.getChatContext(userId, chatId);
       if (!context) {
@@ -880,6 +901,12 @@ export class LLMService {
       }
 
       const { character, heroProfile, heroName, historyMessages } = context;
+      
+      // Если передана предварительно отфильтрованная история (без последнего user сообщения),
+      // используем её вместо полной истории из БД
+      const effectiveHistoryFromProvider = preFilteredHistory !== undefined 
+        ? preFilteredHistory 
+        : historyMessages;
 
       // Debug: логирование текущего сообщения перед отправкой в LLM
       console.log('[LLMService] Current user message to LLM:', userMessage.substring(0, 100));
@@ -901,9 +928,9 @@ export class LLMService {
         console.log(`[LLMService] Local server detected: using full maxTokens = ${effectiveMaxOutput}`);
       }
       
-      // Используем ВСЮ историю (без обрезки) — сжатые блоки уже уменьшают объём
-      // Обрезка нужна только если сжатие активно, но остались несжатые сообщения
-      let effectiveHistory = historyMessages;
+      // Используем передную историю (без последнего user сообщения и без сжатых блоков)
+      // ВАЖНО: effectiveHistoryFromProvider уже без последнего user сообщения от роута
+      let finalHistoryForFormatting = effectiveHistoryFromProvider;
       
       if (compressedBlocks && compressedBlocks.length > 0) {
         // Сжатие уже используется — фильтруем только сообщения, не входящие в сжатые блоки
@@ -920,18 +947,20 @@ export class LLMService {
           }
         }
         // Фильтруем: исключаем сообщения из сжатых блоков, НО сохраняем start_message_id
-        effectiveHistory = historyMessages.filter(m => !compressedMsgIds.has(m.id) || m.hidden || startMessageIds.has(m.id));
-        console.log(`[LLMService] Using compressed history: ${effectiveHistory.length} messages (${compressedBlocks.length} blocks compressed)`);
+        finalHistoryForFormatting = effectiveHistoryFromProvider.filter((m: any) => !compressedMsgIds.has(m.id) || m.hidden || startMessageIds.has(m.id));
+        console.log(`[LLMService] Using compressed history: ${finalHistoryForFormatting.length} messages (${compressedBlocks.length} blocks compressed)`);
       }
       
       // Формируем историю сообщений для Qwen 3.5 с учётом сжатых блоков
+      // ВАЖНО: используем finalHistoryForFormatting (который уже без последнего user сообщения и без сжатых),
+      // а formatMessagesForQwen сам добавит currentMessage в конец через параметр userMessage
       const messages = compressedBlocks && compressedBlocks.length > 0
         ? formatMessagesForQwenWithCompression(
             userId,
             character,
             heroProfile,
             heroName,
-            effectiveHistory,
+            finalHistoryForFormatting,
             userMessage,
             compressedBlocks
           )
@@ -940,25 +969,9 @@ export class LLMService {
             character,
             heroProfile,
             heroName,
-            effectiveHistory,
+            finalHistoryForFormatting,
             userMessage
           );
-
-      // Debug: логирование сформированной истории
-      const allMsgContent = messages.map(m => m.content).join('\n');
-      const msgTokenEstimate = estimateTokenCount(allMsgContent);
-      const msgTotalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-      console.log(`[LLMService] Final messages to LLM: ${messages.length} messages, ~${msgTokenEstimate} tokens, ${msgTotalChars} chars`);
-
-      // 🔍 Prompt Debug: логирование хеша промпта перед отправкой на llama-server
-      const promptDebugInfo = await debugPrompt(messages, {
-        chatId,
-        baseURL: this.baseURL,
-        model: this.model,
-      });
-      if (promptDebugInfo) {
-        console.log(`[LLMService] Prompt debug: hash=${promptDebugInfo.fullHash.slice(0, 16)}... length=${promptDebugInfo.length} tokens=${promptDebugInfo.tokenCount || 'N/A'} match=${promptDebugInfo.matchesPrevious === true ? '✅' : promptDebugInfo.matchesPrevious === false ? '❌' : '—'}`);
-      }
 
       // Проверяем наличие клиента
       if (!this.client) {
@@ -972,23 +985,94 @@ export class LLMService {
         // Это исключает время предпроцессинга (получение контекста, форматирование сообщений) из расчёта скорости.
         // timingContext.firstTokenTime будет установлен в первом же yield.
 
-       // Отправляем запрос к LLM с stream: true
-        // Передаем abortSignal если есть (для отмены генерации)
-        
-        // Ограничиваем max_output
+       // Ограничиваем max_output
       // Для cloud провайдеров — оставляем запас 10%
       // Для локальных серверов — используем полный лимит
       const finalMaxOutput = this.useContextLimits 
         ? Math.floor(effectiveMaxOutput * 0.9)
         : effectiveMaxOutput;
-      console.log(`[LLMService] Sending request: max_tokens=${finalMaxOutput}, useContextLimits=${this.useContextLimits}`);
+
+      console.log(`[LLMService.generateStream] Context obtained, formatting messages...`);
       
-        const stream = await this.client.chatCompletionsCreate({
+      // ============================================================================
+      // 🔍 ЛОГИРОВАНИЕ ТОЧНОГО ЗАПРОСА К llama.cpp API В ФАЙЛ ДЛЯ ДИАГНОСТИКИ
+      // ============================================================================
+      
+      // Создаём папку logs если нет (используем await getFsUtils())
+      const { fs: fsUtil, pathLib: pathLibUtil } = await getFsUtils();
+      
+      const logsDir = pathLibUtil.join(process.cwd(), 'logs');
+      if (!fsUtil.existsSync(logsDir)) {
+        fsUtil.mkdirSync(logsDir, { recursive: true });
+      }
+      
+      // Формируем имя файла: ДАТА_ВРЕМЯ_IDЧАТА.log
+      const now = new Date();
+      const dateStr = now.toISOString().replace(/:/g, '-').split('.')[0]; // YYYY-MM-DDTHH-mm-ss
+      const fileName = `${dateStr}_chat${chatId}.log`;
+      const filePath = pathLibUtil.join(logsDir, fileName);
+      
+      // Формируем точный JSON запроса который отправляется в llama.cpp API
+      // С параметрами для корректной работы KV cache чекпоинтов (SWA architecture)
+      const exactRequestBody = {
+        model: this.model,
+        messages: messages,
+        stream: true,
+        max_tokens: finalMaxOutput,
+        stop: ['\n\nHuman:', '\n\nAssistant:'],
+      };
+      
+      let logContent = '';
+      logContent += `# ========================================\n`;
+      logContent += `# Точный запрос к llama.cpp API\n`;
+      logContent += `# ========================================\n`;
+      logContent += `\n`;
+      logContent += `# URL: POST ${this.baseURL}/chat/completions\n`;
+      logContent += `# Headers:\n`;
+      logContent += `#   Content-Type: application/json\n`;
+      logContent += `\n`;
+      logContent += `# Body (JSON — скопируйте и отправьте через curl для тестирования):\n`;
+      logContent += JSON.stringify(exactRequestBody, null, 2);
+      logContent += `\n`;
+      logContent += `\n`;
+      logContent += `# ========================================\n`;
+      logContent += `# Метаданные\n`;
+      logContent += `# ========================================\n`;
+      logContent += `Date: ${now.toISOString()}\n`;
+      logContent += `chatId: ${chatId}\n`;
+      logContent += `userId: ${userId}\n`;
+      logContent += `model: ${this.model}\n`;
+      logContent += `baseURL: ${this.baseURL}\n`;
+      logContent += `max_tokens: ${finalMaxOutput}\n`;
+      logContent += `stop tokens: ['\\n\\nHuman:', '\\n\\nAssistant:']\n`;
+      logContent += `useContextLimits: ${this.useContextLimits}\n`;
+      logContent += `messages count: ${messages.length}\n`;
+      logContent += `\n`;
+      logContent += `# ========================================\n`;
+      
+      // Записываем лог в файл
+      try {
+        fsUtil.writeFileSync(filePath, logContent, 'utf-8');
+        console.log(`[LLMService.generateStream] >>> Prompt logged to file: ${filePath}`);
+      } catch (logError) {
+        console.error(`[LLMService.generateStream] FAILED to write log file:`, logError);
+      }
+
+        // Параметры для корректной работы чекпоинтов кэша llama.cpp
+        // Критически важно для моделей с SWA (Sliding Window Attention) архитектурой:
+        // https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055
+        const streamRequest = {
           model: this.model,
           messages: messages,
           stream: true,
           max_tokens: finalMaxOutput,
-        }, { signal: abortSignal });
+          // STOP tokens — позволяют llama.cpp точно определять границы сообщений
+          // и использовать KV cache чекпоинты вместо полного перечитывания.
+          // ВАЖНО: НЕ используем '\n\n' как стоп токен — он встречается в каждом абзаце ответа!
+          stop: ['\n\nHuman:', '\n\nAssistant:'],
+        };
+
+        const stream = await this.client.chatCompletionsCreate(streamRequest, { signal: abortSignal });
 
         // Обрабатываем поток
         for await (const chunk of stream) {
