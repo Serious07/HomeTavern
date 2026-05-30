@@ -13,6 +13,7 @@ import { compressionService } from './compression.service';
 import { systemPromptService } from './system-prompt.service';
 import { llmConnectionRepository } from '../repositories/llm-connection.repository';
 import db from '../config/database';
+import { debugPrompt, resetPromptHashCache } from './prompt-debug';
 
 /**
  * Экранирует спецсимволы для безопасного использования в XML/HTML
@@ -948,6 +949,16 @@ export class LLMService {
       const msgTokenEstimate = estimateTokenCount(allMsgContent);
       const msgTotalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
       console.log(`[LLMService] Final messages to LLM: ${messages.length} messages, ~${msgTokenEstimate} tokens, ${msgTotalChars} chars`);
+
+      // 🔍 Prompt Debug: логирование хеша промпта перед отправкой на llama-server
+      const promptDebugInfo = await debugPrompt(messages, {
+        chatId,
+        baseURL: this.baseURL,
+        model: this.model,
+      });
+      if (promptDebugInfo) {
+        console.log(`[LLMService] Prompt debug: hash=${promptDebugInfo.fullHash.slice(0, 16)}... length=${promptDebugInfo.length} tokens=${promptDebugInfo.tokenCount || 'N/A'} match=${promptDebugInfo.matchesPrevious === true ? '✅' : promptDebugInfo.matchesPrevious === false ? '❌' : '—'}`);
+      }
 
       // Проверяем наличие клиента
       if (!this.client) {
