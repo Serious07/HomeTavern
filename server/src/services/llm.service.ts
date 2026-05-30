@@ -988,7 +988,6 @@ export class LLMService {
           messages: messages,
           stream: true,
           max_tokens: finalMaxOutput,
-          stop: ["\n\n", "\n\nHuman:", "</s>"],
         }, { signal: abortSignal });
 
         // Обрабатываем поток
