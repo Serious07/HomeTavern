@@ -160,6 +160,12 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
 
   return (
     <div className="markdown-content">
+      {statusBar && (
+        <>
+          <StatusBar {...statusBar} />
+          <div className="mt-3" />
+        </>
+      )}
       {/* Inline styles for list formatting */}
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
