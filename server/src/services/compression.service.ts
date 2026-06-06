@@ -392,8 +392,32 @@ export class CompressionService {
     const activeHero = heroVariationRepository.getActiveHeroVariationByUserId(userId);
     const heroName = activeHero?.name || null;
 
-    // 4. Разбиваем на семантические блоки
-    const semanticBlocks = this.splitIntoSemanticBlocks(messages, maxBlockMessages);
+    // 4. Получаем уже сжатые блоки и исключаем их сообщения из обработки
+    const existingBlocks = chatBlockRepository.getBlocksByChatId(chatId);
+    const compressedMessageIds: Set<number> = new Set();
+    
+    for (const block of existingBlocks) {
+      try {
+        const ids: number[] = JSON.parse(block.original_message_ids || '[]');
+        for (const id of ids) {
+          compressedMessageIds.add(id);
+        }
+      } catch (e) {
+        console.warn('[CompressionService] Failed to parse original_message_ids for block:', block.id, e);
+      }
+    }
+    
+    // Фильтруем уже сжатые сообщения — они не должны участвовать в новом сжатии
+    const uncompressedMessages = messages.filter(msg => !compressedMessageIds.has(msg.id));
+    
+    if (uncompressedMessages.length === 0) {
+      throw new Error('Все сообщения уже сжаты. Сбросьте блоки сжатия для повторного сжатия.');
+    }
+
+    console.log('[CompressionService] >>> Total messages:', messages.length, '| Already compressed:', compressedMessageIds.size, '| Uncompressed to process:', uncompressedMessages.length);
+
+    // 5. Разбиваем на семантические блоки только несжатые сообщения
+    const semanticBlocks = this.splitIntoSemanticBlocks(uncompressedMessages, maxBlockMessages);
     const totalBlocks = semanticBlocks.length;
 
     // Отправляем начальный прогресс
@@ -401,8 +425,7 @@ export class CompressionService {
       onProgress({ currentBlock: 0, totalBlocks, status: 'Начало сжатия...' });
     }
 
-    // 5. Генерируем summary для каждого блока
-    const existingBlocks = chatBlockRepository.getBlocksByChatId(chatId);
+    // 6. Генерируем summary для каждого блока
     const previousSummaries = existingBlocks.map(b => b.summary);
 
     const compressionBlocks: CompressionBlock[] = [];
@@ -412,7 +435,7 @@ export class CompressionService {
       const block = semanticBlocks[i];
       const currentBlockNum = i + 1;
 
-      // Вычисляем порядковые номера для отображения пользователю
+      // Вычисляем порядковые номера для отображения пользователю (относительно оригинального списка всех сообщений)
       const startPos = this.getMessagePosition(block.startMessageId, messages);
       const endPos = this.getMessagePosition(block.endMessageId, messages);
       const posRange = startPos > 0 && endPos > 0 ? `${startPos}-${endPos}` : '';
@@ -477,7 +500,7 @@ export class CompressionService {
       });
     }
 
-    // 6. Возвращаем результат
+    // 7. Возвращаем результат
     const savedBlocks = chatBlockRepository.getBlocksByChatId(chatId);
     const tokenSavings = this.estimateTokenSavings(messages, savedBlocks);
 
@@ -704,32 +727,35 @@ export class CompressionService {
     const historyParts: string[] = [];
     const uncompressedMessageIds: number[] = [];
     
-    // Сначала добавляем информацию о сжатых блоках (в порядке их появления)
-    const processedBlockStarts = new Set<number>();
+    // Дедупликация блоков по диапазону [startId-endId], чтобы избежать дублирования
+    // если в БД есть повторяющиеся блоки с одинаковыми границами.
+    const processedBlockRanges = new Set<string>();
     const allBlocks = chatId ? chatBlockRepository.getBlocksByChatId(chatId) : [];
     
-    for (const msg of messages) {
-      if (!msg.id) continue;
-      const blockInfo = compressedBlockInfoMap.get(msg.id);
-      if (blockInfo && !processedBlockStarts.has(msg.id)) {
-        // Это начало сжатого блока — добавляем информацию о всём блоке
-        processedBlockStarts.add(msg.id);
-        
-        for (const block of allBlocks) {
-          const ids = JSON.parse(block.original_message_ids || '[]');
-          if (ids.length > 0 && ids.includes(msg.id) && Math.min(...ids) === msg.id) {
-            const startId = Math.min(...ids);
-            const endId = Math.max(...ids);
-            historyParts.push(`[BLOCK:${startId}-${endId}] ${block.title || 'Сжатый блок'}`);
-            historyParts.push(block.summary || '');
-            historyParts.push('---');
-            break;
-          }
-        }
+    // Сортируем блоки по start_message_id для корректного порядка в истории
+    const sortedBlocks = [...allBlocks].sort((a, b) => {
+      const aStart = a.start_message_id ?? 0;
+      const bStart = b.start_message_id ?? 0;
+      return aStart - bStart;
+    });
+    
+    // Сначала добавляем информацию о сжатых блоках (в порядке start_message_id, без дублей)
+    for (const block of sortedBlocks) {
+      if (!block.start_message_id || !block.end_message_id) continue;
+      
+      const rangeKey = `${block.start_message_id}-${block.end_message_id}`;
+      if (processedBlockRanges.has(rangeKey)) {
+        // Пропускаем дубликат блока с теми же границами
+        continue;
       }
+      processedBlockRanges.add(rangeKey);
+      
+      historyParts.push(`[BLOCK:${block.start_message_id}-${block.end_message_id}] ${block.title || 'Сжатый блок'}`);
+      historyParts.push(block.summary || '');
+      historyParts.push('---');
     }
     
-    // Затем добавляем несжатые сообщения
+    // Затем добавляем несжатые сообщения (пропускаем те, что уже в блоках)
     for (const msg of messages) {
       if (!msg.id) continue;
       if (compressedMessageIds.has(msg.id)) {
