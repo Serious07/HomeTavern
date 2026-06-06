@@ -73,6 +73,109 @@ export class CompressionService {
   private readonly DEFAULT_MAX_BLOCK_MESSAGES = 20;
   private readonly SUMMARY_TEMPERATURE = 0.7;
 
+  // ==================== Retry Configuration for Compression ====================
+  /**
+   * Максимальное количество повторных попыток при ошибках API сжатия
+   */
+  private readonly maxRetries: number = 3;
+
+  /**
+   * Базовая задержка между повторными попытками (в миллисекундах)
+   */
+  private readonly baseRetryDelay: number = 2000; // 2 секунды (больше чем для обычного стриминга)
+
+  /**
+   * Максимальная задержка между повторными попытками (в миллисекундах)
+   */
+  private readonly maxRetryDelay: number = 30000; // 30 секунд
+
+  /**
+   * Проверяет, является ли ошибка "временной" и требует повторной попытки.
+   */
+  private isCompressionRetryableError(error: any): { retryable: boolean; delay?: number } {
+    if (error?.name === 'AbortError') {
+      return { retryable: false };
+    }
+
+    const message = error?.message || String(error);
+    const statusCode = error?.status || error?.response?.status;
+    const code = error?.code;
+
+    // HTTP 429 — rate limiting, повторяем с увеличенной задержкой
+    if (statusCode === 429) {
+      return { retryable: true, delay: this.baseRetryDelay * 3 };
+    }
+
+    // HTTP 5xx серверные ошибки
+    if (statusCode && statusCode >= 500 && statusCode < 600) {
+      return { retryable: true };
+    }
+
+    // Сетевые ошибки
+    if (code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || 
+        code === 'EAI_AGAIN' || code === 'ENOTFOUND') {
+      return { retryable: true };
+    }
+
+    // Timeout / network errors
+    if (message.includes('timeout') || message.includes('network error') || 
+        message.includes('fetch failed') || message.toLowerCase().includes('econnrefused')) {
+      return { retryable: true };
+    }
+
+    // Не повторяем
+    if (statusCode === 400 || statusCode === 401 || statusCode === 403 || 
+        statusCode === 404 || statusCode === 413) {
+      return { retryable: false };
+    }
+
+    return { retryable: true, delay: this.baseRetryDelay };
+  }
+
+  /**
+   * Выполняет операцию с повторными попытками и экспоненциальной задержкой.
+   */
+  private async withCompressionRetry<T>(
+    operation: () => Promise<T>,
+    contextLabel: string,
+    maxRetries: number = this.maxRetries,
+    baseDelay: number = this.baseRetryDelay
+  ): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        const { retryable, delay } = this.isCompressionRetryableError(error);
+        
+        if (!retryable || attempt >= maxRetries) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          if (!retryable) {
+            console.log(`[CompressionService.${contextLabel}] Non-retryable error:`, errorMsg);
+          } else {
+            console.error(`[CompressionService.${contextLabel}] Max retries (${maxRetries}) reached. Last error:`, errorMsg);
+          }
+          throw error;
+        }
+
+        const exponentialDelay = baseDelay * Math.pow(2, attempt);
+        const actualDelay = Math.min(exponentialDelay, delay ?? this.maxRetryDelay);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+
+        console.log(
+          `[CompressionService.${contextLabel}] Retry ${attempt + 1}/${maxRetries} in ${actualDelay}ms... ` +
+          `(Error: ${errorMsg})`
+        );
+
+        await new Promise(resolve => setTimeout(resolve, actualDelay));
+      }
+    }
+
+    throw lastError;
+  }
+
   /**
    * Получает порядковый номер (1-based) сообщения по его ID в массиве сообщений.
    * Сообщения отсортированы по created_at ASC, поэтому позиция = индекс + 1.
@@ -714,19 +817,25 @@ ${historyText}
       console.log('[CompressionService] >>> History text length:', historyText.length);
       console.log('[CompressionService] >>> Message ID range:', firstMsgId, '-', lastMsgId);
 
-      const { LLMClient } = require('llm-client');
-      const client = new LLMClient({
-        baseURL: process.env.LLM_BASE_URL || 'http://localhost:1234/v1',
-        apiKey: process.env.LLM_API_KEY || 'local-model-key',
-        timeout: 900000, // 15 минут на обработку — история может быть большой
-      });
+      // Вызываем API с retry логикой при временных ошибках
+      const response = await this.withCompressionRetry(
+        async () => {
+          const { LLMClient } = require('llm-client');
+          const client = new LLMClient({
+            baseURL: process.env.LLM_BASE_URL || 'http://localhost:1234/v1',
+            apiKey: process.env.LLM_API_KEY || 'local-model-key',
+            timeout: 900000, // 15 минут на обработку — история может быть большой
+          });
 
-      const response = await client.chatCompletionsCreate({
-        model: process.env.LLM_MODEL || 'qwen-3.5',
-        messages: llmMessages,
-        temperature: 0.5, // Ниже температура для более структурированного вывода
-        max_tokens: 4000, // Больше токенов для вывода многих глав
-      });
+          return await client.chatCompletionsCreate({
+            model: process.env.LLM_MODEL || 'qwen-3.5',
+            messages: llmMessages,
+            temperature: 0.5, // Ниже температура для более структурированного вывода
+            max_tokens: 4000, // Больше токенов для вывода многих глав
+          });
+        },
+        `splitHistoryIntoSemanticChapters chat${chatId}`
+      );
 
       const message = response.choices?.[0]?.message;
       const content = message?.content || '';
@@ -1093,19 +1202,25 @@ ${userInstructions}`;
     let title = 'Сжатая история';
 
     try {
-      const { LLMClient } = require('llm-client');
-      const client = new LLMClient({
-        baseURL: process.env.LLM_BASE_URL || 'http://localhost:1234/v1',
-        apiKey: process.env.LLM_API_KEY || 'local-model-key',
-        timeout: 900000,
-      });
+      // Вызываем API с retry логикой при временных ошибках
+      const response = await this.withCompressionRetry(
+        async () => {
+          const { LLMClient } = require('llm-client');
+          const client = new LLMClient({
+            baseURL: process.env.LLM_BASE_URL || 'http://localhost:1234/v1',
+            apiKey: process.env.LLM_API_KEY || 'local-model-key',
+            timeout: 900000,
+          });
 
-      const response = await client.chatCompletionsCreate({
-        model: process.env.LLM_MODEL || 'qwen-3.5',
-        messages,
-        temperature: this.SUMMARY_TEMPERATURE,
-        max_tokens: 2000,
-      });
+          return await client.chatCompletionsCreate({
+            model: process.env.LLM_MODEL || 'qwen-3.5',
+            messages,
+            temperature: this.SUMMARY_TEMPERATURE,
+            max_tokens: 2000,
+          });
+        },
+        `generateBlockSummary block[${block.startMessageId}-${block.endMessageId}]`
+      );
 
       const message = response.choices?.[0]?.message;
       const content = message?.content || '';

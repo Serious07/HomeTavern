@@ -602,6 +602,24 @@ export class LLMService {
    * По умолчанию 131072 для большинства современных моделей
    */
   private maxContextLength: number = 131072;
+
+  // ==================== Retry Configuration ====================
+  /**
+   * Максимальное количество повторных попыток при ошибках API
+   */
+  private readonly maxRetries: number = 3;
+
+  /**
+   * Базовая задержка между повторными попытками (в миллисекундах)
+   * Используется экспоненциальная задержка: baseDelay * 2^attempt
+   */
+  private readonly baseRetryDelay: number = 1000; // 1 секунда
+
+  /**
+   * Максимальная задержка между повторными попытками (в миллисекундах)
+   * Не превышает это значение даже при большой степени экспоненты
+   */
+  private readonly maxRetryDelay: number = 30000; // 30 секунд
   /**
    * Максимальный вывод (response tokens)
    * По умолчанию 32000 (не 64000!) чтобы оставить больше места для входа
@@ -613,6 +631,148 @@ export class LLMService {
    * false для локальных серверов (llama.cpp, vllm) — у них нет такого лимита
    */
   private useContextLimits: boolean = false;
+
+  /**
+   * Проверяет, является ли ошибка "временной" и требует повторной попытки.
+   * Временные ошибки — сетевые сбои, таймауты, серверные ошибки 5xx, rate limiting 429.
+   */
+  private isRetryableError(error: any): { retryable: boolean; delay?: number } {
+    // Если это AbortError — отмена пользователем, не повторяем
+    if (error?.name === 'AbortError') {
+      return { retryable: false };
+    }
+
+    const message = error?.message || String(error);
+    const statusCode = error?.status || error?.response?.status;
+    const code = error?.code;
+
+    // HTTP 429 Too Many Requests — rate limiting, повторяем с увеличенной задержкой
+    if (statusCode === 429) {
+      const retryAfter = error?.headers?.['retry-after'] 
+        ? parseInt(error.headers['retry-after'], 10) * 1000 
+        : undefined;
+      return { 
+        retryable: true, 
+        delay: retryAfter || this.baseRetryDelay * 4 // увеличенная задержка для rate limiting
+      };
+    }
+
+    // HTTP 5xx серверные ошибки — повторяем
+    if (statusCode && statusCode >= 500 && statusCode < 600) {
+      return { retryable: true };
+    }
+
+    // HTTP 400 Bad Request — проблема в запросе, не повторяем
+    if (statusCode === 400) {
+      return { retryable: false };
+    }
+
+    // HTTP 401/403 — ошибки авторизации, не повторяем
+    if (statusCode === 401 || statusCode === 403) {
+      return { retryable: false };
+    }
+
+    // HTTP 404 — неверный endpoint, не повторяем
+    if (statusCode === 404) {
+      return { retryable: false };
+    }
+
+    // HTTP 413 Payload Too Large — промпт слишком большой, не повторяем
+    if (statusCode === 413) {
+      return { retryable: false };
+    }
+
+    // Сетевые ошибки Node.js
+    if (code === 'ECONNRESET' || 
+        code === 'ECONNREFUSED' || 
+        code === 'ETIMEDOUT' || 
+        code === 'EAI_AGAIN' ||
+        code === 'ENOTFOUND') {
+      return { retryable: true };
+    }
+
+    // Timeout error — таймаут запроса
+    if (message.includes('timeout') || 
+        message.includes('ETIMEDOUT') ||
+        message.includes('Request timed out')) {
+      return { retryable: true };
+    }
+
+    // Network request failed / fetch error
+    if (message.includes('network error') || 
+        message.includes('fetch failed') ||
+        message.includes('ECONNREFUSED') ||
+        message.toLowerCase().includes('econnrefused')) {
+      return { retryable: true };
+    }
+
+    // Unknown errors — пробуем повторить один раз с минимальной задержкой
+    if (error || true) {
+      return { retryable: true, delay: this.baseRetryDelay };
+    }
+
+    return { retryable: false };
+  }
+
+  /**
+   * Универсальная функция для выполнения операций с повторными попытками.
+   * Использует экспоненциальную задержку: baseDelay * 2^attempt.
+   * 
+   * @param operation — асинхронная операция для выполнения
+   * @param contextLabel — метка для логирования (например, 'generateStream for chat 123')
+   * @param maxRetries — максимальное количество попыток (по умолчанию из класса)
+   * @param baseDelay — базовая задержка в мс (по умолчанию из класса)
+   * @returns результат операции
+   */
+  private async withRetry<T>(
+    operation: () => Promise<T>,
+    contextLabel: string,
+    maxRetries?: number,
+    baseDelay?: number
+  ): Promise<T> {
+    const retries = maxRetries ?? this.maxRetries;
+    const base = baseDelay ?? this.baseRetryDelay;
+
+    let lastError: any;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+
+        // Проверяем, стоит ли повторять
+        const { retryable, delay } = this.isRetryableError(error);
+        
+        if (!retryable || attempt >= retries) {
+          // Не повторяем или исчерпали попытки
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          if (!retryable) {
+            console.log(`[LLMService.${contextLabel}] Non-retryable error:`, errorMsg);
+          } else {
+            console.error(`[LLMService.${contextLabel}] Max retries (${retries}) reached. Last error:`, errorMsg);
+          }
+          throw error;
+        }
+
+        // Вычисляем задержку с экспоненциальным backoff
+        const exponentialDelay = base * Math.pow(2, attempt);
+        const actualDelay = Math.min(exponentialDelay, delay ?? this.maxRetryDelay);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+
+        console.log(
+          `[LLMService.${contextLabel}] Retry ${attempt + 1}/${retries} in ${actualDelay}ms... ` +
+          `(Error: ${errorMsg})`
+        );
+
+        // Ждаем перед повторной попыткой
+        await new Promise(resolve => setTimeout(resolve, actualDelay));
+      }
+    }
+
+    // Теоретически недостижимо, но TypeScript требует
+    throw lastError;
+  }
 
   /**
    * Определяет, является ли провайдер облачным (с лимитом контекста)
@@ -1131,7 +1291,13 @@ export class LLMService {
           stop: ['\n\nHuman:', '\n\nAssistant:'],
         };
 
-        const stream = await this.client.chatCompletionsCreate(streamRequest, { signal: abortSignal });
+        // Вызываем API с retry логикой при временных ошибках
+        const stream = await this.withRetry(
+          async () => {
+            return await this.client.chatCompletionsCreate(streamRequest, { signal: abortSignal });
+          },
+          `generateStream chat${chatId}`
+        );
 
         // Обрабатываем поток
         for await (const chunk of stream) {
