@@ -689,6 +689,17 @@ export class LLMService {
       this.apiKey = decryptedConn.api_key_decrypted;
       this.model = decryptedConn.model;
       this.maxTokens = decryptedConn.max_tokens;
+      // maxContextLength из базы = полный контекст модели (вход + выход)
+      // Используем max_tokens как максимальный контекст, если не задано отдельно в .env
+      const envMaxContext = parseInt(process.env.LLM_MAX_CONTEXT_LENGTH || '');
+      if (envMaxContext > 0) {
+        this.maxContextLength = envMaxContext;
+        console.log('[LLMService] maxContextLength loaded from LLM_MAX_CONTEXT_LENGTH env:', this.maxContextLength);
+      } else {
+        // Fallback: используем max_tokens из подключения как контекст модели
+        this.maxContextLength = decryptedConn.max_tokens;
+        console.log('[LLMService] maxContextLength derived from connection max_tokens:', this.maxContextLength);
+      }
       // Пересчитываем флаг cloud провайдера
       this.useContextLimits = this._isCloudProvider();
 
@@ -696,6 +707,8 @@ export class LLMService {
       console.log('[LLMService] Connection ID:', activeConn.id);
       console.log('[LLMService] BASE_URL:', this.baseURL);
       console.log('[LLMService] MODEL:', this.model);
+      console.log('[LLMService] MAX_TOKENS:', this.maxTokens);
+      console.log('[LLMService] MAX_CONTEXT_LENGTH:', this.maxContextLength);
 
       // Reinitialize client with database settings
       this._initLLMClient();
@@ -743,6 +756,13 @@ export class LLMService {
       this.apiKey = conn.api_key_decrypted;
       this.model = conn.model;
       this.maxTokens = conn.max_tokens;
+      // maxContextLength из базы = полный контекст модели (вход + выход)
+      const envMaxContext = parseInt(process.env.LLM_MAX_CONTEXT_LENGTH || '');
+      if (envMaxContext > 0) {
+        this.maxContextLength = envMaxContext;
+      } else {
+        this.maxContextLength = conn.max_tokens;
+      }
       // Пересчитываем флаг cloud провайдера
       this.useContextLimits = this._isCloudProvider();
 
@@ -752,6 +772,8 @@ export class LLMService {
       console.log('[LLMService] Switched to connection:', conn.name);
       console.log('[LLMService] New BASE_URL:', this.baseURL);
       console.log('[LLMService] New MODEL:', this.model);
+      console.log('[LLMService] New MAX_TOKENS:', this.maxTokens);
+      console.log('[LLMService] New MAX_CONTEXT_LENGTH:', this.maxContextLength);
 
       return Promise.resolve({
         success: true,
@@ -787,6 +809,7 @@ export class LLMService {
       baseURL: this.baseURL,
       model: this.model,
       maxTokens: this.maxTokens,
+      maxContextLength: this.maxContextLength,
       connectionId: this.currentConnectionId,
     };
   }
@@ -988,11 +1011,47 @@ export class LLMService {
        // Ограничиваем max_output
       // Для cloud провайдеров — оставляем запас 10%
       // Для локальных серверов — используем полный лимит
-      const finalMaxOutput = this.useContextLimits 
+      let finalMaxOutput = this.useContextLimits 
         ? Math.floor(effectiveMaxOutput * 0.9)
         : effectiveMaxOutput;
 
       console.log(`[LLMService.generateStream] Context obtained, formatting messages...`);
+
+      // ============================================================================
+      // 🔒 ОГРАНИЧЕНИЕ max_tokens на основе фактического размера контекста (input tokens)
+      // API имеет максимальный context length (input + output combined).
+      // Если input tokens + max_tokens > max_context_length, получаем 400 error.
+      // ============================================================================
+
+      // Estimate input tokens from the formatted messages
+      let estimatedInputTokens = 0;
+      for (const msg of messages) {
+        estimatedInputTokens += estimateTokenCount(msg.content || '');
+      }
+      // Add overhead for role tokens, separators, etc. (~4 tokens per message)
+      estimatedInputTokens += messages.length * 4;
+
+      console.log(`[LLMService.generateStream] Estimated input tokens: ${estimatedInputTokens}`);
+      console.log(`[LLMService.generateStream] max_context_length (from settings): ${this.maxContextLength}`);
+      console.log(`[LLMService.generateStream] Requested max_tokens before limit: ${finalMaxOutput}`);
+
+      // Ensure total (input + output) does not exceed max_context_length
+      // Leave a safety margin of 1024 tokens for internal usage
+      const SAFETY_MARGIN = 1024;
+      const maxAllowedOutput = Math.max(
+        1, // Minimum 1 token to allow any generation
+        this.maxContextLength - estimatedInputTokens - SAFETY_MARGIN
+      );
+
+      if (finalMaxOutput > maxAllowedOutput) {
+        console.log(`[LLMService.generateStream] ⚠️ REDUCING max_tokens: ${finalMaxOutput} -> ${maxAllowedOutput}`);
+        console.log(`[LLMService.generateStream]   Reason: input(${estimatedInputTokens}) + output(${finalMaxOutput}) = ${estimatedInputTokens + finalMaxOutput} > context_limit(${this.maxContextLength})`);
+        finalMaxOutput = maxAllowedOutput;
+      } else {
+        console.log(`[LLMService.generateStream] ✅ max_tokens OK: input(${estimatedInputTokens}) + output(${finalMaxOutput}) = ${estimatedInputTokens + finalMaxOutput} <= context_limit(${this.maxContextLength})`);
+      }
+
+      console.log(`[LLMService.generateStream] Final max_tokens to send: ${finalMaxOutput}`);
       
       // ============================================================================
       // 🔍 ЛОГИРОВАНИЕ ТОЧНОГО ЗАПРОСА К llama.cpp API В ФАЙЛ ДЛЯ ДИАГНОСТИКИ
