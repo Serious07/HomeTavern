@@ -15,6 +15,7 @@ export interface UseContextStatsReturn {
   sync: () => Promise<void>;
   startAutoSync: (intervalMs?: number) => void;
   stopAutoSync: () => void;
+  setGenerating: (generating: boolean) => void;
 }
 
 /**
@@ -44,6 +45,7 @@ export function useContextStats(
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<number | null>(null);
+  const isGeneratingRef = useRef<boolean>(false);
 
   // Функция синхронизации с сервером
   const sync = useCallback(async () => {
@@ -62,6 +64,14 @@ export function useContextStats(
     }
   }, [chatId, enabled]);
 
+  // Функция остановки автоматической синхронизации (должна быть первой, так как используется setGenerating)
+  const stopAutoSync = useCallback(() => {
+    if (intervalRef.current !== null) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
   // Функция запуска автоматической синхронизации
   const startAutoSync = useCallback((customIntervalMs?: number) => {
     if (!chatId || !enabled) return;
@@ -70,21 +80,36 @@ export function useContextStats(
     stopAutoSync();
 
     const effectiveInterval = customIntervalMs || intervalMs;
-    
+
+    // ВАЖНО: Не запускаем polling, если идет генерация (чтобы не конфликтовать с длинными запросами к llama.cpp)
+    if (isGeneratingRef.current) {
+      console.log('[useContextStats] Auto-sync skipped - generation in progress');
+      return;
+    }
+
     intervalRef.current = window.setInterval(() => {
+      // Проверяем флаг генерации внутри интервала
+      if (isGeneratingRef.current) {
+        console.log('[useContextStats] Auto-sync skipped - generation in progress');
+        return;
+      }
       sync().catch((err) => {
         console.error('[useContextStats] Auto-sync error:', err);
       });
     }, effectiveInterval);
-  }, [chatId, enabled, intervalMs, sync]);
+  }, [chatId, enabled, intervalMs, sync, stopAutoSync]);
 
-  // Функция остановки автоматической синхронизации
-  const stopAutoSync = useCallback(() => {
-    if (intervalRef.current !== null) {
-      window.clearInterval(intervalRef.current);
-      intervalRef.current = null;
+  // Функция установки флага генерации (использует stopAutoSync и startAutoSync)
+  const setGenerating = useCallback((generating: boolean) => {
+    isGeneratingRef.current = generating;
+    if (generating) {
+      console.log('[useContextStats] Generation started - pausing context stats polling');
+      stopAutoSync();
+    } else {
+      console.log('[useContextStats] Generation ended - resuming context stats polling');
+      startAutoSync();
     }
-  }, []);
+  }, [stopAutoSync, startAutoSync]);
 
   // Синхронизация при монтировании
   useEffect(() => {
@@ -106,6 +131,7 @@ export function useContextStats(
     sync,
     startAutoSync,
     stopAutoSync,
+    setGenerating,
   };
 }
 

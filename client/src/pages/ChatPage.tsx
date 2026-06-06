@@ -123,7 +123,12 @@ const ChatPage: React.FC = () => {
   
   // Context stats for token usage tracking
   const currentChatId = chatId ? parseInt(chatId) : null;
-  const { stats: contextStats, isLoading: isContextLoading, sync: syncContextStats } = useContextStats(
+  const { 
+    stats: contextStats, 
+    isLoading: isContextLoading, 
+    sync: syncContextStats,
+    setGenerating: setContextGenerating,
+  } = useContextStats(
     currentChatId,
     { enabled: !!currentChatId }
   );
@@ -242,6 +247,8 @@ const ChatPage: React.FC = () => {
     // useEffect автоматически скроллит к новому сообщению
     setIsStreaming(false);
     setIsSending(false);
+    // Возобновляем polling контекста после окончания генерации
+    setContextGenerating(false);
     
     // Возвращаем фокус в поле ввода после завершения генерации
     // Небольшая задержка чтобы DOM успел обновиться
@@ -358,7 +365,8 @@ const ChatPage: React.FC = () => {
       // Обновляем статистику токенов после отправки сообщения
       await syncContextStats();
       
-      // Start streaming response
+      // Start streaming response — приостанавливаем polling контекста чтобы не конфликтовать с llama.cpp
+      setContextGenerating(true);
       setIsStreaming(true);
       
       // Очищаем поле ввода после отправки (смена key заставит React пересоздать input)
