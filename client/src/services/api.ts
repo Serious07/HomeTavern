@@ -13,8 +13,10 @@ export interface ContextStats {
 }
 
 // Create axios instance with default config
+// Timeout set to 60 minutes (3600000 ms) for large history loading/compression operations
 export const api = axios.create({
   baseURL: '/api',
+  timeout: 3600000,
   headers: {
     'Content-Type': 'application/json',
   },

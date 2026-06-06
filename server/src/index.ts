@@ -29,6 +29,13 @@ import { initLlmConnectionsTable, seedConnectionsFromEnv } from './utils/llm-con
 const app: Application = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
 
+// Timeout settings (in milliseconds) - 60 minutes for large history loading/compression
+const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || '3600000', 10);
+const SERVER_REQUEST_TIMEOUT = parseInt(process.env.SERVER_REQUEST_TIMEOUT || '3600000', 10);
+
+console.log(`[Timeout] Request timeout: ${REQUEST_TIMEOUT}ms (${REQUEST_TIMEOUT / 60000} minutes)`);
+console.log(`[Timeout] Server request timeout: ${SERVER_REQUEST_TIMEOUT}ms (${SERVER_REQUEST_TIMEOUT / 60000} minutes)`);
+
 // Middleware
 const corsOrigin = process.env.CORS_ORIGIN || '*';
 app.use(cors({
@@ -38,6 +45,33 @@ app.use(cors({
 // Увеличиваем лимит размера тела запроса до 100MB для поддержки загрузки аватарок
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+
+// Start server
+const HOST = '0.0.0.0';
+
+// Set HTTP server timeout for large operations (loading huge chat histories, compression)
+// Setting both server.timeout and connection.setTimeout for comprehensive coverage
+const serverModule = app.listen(PORT, HOST, async () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+  console.log(`Server is also accessible on LAN:`);
+  console.log(`  - http://127.0.0.1:${PORT}`);
+  console.log(`  - Use your machine's IP address from other devices on the network`);
+  
+  // Set timeout for all connections (60 minutes)
+  serverModule.timeout = SERVER_REQUEST_TIMEOUT;
+  serverModule.keepAliveTimeout = SERVER_REQUEST_TIMEOUT + 1000;
+  
+  // Also set on each new connection
+  serverModule.on('connection', (socket) => {
+    socket.setTimeout(SERVER_REQUEST_TIMEOUT);
+    socket.on('timeout', () => {
+      console.warn('[Server] Connection timeout reached');
+    });
+  });
+
+  // Инициализация администратора после запуска сервера
+  await initializeAdminUser();
+});
 
 // Health check route
 app.get('/api/health', (req: Request, res: Response) => {
@@ -119,15 +153,3 @@ const initializeAdminUser = async () => {
   }
 };
 
-// Start server
-const HOST = '0.0.0.0';
-
-app.listen(PORT, HOST, async () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-  console.log(`Server is also accessible on LAN:`);
-  console.log(`  - http://127.0.0.1:${PORT}`);
-  console.log(`  - Use your machine's IP address from other devices on the network`);
-  
-  // Инициализация администратора после запуска сервера
-  await initializeAdminUser();
-});
