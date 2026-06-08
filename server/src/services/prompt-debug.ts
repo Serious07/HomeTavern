@@ -274,7 +274,7 @@ export async function debugPrompt(
   const parts = analyzePromptParts(messages);
 
   // Сравнение с предыдущим хешем чата (быстрая проверка без обращения к серверу)
-  let matchesPrevious: boolean | null;
+  let matchesPrevious: boolean | null = null;
   if (chatId && promptHashCache.has(chatId)) {
     const cached = promptHashCache.get(chatId)!;
     matchesPrevious = fullHash === cached.hash;
@@ -334,8 +334,8 @@ export async function debugPrompt(
     length: promptText.length,
     hashPrefix,
     fullHash,
-    parts,
-    matchesPrevious,
+    parts: parts || undefined,
+    matchesPrevious: matchesPrevious ?? undefined,
   };
 }
 

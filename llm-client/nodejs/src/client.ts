@@ -34,7 +34,13 @@ export class LLMClient {
         body?: unknown,
         options: { signal?: AbortSignal } = {}
     ): Promise<Response> {
-        const url = `${this.baseURL}${endpoint}`;
+        // Ensure no double slashes and proper URL construction
+        const base = this.baseURL.replace(/\/+$/, '');
+        const ep = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+        const url = base + ep;
+        
+        // Log the full URL for debugging
+        console.log(`[LLMClient] Request: ${method} ${url}`);
         
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
