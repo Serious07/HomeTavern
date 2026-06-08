@@ -67,6 +67,63 @@ function estimateTokenCount(text: string): number {
 }
 
 /**
+ * Возвращает известный лимит контекста модели, если он задан.
+ * Используется для cloud-провайдеров, где API валидирует сумму input + output.
+ */
+function getModelContextLimit(baseURL: string, model: string): number {
+  const normalizedBaseURL = baseURL.toLowerCase();
+  const normalizedModel = model.toLowerCase();
+
+  // Silicon Flow / SiliconCloud: Nex-AGI Nex-N2-Pro advertises 262K context.
+  if (normalizedBaseURL.includes('siliconflow') && normalizedModel.includes('nex-agi/nex-n2-pro')) {
+    return 262144;
+  }
+
+  return 0;
+}
+
+/**
+ * Вычисляет безопасный лимит output tokens для API, где max_tokens должен
+ * укладываться вместе с input в общий context window.
+ */
+function calculateSafeMaxOutputTokens(params: {
+  requestedMaxOutput: number;
+  estimatedInputTokens: number;
+  explicitContextLength: number;
+  baseURL: string;
+  model: string;
+  reserveTokens: number;
+}): number {
+  const {
+    requestedMaxOutput,
+    estimatedInputTokens,
+    explicitContextLength,
+    baseURL,
+    model,
+    reserveTokens,
+  } = params;
+
+  if (!Number.isFinite(requestedMaxOutput) || requestedMaxOutput <= 0) {
+    return requestedMaxOutput;
+  }
+
+  const contextLength = explicitContextLength > 0
+    ? explicitContextLength
+    : getModelContextLimit(baseURL, model);
+
+  if (contextLength <= 0) {
+    return requestedMaxOutput;
+  }
+
+  const maxOutputForContext = contextLength - estimatedInputTokens - reserveTokens;
+  if (maxOutputForContext <= 0) {
+    return 1;
+  }
+
+  return Math.min(requestedMaxOutput, maxOutputForContext);
+}
+
+/**
  * Обрезает историю сообщений, чтобы уложиться в лимит контекста.
  * Возвращает обрезанный массив сообщений, сохраняя самые последние.
  */
@@ -598,10 +655,11 @@ export class LLMService {
   private currentConnectionId: number | null = null;
 
   /**
-   * Максимальный контекст модели (вход + выход)
-   * По умолчанию 131072 для большинства современных моделей
+   * Диагностическое значение context window.
+   * HomeTavern больше не использует его для ограничения max_tokens:
+   * решение о достижении лимита принимает провайдер.
    */
-  private maxContextLength: number = 131072;
+  private maxContextLength: number = 0;
 
   // ==================== Retry Configuration ====================
   /**
@@ -621,14 +679,14 @@ export class LLMService {
    */
   private readonly maxRetryDelay: number = 30000; // 30 секунд
   /**
-   * Максимальный вывод (response tokens)
-   * По умолчанию 32000 (не 64000!) чтобы оставить больше места для входа
+   * Максимальный вывод (response tokens).
+   * Значение берётся из активного подключения в БД/UI и отправляется провайдеру как есть.
    */
   private maxOutputTokens: number = 32000;
+
   /**
-   * Использовать ли лимиты контекста.
-   * true для cloud провайдеров (OpenRouter, z.ai) — у них есть жёсткий лимит 131072
-   * false для локальных серверов (llama.cpp, vllm) — у них нет такого лимита
+   * Диагностический флаг: использовался ранее для cloud-provider лимитов.
+   * Сейчас не ограничивает max_tokens.
    */
   private useContextLimits: boolean = false;
 
@@ -779,13 +837,36 @@ export class LLMService {
    */
   private _isCloudProvider(): boolean {
     const url = this.baseURL.toLowerCase();
-    // OpenRouter, z.ai и другие cloud провайдеры имеют жёсткий лимит контекста
+    // OpenRouter, z.ai, SiliconFlow и другие cloud провайдеры имеют жёсткий лимит контекста
     return url.includes('openrouter') || 
            url.includes('z.ai') || 
            url.includes('together') ||
            url.includes('perplexity') ||
            url.includes('fireworks') ||
-           url.includes('anyscale');
+           url.includes('anyscale') ||
+           url.includes('siliconflow');
+  }
+
+  /**
+   * Определяет, является ли провайдер Silicon Flow
+   */
+  private _isSiliconFlow(): boolean {
+    const url = this.baseURL.toLowerCase();
+    return url.includes('siliconflow');
+  }
+
+  /**
+   * Получает стоп-токены в зависимости от провайдера
+   * Для Silicon Flow и некоторых других cloud провайдеров возвращает пустой массив,
+   * так как их модели не используют специфические стоп-токены в формате ChatML
+   */
+  private getStopTokens(): string[] | null {
+    // Для Silicon Flow — не используем стоп-токены (модели могут их не поддерживать)
+    if (this._isSiliconFlow()) {
+      return null;
+    }
+    // По умолчанию — стоп-токены для ChatML/instruct форматов
+    return ['\n\nHuman:', '\n\nAssistant:'];
   }
 
   constructor() {
@@ -795,10 +876,8 @@ export class LLMService {
     this.model = process.env.LLM_MODEL || 'qwen-3.5';
     this.maxTokens = parseInt(process.env.LLM_MAX_TOKENS || '') || 64000;
     this.maxOutputTokens = this.maxTokens; // По умолчанию = maxTokens
-    // Максимальный входной контекст = maxContextLength - maxTokens (оставляем место для вывода)
-    this.maxContextLength = parseInt(process.env.LLM_MAX_CONTEXT_LENGTH || '') || 131072;
-    // Флаг: используем ли лимиты контекста (true для OpenRouter/z.ai, false для локальных серверов)
-    this.useContextLimits = this._isCloudProvider();
+    this.maxContextLength = parseInt(process.env.LLM_MAX_CONTEXT_LENGTH || '') || 0;
+    this.useContextLimits = false;
 
     // Try to load active connection from database on startup
     this._loadActiveConnectionFromDB();
@@ -849,19 +928,9 @@ export class LLMService {
       this.apiKey = decryptedConn.api_key_decrypted;
       this.model = decryptedConn.model;
       this.maxTokens = decryptedConn.max_tokens;
-      // maxContextLength из базы = полный контекст модели (вход + выход)
-      // Используем max_tokens как максимальный контекст, если не задано отдельно в .env
-      const envMaxContext = parseInt(process.env.LLM_MAX_CONTEXT_LENGTH || '');
-      if (envMaxContext > 0) {
-        this.maxContextLength = envMaxContext;
-        console.log('[LLMService] maxContextLength loaded from LLM_MAX_CONTEXT_LENGTH env:', this.maxContextLength);
-      } else {
-        // Fallback: используем max_tokens из подключения как контекст модели
-        this.maxContextLength = decryptedConn.max_tokens;
-        console.log('[LLMService] maxContextLength derived from connection max_tokens:', this.maxContextLength);
-      }
-      // Пересчитываем флаг cloud провайдера
-      this.useContextLimits = this._isCloudProvider();
+      this.maxOutputTokens = this.maxTokens;
+      this.maxContextLength = 0;
+      this.useContextLimits = false;
 
       console.log('[LLMService] Loaded active connection from database:', decryptedConn.name);
       console.log('[LLMService] Connection ID:', activeConn.id);
@@ -916,15 +985,9 @@ export class LLMService {
       this.apiKey = conn.api_key_decrypted;
       this.model = conn.model;
       this.maxTokens = conn.max_tokens;
-      // maxContextLength из базы = полный контекст модели (вход + выход)
-      const envMaxContext = parseInt(process.env.LLM_MAX_CONTEXT_LENGTH || '');
-      if (envMaxContext > 0) {
-        this.maxContextLength = envMaxContext;
-      } else {
-        this.maxContextLength = conn.max_tokens;
-      }
-      // Пересчитываем флаг cloud провайдера
-      this.useContextLimits = this._isCloudProvider();
+      this.maxOutputTokens = this.maxTokens;
+      this.maxContextLength = 0;
+      this.useContextLimits = false;
 
       // Reinitialize client with new settings
       this._initLLMClient();
@@ -1099,17 +1162,10 @@ export class LLMService {
       // Получаем сжатые блоки для чата
       const compressedBlocks = chatBlockRepository.getBlocksByChatId(chatId);
       
-      // Рассчитываем лимиты вывода
-      // Для cloud провайдеров (OpenRouter, z.ai) ограничиваем output до 25% контекста
-      // Для локальных серверов (llama.cpp) используем полный maxTokens
-      let effectiveMaxOutput: number;
-      if (this.useContextLimits) {
-        effectiveMaxOutput = Math.min(this.maxOutputTokens, Math.floor(this.maxContextLength * 0.25));
-        console.log(`[LLMService] Cloud provider detected: context=${this.maxContextLength}, limiting output to 25% = ${effectiveMaxOutput}`);
-      } else {
-        effectiveMaxOutput = this.maxTokens;
-        console.log(`[LLMService] Local server detected: using full maxTokens = ${effectiveMaxOutput}`);
-      }
+      // HomeTavern больше не ограничивает max_tokens.
+      // Значение из активного подключения в БД/UI отправляется провайдеру как есть.
+      const effectiveMaxOutput = this.maxTokens;
+      console.log(`[LLMService] Provider-managed limits: using max_tokens from active connection = ${effectiveMaxOutput}`);
       
       // Используем передную историю (без последнего user сообщения и без сжатых блоков)
       // ВАЖНО: effectiveHistoryFromProvider уже без последнего user сообщения от роута
@@ -1168,54 +1224,65 @@ export class LLMService {
         // Это исключает время предпроцессинга (получение контекста, форматирование сообщений) из расчёта скорости.
         // timingContext.firstTokenTime будет установлен в первом же yield.
 
-       // Ограничиваем max_output
-      // Для cloud провайдеров — оставляем запас 10%
-      // Для локальных серверов — используем полный лимит
-      let finalMaxOutput = this.useContextLimits 
-        ? Math.floor(effectiveMaxOutput * 0.9)
-        : effectiveMaxOutput;
+      const contextReserveTokens = 2048;
 
       console.log(`[LLMService.generateStream] Context obtained, formatting messages...`);
 
       // ============================================================================
-      // 🔒 ОГРАНИЧЕНИЕ max_tokens на основе фактического размера контекста (input tokens)
-      // API имеет максимальный context length (input + output combined).
-      // Если input tokens + max_tokens > max_context_length, получаем 400 error.
+      // 🔍 Оценка размера промпта.
+      // Для cloud API, где max_tokens должен укладываться вместе с input в общий
+      // context window, это значение используется для безопасного ограничения output.
       // ============================================================================
 
-      // Estimate input tokens from the formatted messages
       let estimatedInputTokens = 0;
       for (const msg of messages) {
         estimatedInputTokens += estimateTokenCount(msg.content || '');
       }
-      // Add overhead for role tokens, separators, etc. (~4 tokens per message)
       estimatedInputTokens += messages.length * 4;
 
+      const finalMaxOutput = calculateSafeMaxOutputTokens({
+        requestedMaxOutput: effectiveMaxOutput,
+        estimatedInputTokens,
+        explicitContextLength: this.maxContextLength,
+        baseURL: this.baseURL,
+        model: this.model,
+        reserveTokens: contextReserveTokens,
+      });
+      const resolvedContextLength = this.maxContextLength > 0
+        ? this.maxContextLength
+        : getModelContextLimit(this.baseURL, this.model);
+
       console.log(`[LLMService.generateStream] Estimated input tokens: ${estimatedInputTokens}`);
-      console.log(`[LLMService.generateStream] max_context_length (from settings): ${this.maxContextLength}`);
-      console.log(`[LLMService.generateStream] Requested max_tokens before limit: ${finalMaxOutput}`);
-
-      // Ensure total (input + output) does not exceed max_context_length
-      // Leave a safety margin of 1024 tokens for internal usage
-      const SAFETY_MARGIN = 1024;
-      const maxAllowedOutput = Math.max(
-        1, // Minimum 1 token to allow any generation
-        this.maxContextLength - estimatedInputTokens - SAFETY_MARGIN
-      );
-
-      if (finalMaxOutput > maxAllowedOutput) {
-        console.log(`[LLMService.generateStream] ⚠️ REDUCING max_tokens: ${finalMaxOutput} -> ${maxAllowedOutput}`);
-        console.log(`[LLMService.generateStream]   Reason: input(${estimatedInputTokens}) + output(${finalMaxOutput}) = ${estimatedInputTokens + finalMaxOutput} > context_limit(${this.maxContextLength})`);
-        finalMaxOutput = maxAllowedOutput;
-      } else {
-        console.log(`[LLMService.generateStream] ✅ max_tokens OK: input(${estimatedInputTokens}) + output(${finalMaxOutput}) = ${estimatedInputTokens + finalMaxOutput} <= context_limit(${this.maxContextLength})`);
-      }
-
+      console.log(`[LLMService.generateStream] Context length used for max_tokens cap: ${resolvedContextLength}`);
+      console.log(`[LLMService.generateStream] Context reserve tokens: ${contextReserveTokens}`);
+      console.log(`[LLMService.generateStream] Requested max_tokens from connection: ${effectiveMaxOutput}`);
       console.log(`[LLMService.generateStream] Final max_tokens to send: ${finalMaxOutput}`);
+      if (finalMaxOutput !== effectiveMaxOutput) {
+        console.log(`[LLMService.generateStream] max_tokens capped to fit input + output within context window`);
+      }
       
       // ============================================================================
-      // 🔍 ЛОГИРОВАНИЕ ТОЧНОГО ЗАПРОСА К llama.cpp API В ФАЙЛ ДЛЯ ДИАГНОСТИКИ
+      // 🔍 ЛОГИРОВАНИЕ ТОЧНОГО ЗАПРОСА К API В ФАЙЛ ДЛЯ ДИАГНОСТИКИ
       // ============================================================================
+      
+      // Формируем точный JSON запроса который отправляется в API
+      // Стоп-токены зависят от провайдера (для Silicon Flow — null)
+      const stopTokens = this.getStopTokens();
+      
+      // ============================================================================
+      // 🔍 ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ ЗАПРОСА ДЛЯ ДИАГНОСТИКИ
+      // ============================================================================
+      console.log(`[LLMService.generateStream] >>> API Details:`);
+      console.log(`[LLMService.generateStream]     BASE_URL: ${this.baseURL}`);
+      console.log(`[LLMService.generateStream]     MODEL: ${this.model}`);
+      console.log(`[LLMService.generateStream]     ENDPOINT: /chat/completions`);
+      console.log(`[LLMService.generateStream]     FULL_URL: ${this.baseURL.replace(/\/+$/, '')}/chat/completions`);
+      console.log(`[LLMService.generateStream]     STOP_TOKENS: ${stopTokens === null ? 'null (provider-specific)' : JSON.stringify(stopTokens)}`);
+      console.log(`[LLMService.generateStream]     MESSAGES_COUNT: ${messages.length}`);
+      console.log(`[LLMService.generateStream]     FIRST_MESSAGE_ROLE: ${messages[0]?.role}`);
+      console.log(`[LLMService.generateStream]     FIRST_MESSAGE_LEN: ${(messages[0]?.content || '').length}`);
+      console.log(`[LLMService.generateStream]     LAST_MESSAGE_ROLE: ${messages[messages.length - 1]?.role}`);
+      console.log(`[LLMService.generateStream]     LAST_MESSAGE_LEN: ${(messages[messages.length - 1]?.content || '').length}`);
       
       // Создаём папку logs если нет (используем await getFsUtils())
       const { fs: fsUtil, pathLib: pathLibUtil } = await getFsUtils();
@@ -1231,15 +1298,15 @@ export class LLMService {
       const fileName = `${dateStr}_chat${chatId}.log`;
       const filePath = pathLibUtil.join(logsDir, fileName);
       
-      // Формируем точный JSON запроса который отправляется в llama.cpp API
-      // С параметрами для корректной работы KV cache чекпоинтов (SWA architecture)
-      const exactRequestBody = {
+      const exactRequestBody: Record<string, any> = {
         model: this.model,
         messages: messages,
         stream: true,
         max_tokens: finalMaxOutput,
-        stop: ['\n\nHuman:', '\n\nAssistant:'],
       };
+      if (stopTokens !== null) {
+        exactRequestBody.stop = stopTokens;
+      }
       
       let logContent = '';
       logContent += `# ========================================\n`;
@@ -1263,7 +1330,7 @@ export class LLMService {
       logContent += `model: ${this.model}\n`;
       logContent += `baseURL: ${this.baseURL}\n`;
       logContent += `max_tokens: ${finalMaxOutput}\n`;
-      logContent += `stop tokens: ['\\n\\nHuman:', '\\n\\nAssistant:']\n`;
+      logContent += `stop tokens: ${stopTokens === null ? 'null (provider-specific)' : JSON.stringify(stopTokens)}\n`;
       logContent += `useContextLimits: ${this.useContextLimits}\n`;
       logContent += `messages count: ${messages.length}\n`;
       logContent += `\n`;
@@ -1277,19 +1344,18 @@ export class LLMService {
         console.error(`[LLMService.generateStream] FAILED to write log file:`, logError);
       }
 
-        // Параметры для корректной работы чекпоинтов кэша llama.cpp
-        // Критически важно для моделей с SWA (Sliding Window Attention) архитектурой:
-        // https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055
-        const streamRequest = {
+        // Формируем запрос с правильными стоп-токенами для текущего провайдера
+        // Для Silicon Flow — стоп-токены не используются (модели могут их не поддерживать)
+        // Для локальных серверов (llama.cpp) — позволяют использовать KV cache чекпоинты
+        const streamRequest: Record<string, any> = {
           model: this.model,
           messages: messages,
           stream: true,
           max_tokens: finalMaxOutput,
-          // STOP tokens — позволяют llama.cpp точно определять границы сообщений
-          // и использовать KV cache чекпоинты вместо полного перечитывания.
-          // ВАЖНО: НЕ используем '\n\n' как стоп токен — он встречается в каждом абзаце ответа!
-          stop: ['\n\nHuman:', '\n\nAssistant:'],
         };
+        if (stopTokens !== null) {
+          streamRequest.stop = stopTokens;
+        }
 
         // Вызываем API с retry логикой при временных ошибках
         const stream = await this.withRetry(
