@@ -57,6 +57,92 @@ function wrapQuotesInText(text: string): string {
   return processed;
 }
 
+// ==================== Обработка LaTeX-символов ====================
+
+/**
+ * Преобразует LaTeX-выражения в Unicode-символы.
+ *
+ * Поддерживаемые символы:
+ * - $\rightarrow$ → →  (U+2192)
+ * - $\leftarrow$ → ←  (U+2190)
+ * - $\Rightarrow$ → ⇒  (U+21D2)
+ * - $\Leftarrow$ → ⇐  (U+21D0)
+ * - $\leftrightarrow$ → ↔  (U+2194)
+ * - $\Leftrightarrow$ → ⇔  (U+21D4)
+ * - $\uparrow$ → ↑  (U+2191)
+ * - $\downarrow$ → ↓  (U+2193)
+ * - $\upuparrows$ → ↑↑
+ * - $\rightrightarrows$ → ⇒⇒
+ * - $\forall$ → ∀  (U+2200)
+ * - $\exists$ → ∃  (U+2203)
+ * - $\in$ → ∈  (U+2208)
+ * - $\notin$ → ∉  (U+2209)
+ * - $\subset$ → ⊂  (U+2282)
+ * - $\supset$ → ⊃  (U+2283)
+ * - $\cup$ → ∪  (U+222A)
+ * - $\cap$ → ∩  (U+2229)
+ * - $\emptyset$ → ∅  (U+2205)
+ * - $\infty$ → ∞  (U+221E)
+ * - $\pm$ → ±  (U+00B1)
+ * - $\times$ → ×  (U+00D7)
+ * - $\div$ → ÷  (U+00F7)
+ * - $\approx$ → ≈  (U+2248)
+ * - $\neq$ → ≠  (U+2260)
+ * - $\leq$ → ≤  (U+2264)
+ * - $\geq$ → ≥  (U+2265)
+ * - $\sum$ → Σ  (U+03A3)
+ * - $\prod$ → Π  (U+03A0)
+ * - $\int$ → ∫  (U+222B)
+ * - $\partial$ → ∂  (U+2202)
+ * - $\nabla$ → ∇  (U+2207)
+ */
+function processLatexSymbols(text: string): string {
+  const latexMap: Record<string, string> = {
+    '\\rightarrow': '→',
+    '\\leftarrow': '←',
+    '\\Rightarrow': '⇒',
+    '\\Leftarrow': '⇐',
+    '\\leftrightarrow': '↔',
+    '\\Leftrightarrow': '⇔',
+    '\\uparrow': '↑',
+    '\\downarrow': '↓',
+    '\\forall': '∀',
+    '\\exists': '∃',
+    '\\in': '∈',
+    '\\notin': '∉',
+    '\\subset': '⊂',
+    '\\supset': '⊃',
+    '\\cup': '∪',
+    '\\cap': '∩',
+    '\\emptyset': '∅',
+    '\\infty': '∞',
+    '\\pm': '±',
+    '\\times': '×',
+    '\\div': '÷',
+    '\\approx': '≈',
+    '\\neq': '≠',
+    '\\leq': '≤',
+    '\\geq': '≥',
+    '\\sum': 'Σ',
+    '\\prod': 'Π',
+    '\\int': '∫',
+    '\\partial': '∂',
+    '\\nabla': '∇',
+  };
+
+  // Заменяем одиночные LaTeX-выражения в формате $...$
+  // Обрабатываем от самых длинных ключей к коротким для корректной замены
+  const sortedKeys = Object.keys(latexMap).sort((a, b) => b.length - a.length);
+
+  for (const key of sortedKeys) {
+    const escapedKey = key.replace(/\\/g, '\\\\');
+    const regex = new RegExp(`\\$${escapedKey}\\$`, 'g');
+    text = text.replace(regex, latexMap[key]);
+  }
+
+  return text;
+}
+
 // ==================== Обработка тегов разметки LLM ====================
 
 /**
@@ -99,10 +185,13 @@ function processLLMTags(text: string): string {
  * Теги LLM используются для маркирования типов речи нейросетью.
  */
 function wrapQuotesWithSpan(text: string): string {
-  // Шаг 1: Обрабатываем теги LLM (speech, monologue, dialog, narration)
-  let withLLMTags = processLLMTags(text);
+  // Шаг 1: Преобразуем LaTeX-символы ($\rightarrow$ → →)
+  let withLatex = processLatexSymbols(text);
 
-  // Шаг 2: Оборачиваем кавычки
+  // Шаг 2: Обрабатываем теги LLM (speech, monologue, dialog, narration)
+  let withLLMTags = processLLMTags(withLatex);
+
+  // Шаг 3: Оборачиваем кавычки
   let withWrappedQuotes = wrapQuotesInText(withLLMTags);
 
   return withWrappedQuotes;
