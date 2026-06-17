@@ -91,7 +91,8 @@ router.post('/sync/:chatId', async (req: AuthenticatedRequest, res: Response) =>
  */
 router.get('/slots', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const slots = await contextService.getActiveSlots();
+    const userId = req.user!.userId;
+    const slots = await contextService.getActiveSlots(userId);
     res.status(200).json({ slots });
   } catch (error) {
     console.error('[ContextRoutes] Error getting slots:', error);
@@ -105,7 +106,8 @@ router.get('/slots', async (req: AuthenticatedRequest, res: Response) => {
  */
 router.get('/props', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const n_ctx = await contextService.getMaxContext();
+    const userId = req.user!.userId;
+    const n_ctx = await contextService.getMaxContext(userId);
     res.status(200).json({ n_ctx });
   } catch (error) {
     console.error('[ContextRoutes] Error getting props:', error);

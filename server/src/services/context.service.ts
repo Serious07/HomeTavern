@@ -4,7 +4,10 @@
  * Эндпоинты llama.cpp:
  * - GET /props - Общие настройки сервера (n_ctx)
  * - GET /slots - Состояние слотов (n_ctx, n_decoded для каждого слота)
- * - GET /metrics - Prometheus метрики (если включено)
+ * - GET /tokenize - Токенизация текста через модель
+ * 
+ * URL сервера берётся из активного подключения пользователя в БД (llm_connections),
+ * а не из .env — это позволяет использовать разные подключения для разных пользователей.
  */
 
 import { contextRepository } from '../repositories/context.repository';
@@ -13,6 +16,7 @@ import { characterRepository } from '../repositories/character.repository';
 import { heroVariationRepository } from '../repositories/hero.variation.repository';
 import { formatMessagesForQwen, formatMessagesForQwenWithCompression, replaceUserPlaceholders } from './llm.service';
 import { chatBlockRepository } from '../repositories/chat-block.repository';
+import { llmConnectionRepository } from '../repositories/llm-connection.repository';
 
 // Типы для llama.cpp API
 interface LlamaProps {
@@ -58,22 +62,40 @@ export interface ContextStats {
 }
 
 export class ContextService {
-  private baseURL: string;
-  private propsCache: { n_ctx: number; timestamp: number } | null = null;
+  private propsCache: { n_ctx: number; timestamp: number; baseURL: string } | null = null;
   private readonly PROPS_CACHE_TTL = 60000; // 1 минута кэширование для /props
 
   constructor() {
-    // URL llama.cpp сервера (без /v1, так как /props и /health на уровне сервера)
-    this.baseURL = process.env.LLM_BASE_URL?.replace(/\/v1\/?$/, '') || 'http://localhost:8080';
-    console.log('[ContextService] LLM base URL:', this.baseURL);
+    console.log('[ContextService] Initialized — reads LLM URL from active connection in DB');
+  }
+
+  /**
+   * Получение URL активного подключения пользователя из БД
+   * Возвращает URL без /v1 суффикса (для /props, /slots, /tokenize)
+   */
+  private getActiveLlmBaseUrl(userId: number): string | null {
+    try {
+      const conn = llmConnectionRepository.getActiveByUserId(userId);
+      if (!conn) {
+        console.log(`[ContextService] No active connection found for user ${userId}`);
+        return null;
+      }
+      // Убираем /v1 суффикс если есть (llama.cpp API на корневом уровне)
+      const baseURL = conn.base_url.replace(/\/v1\/?$/, '');
+      console.log(`[ContextService] Active connection for user ${userId}: ${baseURL}`);
+      return baseURL;
+    } catch (err) {
+      console.error(`[ContextService] Error getting active connection for user ${userId}:`, err);
+      return null;
+    }
   }
 
   /**
    * Проверяет, является ли сервер локальным (127.0.0.1 или localhost)
    */
-  private isLocalServer(): boolean {
+  private isLocalServer(baseURL: string): boolean {
     try {
-      const url = new URL(this.baseURL);
+      const url = new URL(baseURL);
       const hostname = url.hostname.toLowerCase();
       return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
     } catch {
@@ -84,23 +106,27 @@ export class ContextService {
   /**
    * Получение максимального контекста из /props
    * Использует кэширование для снижения нагрузки
-   * Для удаленных серверов возвращает значение по умолчанию
    */
-  async getMaxContext(): Promise<number> {
+  async getMaxContext(userId: number): Promise<number> {
+    const baseURL = this.getActiveLlmBaseUrl(userId);
+    if (!baseURL) {
+      return 16384; // Значение по умолчанию если нет подключения
+    }
+
     // Для удаленных серверов не обращаемся к llama.cpp API
-    if (!this.isLocalServer()) {
-      return 16384; // Значение по умолчанию для удаленных серверов
+    if (!this.isLocalServer(baseURL)) {
+      return 16384;
     }
 
     const now = Date.now();
-    
-    // Проверяем кэш
-    if (this.propsCache && (now - this.propsCache.timestamp) < this.PROPS_CACHE_TTL) {
+
+    // Проверяем кэш (только если тот же baseURL)
+    if (this.propsCache && this.propsCache.baseURL === baseURL && (now - this.propsCache.timestamp) < this.PROPS_CACHE_TTL) {
       return this.propsCache.n_ctx;
     }
 
     try {
-      const response = await fetch(`${this.baseURL}/props`, {
+      const response = await fetch(`${baseURL}/props`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
       });
@@ -117,7 +143,7 @@ export class ContextService {
       }
 
       // Кэшируем результат
-      this.propsCache = { n_ctx, timestamp: now };
+      this.propsCache = { n_ctx, timestamp: now, baseURL };
       return n_ctx;
     } catch (error) {
       console.error('[ContextService] Error fetching /props:', error);
@@ -128,29 +154,20 @@ export class ContextService {
   /**
    * Получение текущего использования контекста из /slots
    * Возвращает информацию о всех активных слотах
-   * 
-   * В llama.cpp сервере эндпоинт /slots возвращает массив слотов с информацией:
-   * - n_ctx: лимит контекста для слота
-   * - next_token[].n_decoded: количество сгенерированных токенов
-   * - next_token[].n_remain: количество оставшихся токенов
-   * - is_processing: флаг обработки
-   * 
-   * Для вычисления использованных токенов используется формула:
-   * tokensUsed = n_ctx - n_remain (если n_remain < n_ctx)
-   * tokensUsed = n_decoded + prompt_tokens (если n_remain >= n_ctx)
-   * 
-   * В данной версии llama.cpp поле n_past недоступно, поэтому используем n_remain
-   * 
-   * Для удаленных серверов возвращает пустой массив (не обращаемся к llama.cpp API)
    */
-  async getContextUsage(): Promise<LlamaSlot[]> {
+  async getContextUsage(userId: number): Promise<LlamaSlot[]> {
+    const baseURL = this.getActiveLlmBaseUrl(userId);
+    if (!baseURL) {
+      return [];
+    }
+
     // Для удаленных серверов не обращаемся к llama.cpp API
-    if (!this.isLocalServer()) {
+    if (!this.isLocalServer(baseURL)) {
       return [];
     }
 
     try {
-      const response = await fetch(`${this.baseURL}/slots`, {
+      const response = await fetch(`${baseURL}/slots`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
       });
@@ -169,135 +186,137 @@ export class ContextService {
 
   /**
    * Точный подсчет токенов через эндпоинт /tokenize llama.cpp
-  *
-  * @param text - Текст для токенизации
-  * @returns Количество токенов
-  */
- private async tokenizeViaLlamaCpp(text: string): Promise<number> {
-   if (!text || text.length === 0) {
-     return 0;
-   }
-
-   try {
-     const response = await fetch(`${this.baseURL}/tokenize`, {
-       method: 'POST',
-       headers: { 'Content-Type': 'application/json' },
-       body: JSON.stringify({ content: text }),
-     });
-
-     if (!response.ok) {
-       throw new Error(`Failed to tokenize: ${response.status} ${response.statusText}`);
-     }
-
-     const data = await response.json() as { tokens: number[] | Array<{ id: number; piece: string }> };
-     return Array.isArray(data.tokens) ? data.tokens.length : 0;
-   } catch (error) {
-     console.error('[ContextService] Error tokenizing via llama.cpp:', error);
-     // Fallback на эвристику при ошибке
-     return this.estimateTokensFromText(text);
-   }
- }
-
- /**
-    * Оценка количества токенов на основе размера текста (эвристика)
-    *
-    * Используем как fallback когда эндпоинт /tokenize недоступен
-    * - Для английского текста: ~1 token ≈ 4 символа (среднее значение)
-    * - Для русского/европейских языков: ~1 token ≈ 3.5 символа
-    *
-    * @param text - Текст для оценки (должен быть на английском)
-    * @returns Примерное количество токенов
-    */
- private estimateTokensFromText(text: string): number {
-   if (!text || text.length === 0) {
-     return 0;
-   }
-   
-   // Эвристика: ~4 символа на токен для английского текста
-   const charsPerToken = 4.0;
-   return Math.max(1, Math.round(text.length / charsPerToken));
- }
-
- /**
-   * Вычисление использованных токенов для слота на основе данных из /slots
-   *
-   * Поскольку llama.cpp не возвращает поле n_tokens, используем комбинацию:
-   * 1. n_decoded (количество сгенерированных токенов ответа)
-   * 2. Точный подсчет токенов промпта через /tokenize эндпоинт
-   *
-   * @param slot - Данные слота из llama.cpp
-   * @param chatContext - Контекст чата с текстом промпта
-   * @returns Вычисленное количество использованных токенов
    */
- private async calculateTokensFromSlot(slot: LlamaSlot, chatContext?: { promptText?: string }): Promise<number> {
-   const nDecoded = slot.next_token?.[0]?.n_decoded ?? 0;
+  private async tokenizeViaLlamaCpp(baseURL: string, text: string): Promise<number> {
+    if (!text || text.length === 0) {
+      return 0;
+    }
 
-   // Если есть текст промпта, используем точный подсчет через /tokenize
-   if (chatContext?.promptText) {
-     const promptTokens = await this.tokenizeViaLlamaCpp(chatContext.promptText);
-     return promptTokens + nDecoded;
-   }
+    try {
+      const response = await fetch(`${baseURL}/tokenize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: text }),
+      });
 
-   // Fallback: используем только n_decoded (минимальная оценка)
-   return nDecoded;
- }
+      if (!response.ok) {
+        throw new Error(`Failed to tokenize: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json() as { tokens: number[] | Array<{ id: number; piece: string }> };
+      return Array.isArray(data.tokens) ? data.tokens.length : 0;
+    } catch (error) {
+      console.error('[ContextService] Error tokenizing via llama.cpp:', error);
+      // Fallback на эвристику при ошибке
+      return this.estimateTokensFromText(text);
+    }
+  }
+
+  /**
+   * Оценка количества токенов на основе размера текста (эвристика)
+   */
+  private estimateTokensFromText(text: string): number {
+    if (!text || text.length === 0) {
+      return 0;
+    }
+    // Эвристика: ~4 символа на токен для английского текста
+    const charsPerToken = 4.0;
+    return Math.max(1, Math.round(text.length / charsPerToken));
+  }
+
+  /**
+   * Вычисление использованных токенов для слота на основе данных из /slots
+   */
+  private async calculateTokensFromSlot(baseURL: string, slot: LlamaSlot, chatContext?: { promptText?: string }): Promise<number> {
+    const nDecoded = slot.next_token?.[0]?.n_decoded ?? 0;
+    const nRemain = slot.next_token?.[0]?.n_remain ?? 0;
+    const nCtx = slot.n_ctx ?? 0;
+
+    // Метод 1: n_ctx - n_remain — самый надёжный способ получить общее количество токенов
+    if (nCtx > 0 && nRemain > 0 && nRemain < nCtx) {
+      const tokensUsed = nCtx - nRemain;
+      console.log(`[ContextService] Using n_ctx - n_remain method: ${nCtx} - ${nRemain} = ${tokensUsed}`);
+      return tokensUsed;
+    }
+
+    // Метод 2: Точный подсчет через /tokenize + n_decoded
+    if (chatContext?.promptText) {
+      const promptTokens = await this.tokenizeViaLlamaCpp(baseURL, chatContext.promptText);
+      const total = promptTokens + nDecoded;
+      console.log(`[ContextService] Using tokenize method: ${promptTokens} (prompt) + ${nDecoded} (decoded) = ${total}`);
+      return total;
+    }
+
+    // Метод 3: Fallback — только n_decoded
+    console.log(`[ContextService] Fallback to n_decoded only: ${nDecoded}`);
+    return nDecoded;
+  }
 
   /**
    * Поиск активного слота для текущего чата
-   * 
-   * Поскольку llama.cpp не имеет прямой связи между слотом и chat_id,
-   * мы ищем слоты, которые активно используются (is_processing или есть сгенерированные токены)
-   * 
-   * @param slots - Список всех слотов из llama.cpp
-   * @returns Найденный активный слот или null
    */
   private findActiveSlot(slots: LlamaSlot[]): LlamaSlot | null {
-    // Ищем слоты, которые активно используются
-    const activeSlots = slots.filter(slot => 
-      slot.is_processing || 
-      (slot.next_token?.[0]?.n_decoded ?? 0) > 0 ||
-      (slot.next_token?.[0]?.n_remain ?? slot.n_ctx) < slot.n_ctx
-    );
-
-    // Если есть активные слоты, возвращаем первый найденный
-    // В будущем можно улучшить логику поиска по конкретному чату
-    if (activeSlots.length > 0) {
-      return activeSlots[0];
+    if (!slots || slots.length === 0) {
+      console.log('[ContextService] No slots returned from llama.cpp');
+      return null;
     }
 
+    // Стратегия 1: Ищем слоты, которые активно используются
+    const processingSlots = slots.filter(slot => slot.is_processing);
+    if (processingSlots.length > 0) {
+      console.log(`[ContextService] Found ${processingSlots.length} processing slot(s)`);
+      return processingSlots[0];
+    }
+
+    // Стратегия 2: Ищем слоты с сгенерированными токенами
+    const decodedSlots = slots.filter(slot => (slot.next_token?.[0]?.n_decoded ?? 0) > 0);
+    if (decodedSlots.length > 0) {
+      console.log(`[ContextService] Found ${decodedSlots.length} slot(s) with decoded tokens`);
+      return decodedSlots[0];
+    }
+
+    // Стратегия 3: Ищем слоты где n_remain < n_ctx (контекст занят)
+    const occupiedSlots = slots.filter(slot => {
+      const nRemain = slot.next_token?.[0]?.n_remain ?? 0;
+      return slot.n_ctx > 0 && nRemain > 0 && nRemain < slot.n_ctx;
+    });
+    if (occupiedSlots.length > 0) {
+      console.log(`[ContextService] Found ${occupiedSlots.length} occupied slot(s)`);
+      return occupiedSlots[0];
+    }
+
+    // Стратегия 4: Возвращаем первый слот с n_ctx > 0
+    const firstSlot = slots.find(slot => slot.n_ctx > 0);
+    if (firstSlot) {
+      console.log(`[ContextService] Using first available slot ${firstSlot.id} (idle, will use tokenize fallback)`);
+      return firstSlot;
+    }
+
+    console.log('[ContextService] No valid slots found');
     return null;
   }
 
- /**
+  /**
    * Построение текста промпта для оценки количества токенов
-   * Использует ТОЛЬКО тот же текст, который отправляется в LLM
-   *
-   * Это гарантирует, что оценка токенов соответствует реальному использованию контекста.
-   * Использует ту же логику, что и formatMessagesForQwen в llm.service.ts
-   * Учитывает сжатые блоки (chat_blocks) для точного подсчета токенов
    */
- private buildPromptTextForChat(chatId: number, userId: number): string {
+  private buildPromptTextForChat(chatId: number, userId: number): string {
     try {
       const chatWithMessages = chatRepository.getChatWithMessages(chatId);
       if (!chatWithMessages || !chatWithMessages.messages || chatWithMessages.messages.length === 0) {
         return '';
       }
 
-      // Получаем персонаж
       const character = characterRepository.getCharacterById(chatWithMessages.character_id);
       if (!character) {
         return '';
       }
 
-      // Получаем профиль героя (активная вариация)
       const heroProfile = heroVariationRepository.getHeroProfileForLLM(userId);
       const activeHero = heroVariationRepository.getActiveHeroVariationByUserId(userId);
       const heroName = activeHero?.name || null;
 
-      // Получаем сжатые блоки
       const compressedBlocks = chatBlockRepository.getBlocksByChatId(chatId);
 
-      // Используем ту же логику форматирования, что и в llm.service.ts
       const messages = compressedBlocks.length > 0
         ? formatMessagesForQwenWithCompression(
             userId,
@@ -305,7 +324,7 @@ export class ContextService {
             heroProfile,
             heroName,
             chatWithMessages.messages,
-            '', // currentMessage не нужен для оценки текущего контекста
+            '',
             compressedBlocks
           )
         : formatMessagesForQwen(
@@ -314,12 +333,10 @@ export class ContextService {
             heroProfile,
             heroName,
             chatWithMessages.messages,
-            '' // currentMessage не нужен для оценки текущего контекста
+            ''
           );
 
-      // Преобразуем сообщения в текстовый формат для оценки
       const textParts: string[] = [];
-      
       for (const msg of messages) {
         const role = msg.role === 'system' ? 'System' : (msg.role === 'user' ? 'User' : 'Assistant');
         textParts.push(`${role}: ${msg.content}`);
@@ -333,80 +350,142 @@ export class ContextService {
   }
 
   /**
-     * Получение статистики контекста для конкретного чата
-     *
-     * Алгоритм:
-     * 1. Для локальных серверов: получаем данные из /slots llama.cpp
-     * 2. Для удаленных серверов: используем данные из БД
-     * 3. Получаем максимальный контекст из /props (локальный) или значение по умолчанию (удаленный)
-     * 4. Строим текст промпта из истории сообщений для оценки токенов
-     * 5. Вычисляем процент использования
-     * 6. Если слоты недоступны, используем данные из БД как fallback
-     *
-     * Поскольку llama.cpp не возвращает точное количество токенов,
-     * используем эвристику: оценка на основе размера текста промпта + n_decoded
-     */
+   * Получение статистики контекста для конкретного чата
+   *
+   * Алгоритм (для локальных серверов):
+   * 1. Получаем URL активного подключения из БД
+   * 2. Если сервер локальный — получаем слоты из /slots
+   * 3. Если слот занят — используем n_ctx - n_remain
+   * 4. Если слот в idle — токенизируем промпт через /tokenize
+   * 5. Сохраняем результат в БД для будущих запросов
+   *
+   * Для удаленных серверов: используем tokenize + кэш из БД
+   */
   async getChatContextStats(chatId: number, userId: number, forceSync = false): Promise<ContextStats> {
     try {
-      const maxContext = await this.getMaxContext().catch(() => 16384);
+      const baseURL = this.getActiveLlmBaseUrl(userId);
+      const isLocal = baseURL ? this.isLocalServer(baseURL) : false;
 
-      // Для локальных серверов: пытаемся получить данные из llama.cpp
-      if (this.isLocalServer()) {
-        const slots = await this.getContextUsage();
-        const promptText = this.buildPromptTextForChat(chatId, userId);
-        const activeSlot = this.findActiveSlot(slots);
+      const maxContext = await this.getMaxContext(userId).catch(() => 16384);
+      let tokensUsed: number | null = null;
+      let slotId: number | null = null;
+      let isCached = false;
 
-        if (activeSlot) {
-          // Вычисляем использованные токены из данных слота с учетом текста промпта (точный подсчет)
-          const tokensUsed = await this.calculateTokensFromSlot(activeSlot, { promptText });
-          const percentage = maxContext > 0 ? (tokensUsed / maxContext) * 100 : 0;
+      // Для локальных серверов: получаем данные из llama.cpp
+      if (isLocal && baseURL) {
+        const slots = await this.getContextUsage(userId).catch((err) => {
+          console.error('[ContextService] Failed to get slots:', err);
+          return null;
+        });
 
-          console.log(`[ContextService] Slot-based stats for chat ${chatId}: ${tokensUsed} tokens (slot ${activeSlot.id}, prompt length: ${promptText.length} chars, prompt tokens via /tokenize)`);
+        if (slots && slots.length > 0) {
+          const promptText = this.buildPromptTextForChat(chatId, userId);
+          const activeSlot = this.findActiveSlot(slots);
 
-          return {
-            tokensUsed,
-            contextLimit: maxContext,
-            percentage,
-            cached: false,
-            slotId: activeSlot.id,
-            lastSynced: new Date().toISOString(),
-          };
+          if (activeSlot) {
+            slotId = activeSlot.id;
+
+            // Метод 1: n_ctx - n_remain (если слот занят — самый точный метод)
+            const nDecoded = activeSlot.next_token?.[0]?.n_decoded ?? 0;
+            const nRemain = activeSlot.next_token?.[0]?.n_remain ?? 0;
+            const nCtx = activeSlot.n_ctx ?? 0;
+
+            if (nCtx > 0 && nRemain > 0 && nRemain < nCtx) {
+              tokensUsed = nCtx - nRemain;
+              console.log(`[ContextService] Using n_ctx - n_remain: ${tokensUsed} tokens (slot ${slotId})`);
+            } else if (promptText) {
+              // Метод 2: Слот в idle — токенизируем промпт + n_decoded
+              const promptTokens = await this.tokenizeViaLlamaCpp(baseURL, promptText);
+              tokensUsed = promptTokens + nDecoded;
+              console.log(`[ContextService] Using tokenize (slot idle): ${promptTokens} + ${nDecoded} = ${tokensUsed} tokens (slot ${slotId})`);
+            } else if (nDecoded > 0) {
+              // Метод 3: Только n_decoded (минимальный fallback)
+              tokensUsed = nDecoded;
+              console.log(`[ContextService] Using n_decoded only: ${tokensUsed} tokens (slot ${slotId})`);
+            }
+          }
         }
       }
 
-      // Для удаленных серверов или если нет активных слотов, используем данные из БД как fallback
-      const cached = contextRepository.getCachedStats(chatId);
-      if (cached) {
-        console.log(`[ContextService] Using DB fallback for chat ${chatId}: ${cached.context_tokens_used} tokens`);
-        const percentage = maxContext > 0 ? (cached.context_tokens_used / maxContext) * 100 : 0;
-        return {
-          tokensUsed: cached.context_tokens_used,
-          contextLimit: maxContext,
-          percentage,
-          cached: true,
-          slotId: null,
-          lastSynced: cached.context_last_synced,
-        };
+      // Если не получили токены из слотов, пробуем оценить через tokenize
+      if ((tokensUsed === null || tokensUsed === 0) && isLocal && baseURL) {
+        const promptText = this.buildPromptTextForChat(chatId, userId);
+        if (promptText) {
+          const promptTokens = await this.tokenizeViaLlamaCpp(baseURL, promptText);
+          if (promptTokens > 0) {
+            tokensUsed = promptTokens;
+            console.log(`[ContextService] Using standalone tokenize: ${tokensUsed} tokens`);
+          }
+        }
       }
 
-      // Если нет данных ни из слотов, ни из БД, возвращаем нули
-      console.log(`[ContextService] No stats available for chat ${chatId}`);
+      // Если всё ещё нет токенов, пробуем кэш из БД
+      if (tokensUsed === null || tokensUsed === 0) {
+        const cached = contextRepository.getCachedStats(chatId);
+        if (cached && cached.context_tokens_used > 0) {
+          tokensUsed = cached.context_tokens_used;
+          isCached = true;
+          console.log(`[ContextService] Using DB cache: ${tokensUsed} tokens`);
+        }
+      }
+
+      // Если получили токены и они не из кэша — сохранить в БД
+      if (tokensUsed !== null && tokensUsed > 0 && !isCached) {
+        try {
+          contextRepository.updateCachedStats(chatId, tokensUsed, new Date().toISOString());
+        } catch (err) {
+          console.error('[ContextService] Failed to update cache:', err);
+        }
+      }
+
+      // Финальный fallback
+      if (tokensUsed === null || tokensUsed === 0) {
+        const cached = contextRepository.getCachedStats(chatId);
+        if (cached && cached.context_tokens_used > 0) {
+          tokensUsed = cached.context_tokens_used;
+          isCached = true;
+        } else {
+          tokensUsed = 0;
+        }
+      }
+
+      const percentage = maxContext > 0 ? (tokensUsed / maxContext) * 100 : 0;
+
+      console.log(`[ContextService] Final stats for chat ${chatId}: ${tokensUsed}/${maxContext} tokens (${percentage.toFixed(1)}%) ${isCached ? '[cached]' : '[live]'} ${isLocal ? '[local]' : '[remote]'}`);
+
       return {
-        tokensUsed: 0,
+        tokensUsed,
         contextLimit: maxContext,
-        percentage: 0,
-        cached: false,
-        slotId: null,
-        lastSynced: null,
+        percentage,
+        cached: isCached,
+        slotId,
+        lastSynced: isCached ? contextRepository.getCachedStats(chatId)?.context_last_synced ?? null : new Date().toISOString(),
       };
     } catch (error) {
       console.error(`[ContextService] Error getting context stats for chat ${chatId}:`, error);
 
-      // Полностью fallback
-      const maxContext = await this.getMaxContext().catch(() => 16384);
+      // Полный fallback: попробуем кэш из БД
+      try {
+        const maxContext = await this.getMaxContext(userId).catch(() => 16384);
+        const cached = contextRepository.getCachedStats(chatId);
+        if (cached && cached.context_tokens_used > 0) {
+          const percentage = maxContext > 0 ? (cached.context_tokens_used / maxContext) * 100 : 0;
+          return {
+            tokensUsed: cached.context_tokens_used,
+            contextLimit: maxContext,
+            percentage,
+            cached: true,
+            slotId: null,
+            lastSynced: cached.context_last_synced,
+          };
+        }
+      } catch (err) {
+        // ignore
+      }
+
       return {
         tokensUsed: 0,
-        contextLimit: maxContext,
+        contextLimit: 16384,
         percentage: 0,
         cached: false,
         slotId: null,
@@ -425,8 +504,8 @@ export class ContextService {
   /**
    * Получение списка всех активных слотов
    */
-  async getActiveSlots() {
-    const slots = await this.getContextUsage();
+  async getActiveSlots(userId: number) {
+    const slots = await this.getContextUsage(userId);
     return slots.filter(slot => slot.is_processing || (slot.next_token?.[0]?.n_decoded || 0) > 0);
   }
 }

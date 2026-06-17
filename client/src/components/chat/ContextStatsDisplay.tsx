@@ -57,7 +57,7 @@ export const ContextStatsDisplay: React.FC<ContextStatsDisplayProps> = ({
     );
   }
 
-  if (!stats || stats.tokensUsed === 0) {
+  if (!stats) {
     return null;
   }
 
