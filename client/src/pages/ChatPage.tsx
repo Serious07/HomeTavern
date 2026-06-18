@@ -10,7 +10,7 @@ import StreamingResponse from '../components/chat/StreamingResponse';
 import ChatInputArea from '../components/chat/ChatInputArea';
 import MobileMessageInputModal from '../components/chat/MobileMessageInputModal';
 import ContextStatsDisplay from '../components/chat/ContextStatsDisplay';
-import { useContextStats, useContextStatsDuringGeneration } from '../hooks/useContextStats';
+import { useContextStats } from '../hooks/useContextStats';
 import { useCompression } from '../hooks/useCompression';
 import { EditBlockModal } from '../components/chat/EditBlockModal';
 import { ChatBlockWithParsedIds } from '../types/compression';
@@ -123,18 +123,13 @@ const ChatPage: React.FC = () => {
   
   // Context stats for token usage tracking
   const currentChatId = chatId ? parseInt(chatId) : null;
-  const { 
+   const { 
     stats: contextStats, 
     isLoading: isContextLoading, 
     sync: syncContextStats,
-    setGenerating: setContextGenerating,
   } = useContextStats(
     currentChatId,
     { enabled: !!currentChatId }
-  );
-  const { sync: syncDuringGeneration } = useContextStatsDuringGeneration(
-    currentChatId,
-    isStreaming
   );
   
   // Compression hooks
@@ -240,22 +235,18 @@ const ChatPage: React.FC = () => {
       playNotificationSound(notificationVolume);
     }
     
-    // Синхронизация токенов после окончания генерации
-    syncDuringGeneration();
-    // Принудительная синхронизация контекста после завершения генерации
+    // Синхронизация контекста после завершения генерации
     syncContextStats();
     // useEffect автоматически скроллит к новому сообщению
     setIsStreaming(false);
     setIsSending(false);
-    // Возобновляем polling контекста после окончания генерации
-    setContextGenerating(false);
     
     // Возвращаем фокус в поле ввода после завершения генерации
     // Небольшая задержка чтобы DOM успел обновиться
     setTimeout(() => {
       setInputAutoFocus(true);
     }, 100);
-  }, [fetchMessages, syncDuringGeneration, syncContextStats, soundEnabled]);
+  }, [fetchMessages, syncContextStats, soundEnabled]);
 
   const handleStreamingError = useCallback(async (errorMessage: string) => {
     console.error('[ChatPage] Streaming error:', errorMessage);
@@ -365,8 +356,7 @@ const ChatPage: React.FC = () => {
       // Обновляем статистику токенов после отправки сообщения
       await syncContextStats();
       
-      // Start streaming response — приостанавливаем polling контекста чтобы не конфликтовать с llama.cpp
-      setContextGenerating(true);
+      // Start streaming response
       setIsStreaming(true);
       
       // Очищаем поле ввода после отправки (смена key заставит React пересоздать input)
