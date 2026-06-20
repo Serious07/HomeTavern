@@ -16,6 +16,7 @@ import { characterRepository } from '../repositories/character.repository';
 import { heroVariationRepository } from '../repositories/hero.variation.repository';
 import { llmService, LLMMessage } from './llm.service';
 import { translationService } from './translation.service';
+import { llmConnectionRepository } from '../repositories/llm-connection.repository';
 
 export type CompressionMethod = 'fixed' | 'semantic';
 
@@ -183,6 +184,33 @@ export class CompressionService {
   private getMessagePosition(messageId: number, messages: Message[]): number {
     const index = messages.findIndex(m => m.id === messageId);
     return index >= 0 ? index + 1 : 0;
+  }
+
+  /**
+   * Получает конфигурацию активного LLM-соединения пользователя из БД.
+   * Fallback на environment variables, если соединение не найдено.
+   */
+  private getLlmConnectionConfig(userId?: number): { baseURL: string; apiKey: string; model: string } {
+    if (userId) {
+      const activeConn = llmConnectionRepository.getActiveByUserId(userId);
+      if (activeConn) {
+        const connWithKey = llmConnectionRepository.getByIdWithDecryptedKey(activeConn.id);
+        if (connWithKey) {
+          console.log(`[CompressionService] >>> Using active LLM connection: ${activeConn.name} (${activeConn.base_url})`);
+          return {
+            baseURL: activeConn.base_url,
+            apiKey: connWithKey.api_key_decrypted || '',
+            model: activeConn.model,
+          };
+        }
+      }
+    }
+    console.log('[CompressionService] >>> Fallback: using environment variables for LLM connection');
+    return {
+      baseURL: process.env.LLM_BASE_URL || 'http://localhost:1234/v1',
+      apiKey: process.env.LLM_API_KEY || 'local-model-key',
+      model: process.env.LLM_MODEL || 'qwen-3.5',
+    };
   }
   private readonly DEFAULT_COMPRESSION_SYSTEM_INSTRUCTIONS = `Ты — опытный редактор и летописец. Твоя задача — создавать структурированные, информативные краткие пересказы диалогов и событий.
 
@@ -843,18 +871,21 @@ ${historyText}
       console.log('[CompressionService] >>> History text length:', historyText.length);
       console.log('[CompressionService] >>> Message ID range:', firstMsgId, '-', lastMsgId);
 
+      // Получаем конфигурацию LLM из активного соединения пользователя
+      const llmConfig = this.getLlmConnectionConfig(userId);
+
       // Вызываем API с retry логикой при временных ошибках
       const response = await this.withCompressionRetry(
         async () => {
           const { LLMClient } = require('llm-client');
           const client = new LLMClient({
-            baseURL: process.env.LLM_BASE_URL || 'http://localhost:1234/v1',
-            apiKey: process.env.LLM_API_KEY || 'local-model-key',
+            baseURL: llmConfig.baseURL,
+            apiKey: llmConfig.apiKey,
             timeout: 900000, // 15 минут на обработку — история может быть большой
           });
 
           return await client.chatCompletionsCreate({
-            model: process.env.LLM_MODEL || 'qwen-3.5',
+            model: llmConfig.model,
             messages: llmMessages,
             temperature: 0.5, // Ниже температура для более структурированного вывода
             max_tokens: 4000, // Больше токенов для вывода многих глав
@@ -1228,18 +1259,21 @@ ${userInstructions}`;
     let title = 'Сжатая история';
 
     try {
+      // Получаем конфигурацию LLM из активного соединения пользователя
+      const llmConfig = this.getLlmConnectionConfig(userId);
+
       // Вызываем API с retry логикой при временных ошибках
       const response = await this.withCompressionRetry(
         async () => {
           const { LLMClient } = require('llm-client');
           const client = new LLMClient({
-            baseURL: process.env.LLM_BASE_URL || 'http://localhost:1234/v1',
-            apiKey: process.env.LLM_API_KEY || 'local-model-key',
+            baseURL: llmConfig.baseURL,
+            apiKey: llmConfig.apiKey,
             timeout: 900000,
           });
 
           return await client.chatCompletionsCreate({
-            model: process.env.LLM_MODEL || 'qwen-3.5',
+            model: llmConfig.model,
             messages,
             temperature: this.SUMMARY_TEMPERATURE,
             max_tokens: 2000,
