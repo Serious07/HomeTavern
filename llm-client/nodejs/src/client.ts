@@ -10,6 +10,16 @@ import {
     MessageWithId,
     ChatConfig,
 } from './types';
+import { request as undiciRequest, Agent } from 'undici';
+import { URL } from 'url';
+
+/**
+ * Глобальный HTTP агент для reuse соединений.
+ */
+const httpAgent = new Agent({
+    keepAliveTimeout: 300000,    // 5 минут keep-alive для idle соединений
+    keepAliveMaxTimeout: 600000, // 10 минут макс для idle соединений
+});
 
 /**
  * HTTP клиент для работы с OpenAI API совместимыми серверами
@@ -22,11 +32,18 @@ export class LLMClient {
     constructor(options: ClientOptions) {
         this.baseURL = options.baseURL.replace(/\/$/, '');
         this.apiKey = options.apiKey;
-        this.timeout = options.timeout ?? 900000; // 15 minutes
+        this.timeout = options.timeout ?? 3600000; // 60 минут (было 15)
     }
 
     /**
-     * Отправка запроса к API
+     * Отправка запроса к API через undici.request
+     * 
+     * Критически важно: используем undici.request напрямую вместо fetch,
+     * чтобы иметь полный контроль над headersTimeout.
+     * 
+     * Причина: llama.cpp выполняет prefill всего контекста (94608+ токенов)
+     * ПЕРЕД отправкой HTTP заголовков. При 12.6 tok/s это занимает ~12 минут
+     * на prefill, что远超 стандартный headersTimeout (30 сек).
      */
     private async request(
         endpoint: string,
@@ -37,10 +54,10 @@ export class LLMClient {
         // Ensure no double slashes and proper URL construction
         const base = this.baseURL.replace(/\/+$/, '');
         const ep = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
-        const url = base + ep;
+        const urlString = base + ep;
         
         // Log the full URL for debugging
-        console.log(`[LLMClient] Request: ${method} ${url}`);
+        console.log(`[LLMClient] Request: ${method} ${urlString}`);
         
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
@@ -54,31 +71,63 @@ export class LLMClient {
         const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
         try {
-            const response = await fetch(url, {
+            // Используем undici.request напрямую для полного контроля таймаутов
+            const urlObj = new URL(urlString);
+            const response = await undiciRequest(urlString, {
                 method,
                 headers,
                 body: body ? JSON.stringify(body) : undefined,
                 signal: options.signal ?? controller.signal,
+                dispatcher: httpAgent,
+                // Критически важные таймауты:
+                headersTimeout: 1800000,   // 30 минут на получение заголовков (prefill!)
+                bodyTimeout: 3600000,      // 60 минут на чтение тела ответа
+                // Информируем сервер что поддерживаем gzip (llama.cpp не стримит, но на всякий случай)
+                highWaterMark: 64 * 1024,  // Увеличенный буфер для больших ответов
             });
 
             clearTimeout(timeoutId);
 
-            if (!response.ok) {
-                const text = await response.text();
-                throw new APIError(response.status, response.headers, text);
+            // Преобразуем undici response в стандартный Response
+            // undici body — это Node.js Readable stream, оборачиваем в Web ReadableStream
+            const headersInit: [string, string][] = [];
+            for (const [k, v] of Object.entries(response.headers)) {
+                if (v !== undefined) {
+                    headersInit.push([k, Array.isArray(v) ? v.join(', ') : v]);
+                }
+            }
+            const standardResponse = new Response(
+                response.body as unknown as ReadableStream<Uint8Array>,
+                {
+                    status: response.statusCode,
+                    statusText: (response as any).statusMessage ?? '',
+                    headers: headersInit,
+                }
+            );
+
+            if (!standardResponse.ok) {
+                const text = await standardResponse.text();
+                throw new APIError(standardResponse.status, standardResponse.headers, text);
             }
 
-            return response;
+            return standardResponse;
         } catch (error) {
             clearTimeout(timeoutId);
             
             if (error instanceof Error) {
                 if (error.name === 'AbortError') {
-                    throw new TimeoutError('Request timeout');
+                    throw new TimeoutError(`Request timeout after ${this.timeout}ms`);
                 }
                 if (error instanceof APIError) {
                     throw error;
                 }
+                // Логирование деталей ошибки для диагностики разрывов соединения
+                console.error(`[LLMClient] Network error details:`, {
+                    name: error.name,
+                    message: error.message,
+                    code: (error as any).code,
+                    cause: (error as any).cause,
+                });
             }
             
             throw new NetworkError('Network error', error instanceof Error ? error : undefined);

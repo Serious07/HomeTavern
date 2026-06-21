@@ -254,120 +254,59 @@ export class CompressionService {
     return this.DEFAULT_COMPRESSION_SYSTEM_INSTRUCTIONS;
   }
 
-  /**
-   * Извлекает ответ от LLM из reasoning-текста (когда content пустой)
-   * Фильтрует thinking-процесс и ищет реальный ответ
-   */
-  private extractResponseFromReasoning(reasoningContent: string): string {
-    console.log('[CompressionService] >>> Extracting response from reasoning...');
+   /**
+    * Извлекает ответ от LLM из reasoning-текста (когда content пустой)
+    * Использует только 2 простые и надёжные стратегии
+    */
+   private extractResponseFromReasoning(reasoningContent: string): string {
+     console.log('[CompressionService] >>> Extracting response from reasoning...');
 
-    // Сначала пробуем найти маркеры ЗАГОЛОВОК/ПЕРЕСКАЗ прямо в reasoning
-    const titleDirectMatch = reasoningContent.match(/ЗАГОЛОВОК:\s*(.+?)(?:\n|$)/i);
-    const summaryDirectMatch = reasoningContent.match(/ПЕРЕСКАЗ:\s*([\s\S]+?)(?=\n\nПЕРЕСКАЗ:|\n\nЗАГОЛОВОК:|\n\n|$)/i);
-    
-    if (titleDirectMatch || summaryDirectMatch) {
-      console.log('[CompressionService] >>> Found direct format matches in reasoning');
-      const fullText = [];
-      if (titleDirectMatch) fullText.push(`ЗАГОЛОВОК: ${titleDirectMatch[1].trim()}`);
-      if (summaryDirectMatch) fullText.push(`ПЕРЕСКАЗ: ${summaryDirectMatch[1].trim()}`);
-      return fullText.join('\n');
-    }
+     // Стратегия 1: Ищем маркер ЗАГОЛОВОК: и берём всё от него до конца
+     const titleIndex = reasoningContent.search(/ЗАГОЛОВОК:\s*/i);
+     if (titleIndex !== -1) {
+       const extracted = reasoningContent.substring(titleIndex).trim();
+       console.log('[CompressionService] >>> Extracted from ЗАГОЛОВОК marker:', extracted.substring(0, 200));
+       return extracted;
+     }
 
-    // LLM с reasoning mode выводит мыслительный процесс, а content пустой
-    // Нужно извлечь ответ из reasoning — ищем текст после маркеров конца thinking
-    
-    const lines = reasoningContent.split('\n');
-    
-    // Стратегия 1: Ищем строку "Language:" и берём всё после неё
-    let foundAt = -1;
-    for (let i = 0; i < lines.length; i++) {
-      const lower = lines[i].trim().toLowerCase();
-      if (lower.includes('language:') && lower.includes('russian') || lower.includes('language:') && lower.includes('english') || lower.includes('language:') && lower.includes('latin')) {
-        foundAt = i + 1;
-        console.log('[CompressionService] >>> Found "language:" at line', i);
-        break;
-      }
-      if (lower === 'language: russian' || lower === 'language: english' || lower.includes('language:')) {
-        foundAt = i + 1;
-        console.log('[CompressionService] >>> Found "language:" at line', i);
-        break;
-      }
-    }
-    
-    // Стратегия 2: Ищем конец маркированного списка (последний "- **...:**" + пустая строка)
-    if (foundAt < 0) {
-      let lastListItemEnd = -1;
-      let consecutiveEmptyLines = 0;
-      for (let i = 0; i < lines.length; i++) {
-        const trimmed = lines[i].trim();
-        if (/^- \*\*/.test(trimmed) || /^\d+\.\s/.test(trimmed)) {
-          lastListItemEnd = i;
-          consecutiveEmptyLines = 0;
-        } else if (trimmed === '' && lastListItemEnd > 0) {
-          // Пустая строка после списка — возможное начало ответа
-          foundAt = i + 1;
-          console.log('[CompressionService] >>> Found empty line after list at line', i);
-          break;
-        }
-      }
-    }
-    
-    // Стратегия 3: Ищем маркеры конца анализа
-    if (foundAt < 0) {
-      for (let i = 0; i < lines.length; i++) {
-        const lower = lines[i].trim().toLowerCase();
-        if (lower.includes('content:') && lower.includes('preserves')) {
-          foundAt = i + 1;
-          console.log('[CompressionService] >>> Found "content:" at line', i);
-          break;
-        }
-        if (lower.includes('format:') && lower.includes('summary length')) {
-          foundAt = i + 1;
-          console.log('[CompressionService] >>> Found "format:" at line', i);
-          break;
-        }
-      }
-    }
-    
-    // Стратегия 4: Ищем "Here's a thinking process:" и берём текст после последнего абзаца
-    if (foundAt < 0) {
-      let thinkingStart = -1;
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim().toLowerCase().includes("here's a thinking") || lines[i].trim().toLowerCase().includes('let me think')) {
-          thinkingStart = i;
-          break;
-        }
-      }
-      if (thinkingStart >= 0) {
-        // Берём последние 3000 символов после начала thinking
-        const afterThinking = lines.slice(thinkingStart).join('\n');
-        const lastChars = afterThinking.slice(-3000);
-        if (lastChars.length > 50) {
-          foundAt = -1; // fallback ниже
-          const extracted = lastChars.trim();
-          console.log('[CompressionService] >>> Using last 3000 chars fallback:', extracted.substring(0, 200));
-          return extracted;
-        }
-      }
-    }
-    
-    // Стратегия 5: Берём текст после N-й строки (пропускаем первые 20 строк thinking)
-    if (foundAt < 0) {
-      foundAt = 25;
-      console.log('[CompressionService] >>> Using skip 25 lines fallback');
-    }
-    
-    const extracted = lines.slice(foundAt).join('\n').trim();
-    if (extracted.length > 50) {
-      console.log('[CompressionService] >>> Extracted from reasoning:', extracted.substring(0, 300));
-      return extracted;
-    }
-    
-    // Последний fallback: берём последние 4000 символов
-    const lastPart = reasoningContent.slice(-4000).trim();
-    console.log('[CompressionService] >>> Using last 4000 chars fallback:', lastPart.substring(0, 200));
-    return lastPart;
-  }
+     // Стратегия 2: Ищем маркер [Действия] и берём всё от него до конца
+     const actionsIndex = reasoningContent.search(/\[Действия\]/i);
+     if (actionsIndex !== -1) {
+       const extracted = reasoningContent.substring(actionsIndex).trim();
+       console.log('[CompressionService] >>> Extracted from [Действия] marker:', extracted.substring(0, 200));
+       return extracted;
+     }
+
+     // Fallback: ничего подходящего не найдено
+     console.log('[CompressionService] >>> No valid markers found in reasoning');
+     return '';
+   }
+
+   /**
+    * Проверяет, не является ли результат "сломанным" (эхо-повтор промпта)
+    */
+   private isBrokenOutput(text: string): boolean {
+     const brokenPatterns = [
+       /\*\*Constraints:\*\*/i,
+       /\*\*Content to Summarize:\*\*/i,
+       /\*\*Key Events:\*\*/i,
+       /\*\*Required Tags/i,
+       /\*\*Format Requirements/i,
+       /\*\*Input Content:\*\*/i,
+       /\*\*Key Elements to Capture:\*\*/i,
+       /<text>`/,
+       /ПЕРЕСКАЗ:\s*<text>`/,
+       /NO reasoning.*NO.*thinking/i,
+     ];
+
+     for (const pattern of brokenPatterns) {
+       if (pattern.test(text)) {
+         console.log('[CompressionService] >>> Detected broken output, pattern:', pattern.source);
+         return true;
+       }
+     }
+     return false;
+   }
 
   /**
    * Автоматическое сжатие истории чата
@@ -1276,7 +1215,7 @@ ${userInstructions}`;
             model: llmConfig.model,
             messages,
             temperature: this.SUMMARY_TEMPERATURE,
-            max_tokens: 2000,
+            max_tokens: 50000,
           });
         },
         `generateBlockSummary block[${block.startMessageId}-${block.endMessageId}]`
@@ -1299,106 +1238,118 @@ ${userInstructions}`;
       
       console.log('[CompressionService] >>> LLM finalContent preview:', finalContent.substring(0, 300));
       
-      // Парсим ответ — пробуем формат ЗАГОЛОВОК/ПЕРЕСКАЗ
-      let titleMatch = finalContent.match(/ЗАГОЛОВОК:\s*(.+?)(?:\n|$)/i);
-      let summaryMatch = finalContent.match(/ПЕРЕСКАЗ:\s*([\s\S]+?)(?=\n\nПЕРЕСКАЗ:|\n\nЗАГОЛОВОК:|\n\n|$)/i);
-      
-      // Если не сработало, пробуем извлечь без префиксов
-      if (!titleMatch && !summaryMatch) {
-        console.log('[CompressionService] >>> Standard format failed, trying to extract content');
+      // ПРОВЕРКА: не является ли результат "сломанным" (эхо-повтор промпта)
+      if (this.isBrokenOutput(finalContent)) {
+        console.log('[CompressionService] >>> BROKEN OUTPUT DETECTED, using fallback from first/last messages');
+        // Fallback: берём первые 3 и последние 2 сообщения как summary
+        const firstMsgs = block.messages.slice(0, 3);
+        const lastMsgs = block.messages.length > 5 ? block.messages.slice(-2) : [];
+        const fallbackMsgs = [...firstMsgs, ...lastMsgs];
+        summary = fallbackMsgs.map(m => (m.content || '').substring(0, 100)).join(' ... ');
+        title = `Блок [${block.messages.length} сообщ.]`;
+        console.log('[CompressionService] >>> Fallback summary:', summary.substring(0, 200));
+      } else {
+        // Нормальный ответ — парсим формат ЗАГОЛОВОК/ПЕРЕСКАЗ
+        let titleMatch = finalContent.match(/ЗАГОЛОВОК:\s*(.+?)(?:\n|$)/i);
+        let summaryMatch = finalContent.match(/ПЕРЕСКАЗ:\s*([\s\S]+?)(?=\n\nПЕРЕСКАЗ:|\n\nЗАГОЛОВОК:|\n\n|$)/i);
         
-        // Убираем thinking-процесс из текста
-        let cleanContent = finalContent;
-        
-        // Убираем "Here's a thinking process:" и всё что до реального ответа
-        cleanContent = cleanContent.replace(/here['']s\s+(a\s+)?thinking\s+(process|analysis)?\s*:/gi, '');
-        cleanContent = cleanContent.replace(/let['']s\s+(me\s+)?(think|analyze)/gi, '');
-        
-        // Убираем нумерованные пункты анализа (1. Analyze, 2. Identify и т.д.)
-        cleanContent = cleanContent.replace(/^\d+\.\s+[\w\s]+?:\s*\n([\s\S]*?)(?=\n\d+\.\s|\n\n|$)/gms, '');
-        
-        // Убираем "- **Analyze User Input:**" и подобные строки
-        cleanContent = cleanContent.replace(/^- \*\*[\w\s]+\*\*:\s*\n([\s\S]*?)(?=\n- \*\*|\n\n$)/gm, '');
-        
-        // Убираем "- Language:" строку
-        cleanContent = cleanContent.replace(/^- \*\*Language\*\*:\s*[\w\s]+\n?/gi, '');
-        
-        // Убираем "- **Task:**" строку
-        cleanContent = cleanContent.replace(/^- \*\*Task\*\*:\s*[\w\s:]+/gi, '');
-        
-        // Убираем "- **Content:**" строку
-        cleanContent = cleanContent.replace(/^- \*\*Content\*\*:\s*[\w\s:]+/gi, '');
-        
-        // Убираем "- **Summary length:**" строку
-        cleanContent = cleanContent.replace(/^- \*\*Summary length\*\*:\s*[\w\s:]+/gi, '');
-        
-        // Убираем "- **Title length:**" строку
-        cleanContent = cleanContent.replace(/^- \*\*Title length\*\*:\s*[\w\s:]+/gi, '');
-        
-        // Убираем "- **Input Text:**" и всё до следующего пустого конца
-        cleanContent = cleanContent.replace(/^- \*\*Input Text\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
-        
-        // Убираем "- **Current Segment Events:**" и всё до следующего пустого конца
-        cleanContent = cleanContent.replace(/^- \*\*Current Segment Events\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
-        
-        // Убираем "- **Key Events:**" и всё до следующего пустого конца
-        cleanContent = cleanContent.replace(/^- \*\*Key Events\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
-        
-        // Убираем "- **Context:**" и всё до следующего пустого конца
-        cleanContent = cleanContent.replace(/^- \*\*Context\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
-        
-        // Убираем "- **Role:**" и всё до следующего пустого конца
-        cleanContent = cleanContent.replace(/^- \*\*Role\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
-        
-        // Убираем "- **Task**" и всё до следующего пустого конца
-        cleanContent = cleanContent.replace(/^- \*\*Task\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
-        
-        // Убираем "- **Language:**" строку
-        cleanContent = cleanContent.replace(/^- \*\*Language\*\*:\s*[\w\s]+\n?/g, '');
-        
-        // Убираем "- **Summary length:**" строку
-        cleanContent = cleanContent.replace(/^- \*\*Summary length\*\*:\s*[\w\s:]+\n?/g, '');
-        
-        // Убираем "- **Title length:**" строку
-        cleanContent = cleanContent.replace(/^- \*\*Title length\*\*:\s*[\w\s:]+\n?/g, '');
-        
-        // Убираем "- **Content:**" строку
-        cleanContent = cleanContent.replace(/^- \*\*Content\*\*:\s*[\w\s:]+\n?/g, '');
-        
-        // Убираем пустые строки в начале
-        cleanContent = cleanContent.replace(/^\n+/, '').trim();
-        
-        // Пробуем снова с очищенным текстом
-        titleMatch = cleanContent.match(/ЗАГОЛОВОК:\s*(.+?)(?:\n|$)/i);
-        summaryMatch = cleanContent.match(/ПЕРЕСКАЗ:\s*([\s\S]+?)(?=\n\nПЕРЕСКАЗ:|\n\nЗАГОЛОВОК:|\n\n|$)/i);
-        
+        // Если не сработало, пробуем извлечь без префиксов
         if (!titleMatch && !summaryMatch) {
-          console.log('[CompressionService] >>> Cleaned content:', cleanContent.substring(0, 400));
+          console.log('[CompressionService] >>> Standard format failed, trying to extract content');
           
-          // Если всё ещё не сработало — используем весь текст как summary
-          if (cleanContent.length > 50) {
-            console.log('[CompressionService] >>> Using entire cleaned content as summary');
-            summary = cleanContent.substring(0, 1500);
-            title = 'Сжатая история';
+          // Убираем thinking-процесс из текста
+          let cleanContent = finalContent;
+          
+          // Убираем "Here's a thinking process:" и всё что до реального ответа
+          cleanContent = cleanContent.replace(/here['']s\s+(a\s+)?thinking\s+(process|analysis)?\s*:/gi, '');
+          cleanContent = cleanContent.replace(/let['']s\s+(me\s+)?(think|analyze)/gi, '');
+          
+          // Убираем нумерованные пункты анализа (1. Analyze, 2. Identify и т.д.)
+          cleanContent = cleanContent.replace(/^\d+\.\s+[\w\s]+?:\s*\n([\s\S]*?)(?=\n\d+\.\s|\n\n|$)/gms, '');
+          
+          // Убираем "- **Analyze User Input:**" и подобные строки
+          cleanContent = cleanContent.replace(/^- \*\*[\w\s]+\*\*:\s*\n([\s\S]*?)(?=\n- \*\*|\n\n$)/gm, '');
+          
+          // Убираем "- Language:" строку
+          cleanContent = cleanContent.replace(/^- \*\*Language\*\*:\s*[\w\s]+\n?/gi, '');
+          
+          // Убираем "- **Task:**" строку
+          cleanContent = cleanContent.replace(/^- \*\*Task\*\*:\s*[\w\s:]+/gi, '');
+          
+          // Убираем "- **Content:**" строку
+          cleanContent = cleanContent.replace(/^- \*\*Content\*\*:\s*[\w\s:]+/gi, '');
+          
+          // Убираем "- **Summary length:**" строку
+          cleanContent = cleanContent.replace(/^- \*\*Summary length\*\*:\s*[\w\s:]+/gi, '');
+          
+          // Убираем "- **Title length:**" строку
+          cleanContent = cleanContent.replace(/^- \*\*Title length\*\*:\s*[\w\s:]+/gi, '');
+          
+          // Убираем "- **Input Text:**" и всё до следующего пустого конца
+          cleanContent = cleanContent.replace(/^- \*\*Input Text\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
+          
+          // Убираем "- **Current Segment Events:**" и всё до следующего пустого конца
+          cleanContent = cleanContent.replace(/^- \*\*Current Segment Events\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
+          
+          // Убираем "- **Key Events:**" и всё до следующего пустого конца
+          cleanContent = cleanContent.replace(/^- \*\*Key Events\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
+          
+          // Убираем "- **Context:**" и всё до следующего пустого конца
+          cleanContent = cleanContent.replace(/^- \*\*Context\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
+          
+          // Убираем "- **Role:**" и всё до следующего пустого конца
+          cleanContent = cleanContent.replace(/^- \*\*Role\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
+          
+          // Убираем "- **Task**" и всё до следующего пустого конца
+          cleanContent = cleanContent.replace(/^- \*\*Task\*\*:\s*[\s\S]*?(?=\n\n)/g, '');
+          
+          // Убираем "- **Language:**" строку
+          cleanContent = cleanContent.replace(/^- \*\*Language\*\*:\s*[\w\s]+\n?/g, '');
+          
+          // Убираем "- **Summary length:**" строку
+          cleanContent = cleanContent.replace(/^- \*\*Summary length\*\*:\s*[\w\s:]+\n?/g, '');
+          
+          // Убираем "- **Title length:**" строку
+          cleanContent = cleanContent.replace(/^- \*\*Title length\*\*:\s*[\w\s:]+\n?/g, '');
+          
+          // Убираем "- **Content:**" строку
+          cleanContent = cleanContent.replace(/^- \*\*Content\*\*:\s*[\w\s:]+\n?/g, '');
+          
+          // Убираем пустые строки в начале
+          cleanContent = cleanContent.replace(/^\n+/, '').trim();
+          
+          // Пробуем снова с очищенным текстом
+          titleMatch = cleanContent.match(/ЗАГОЛОВОК:\s*(.+?)(?:\n|$)/i);
+          summaryMatch = cleanContent.match(/ПЕРЕСКАЗ:\s*([\s\S]+?)(?=\n\nПЕРЕСКАЗ:|\n\nЗАГОЛОВОК:|\n\n|$)/i);
+          
+          if (!titleMatch && !summaryMatch) {
+            console.log('[CompressionService] >>> Cleaned content:', cleanContent.substring(0, 400));
+            
+            // Если всё ещё не сработало — используем весь текст как summary
+            if (cleanContent.length > 50) {
+              console.log('[CompressionService] >>> Using entire cleaned content as summary');
+              summary = cleanContent.substring(0, 1500);
+              title = 'Сжатая история';
+            }
           }
         }
-      }
 
-      if (!titleMatch && !summaryMatch && !summary) {
-        // Fallback: берем первые N символов как summary
-        const cleanText = finalContent.replace(/here['']s\s+(a\s+)?thinking/gi, '').trim();
-        if (cleanText.length > 50) {
-          summary = cleanText.substring(0, 1000);
-          title = 'Сжатая история';
-          console.log('[CompressionService] >>> Using final fallback');
+        if (!titleMatch && !summaryMatch && !summary) {
+          // Fallback: берем первые N символов как summary
+          const cleanText = finalContent.replace(/here['']s\s+(a\s+)?thinking/gi, '').trim();
+          if (cleanText.length > 50) {
+            summary = cleanText.substring(0, 1000);
+            title = 'Сжатая история';
+            console.log('[CompressionService] >>> Using final fallback');
+          }
         }
-      }
 
-      if (titleMatch) {
-        title = titleMatch[1].trim();
-      }
-      if (summaryMatch) {
-        summary = summaryMatch[1].trim();
+        if (titleMatch) {
+          title = titleMatch[1].trim();
+        }
+        if (summaryMatch) {
+          summary = summaryMatch[1].trim();
+        }
       }
       
       // Ограничиваем длину summary
