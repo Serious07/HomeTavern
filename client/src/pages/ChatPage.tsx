@@ -166,6 +166,8 @@ const ChatPage: React.FC = () => {
   
   // Ref для хранения последнего ID сообщения для скролла
   const lastMessageIdRef = useRef<number | null>(null);
+  // Ref для отслеживания уже запущенных переводов, чтобы избежать дублей
+  const translatedMessagesRef = useRef<Set<number>>(new Set());
 
   // memoized messages to prevent unnecessary MessageList re-renders (Optimization A)
   const memoizedMessages = useMemo(() => messages, [messages]);
@@ -243,13 +245,16 @@ const ChatPage: React.FC = () => {
 
     // Автоматический запуск LLM-перевода для ответа LLM (EN -> DisplayLang), если провайдер LLM
     if (translationEnabled && translationProvider === 'llm' && messageId) {
-      const displayLang = (window as any).__translationDisplayLang || 'ru';
-      setLlmTranslationState({
-        text: message.content,
-        sourceLang: 'en',
-        targetLang: displayLang,
-        messageId,
-      });
+      if (!translatedMessagesRef.current.has(messageId)) {
+        translatedMessagesRef.current.add(messageId);
+        const displayLang = (window as any).__translationDisplayLang || 'ru';
+        setLlmTranslationState({
+          text: message.content,
+          sourceLang: 'en',
+          targetLang: displayLang,
+          messageId,
+        });
+      }
     }
 
     // Затем обновляем сообщения без показа загрузки
@@ -399,13 +404,16 @@ const ChatPage: React.FC = () => {
 
       // Автоматический запуск LLM-перевода для сообщения пользователя, если провайдер LLM
       if (translationEnabled && translationProvider === 'llm' && newMessage?.id) {
-        const displayLang = (window as any).__translationDisplayLang || 'ru';
-        setLlmTranslationState({
-          text: messageToSend,
-          sourceLang: displayLang,
-          targetLang: 'en',
-          messageId: newMessage.id,
-        });
+        if (!translatedMessagesRef.current.has(newMessage.id)) {
+          translatedMessagesRef.current.add(newMessage.id);
+          const displayLang = (window as any).__translationDisplayLang || 'ru';
+          setLlmTranslationState({
+            text: messageToSend,
+            sourceLang: displayLang,
+            targetLang: 'en',
+            messageId: newMessage.id,
+          });
+        }
       }
 
       // Сбрасываем значение ввода
