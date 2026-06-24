@@ -240,6 +240,18 @@ const ChatPage: React.FC = () => {
     if (messageId) {
       lastMessageIdRef.current = messageId;
     }
+
+    // Автоматический запуск LLM-перевода для ответа LLM (EN -> DisplayLang), если провайдер LLM
+    if (translationEnabled && translationProvider === 'llm' && messageId) {
+      const displayLang = (window as any).__translationDisplayLang || 'ru';
+      setLlmTranslationState({
+        text: message.content,
+        sourceLang: 'en',
+        targetLang: displayLang,
+        messageId,
+      });
+    }
+
     // Затем обновляем сообщения без показа загрузки
     await fetchMessages(false);
     
@@ -379,10 +391,22 @@ const ChatPage: React.FC = () => {
     
     try {
       // Отправляем сообщение на сервер
-      await chatsApi.sendMessage(parseInt(chatId), {
+      const response = await chatsApi.sendMessage(parseInt(chatId), {
         content: messageToSend,
         role: 'user',
       });
+      const newMessage = response.data;
+
+      // Автоматический запуск LLM-перевода для сообщения пользователя, если провайдер LLM
+      if (translationEnabled && translationProvider === 'llm' && newMessage?.id) {
+        const displayLang = (window as any).__translationDisplayLang || 'ru';
+        setLlmTranslationState({
+          text: messageToSend,
+          sourceLang: displayLang,
+          targetLang: 'en',
+          messageId: newMessage.id,
+        });
+      }
 
       // Сбрасываем значение ввода
       currentInputRef.current = '';
