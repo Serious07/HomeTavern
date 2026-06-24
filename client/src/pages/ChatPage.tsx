@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom';
 import { chatsApi, charactersApi, settingsApi } from '../services/api';
 import { compressionApi } from '../services/api';
+import { STORAGE_KEYS } from '../constants/storage';
 import { Chat, Message, Character } from '../types';
 import { CompressionMethod } from '../types/compression';
 import { playNotificationSound } from '../utils/notificationSound';
@@ -17,6 +18,7 @@ import { ChatBlockWithParsedIds } from '../types/compression';
 import AppHeader from '../components/common/AppHeader';
 import CompressionProgressOverlay from '../components/chat/CompressionProgressOverlay';
 import CompressionConfirmModal from '../components/chat/CompressionConfirmModal';
+import LLMTranslationModal from '../components/LLMTranslationModal';
 
 /**
  * Форматирование даты последнего сообщения
@@ -98,6 +100,17 @@ const ChatPage: React.FC = () => {
   
   // Translation setting
   const [translationEnabled, setTranslationEnabled] = useState<boolean>(true);
+  
+  // Translation provider setting
+  const [translationProvider, setTranslationProvider] = useState<string>('google');
+  
+  // LLM translation modal state
+  const [llmTranslationState, setLlmTranslationState] = useState<{
+    text: string;
+    sourceLang: string;
+    targetLang: string;
+    messageId: number;
+  } | null>(null);
   
   // Compression method setting
   const [compressionMethod, setCompressionMethod] = useState<CompressionMethod>('fixed');
@@ -307,6 +320,30 @@ const ChatPage: React.FC = () => {
         if (data.translation_enabled !== undefined) {
           setTranslationEnabled(data.translation_enabled === 'true');
         }
+        if (data.translation_provider) {
+          setTranslationProvider(data.translation_provider);
+        }
+        // Load translation provider from dedicated endpoint - this should take precedence
+        try {
+          const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+          const transResponse = await fetch('/api/translate/settings', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+           if (transResponse.ok) {
+             const transData = await transResponse.json();
+             if (transData?.provider) {
+               setTranslationProvider(transData.provider);
+             }
+             if (transData?.displayLang) {
+               // Store for LLM translation
+               (window as any).__translationDisplayLang = transData.displayLang;
+             }
+           }
+        } catch (transErr) {
+          console.warn('Failed to load translation provider:', transErr);
+        }
         if (data.compression_method !== undefined) {
           setCompressionMethod(data.compression_method as CompressionMethod);
         }
@@ -472,6 +509,46 @@ const ChatPage: React.FC = () => {
   const handleTranslateMessage = async (messageId: number) => {
     if (!chatId) return;
 
+    // Find the message to translate
+    const message = messages.find((m) => m.id === messageId);
+    if (!message) return;
+
+    // To ensure UI is in sync with server settings, we fetch latest provider
+    let currentProvider = translationProvider;
+    try {
+      const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+      const transResponse = await fetch('/api/translate/settings', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (transResponse.ok) {
+        const transData = await transResponse.json();
+        if (transData?.provider) {
+          currentProvider = transData.provider;
+          if (currentProvider !== translationProvider) {
+            setTranslationProvider(currentProvider);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to sync translation provider, using local state:', err);
+    }
+
+    // Check if LLM provider is active
+    if (currentProvider === 'llm') {
+      const displayLang = (window as any).__translationDisplayLang || 'ru';
+      const sourceLang = message.role === 'user' ? displayLang : 'en';
+      const targetLang = message.role === 'user' ? 'en' : displayLang;
+
+      setLlmTranslationState({
+        text: message.content,
+        sourceLang,
+        targetLang,
+        messageId,
+      });
+      return;
+    }
+
+    // Default: use standard translation API
     setTranslatingMessageId(messageId);
     try {
       const response = await chatsApi.translateMessage(parseInt(chatId), messageId);
@@ -488,6 +565,33 @@ const ChatPage: React.FC = () => {
     } finally {
       setTranslatingMessageId(null);
     }
+  };
+
+  // LLM translation callbacks
+  const handleLlmTranslationComplete = async (translatedText: string) => {
+    if (!llmTranslationState || !chatId) return;
+    const { messageId } = llmTranslationState;
+
+    // Update the message with translated content via API
+    try {
+      await chatsApi.updateMessage(parseInt(chatId), messageId, {
+        translated_content: translatedText,
+      });
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId ? { ...m, translated_content: translatedText } : m
+        )
+      );
+      await syncContextStats();
+    } catch (err: any) {
+      console.error('Error saving LLM translation:', err);
+    } finally {
+      setLlmTranslationState(null);
+    }
+  };
+
+  const handleLlmTranslationCancel = () => {
+    setLlmTranslationState(null);
   };
 
   const handleSelectChat = (chat: Chat) => {
@@ -983,6 +1087,17 @@ const ChatPage: React.FC = () => {
         isOpen={isCompressing}
         progress={compressionProgress}
       />
+
+      {/* LLM Translation Modal */}
+      {llmTranslationState && (
+        <LLMTranslationModal
+          text={llmTranslationState.text}
+          sourceLang={llmTranslationState.sourceLang}
+          targetLang={llmTranslationState.targetLang}
+          onComplete={handleLlmTranslationComplete}
+          onCancel={handleLlmTranslationCancel}
+        />
+      )}
     </div>
   );
 };

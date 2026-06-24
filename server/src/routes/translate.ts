@@ -6,6 +6,8 @@ import {
   getTranslationService,
   invalidateServiceCache,
 } from '../services/translation.service';
+import { LlmTranslator } from 'translation-library';
+import { llmService } from '../services/llm.service';
 import db from '../config/database';
 
 const router = Router();
@@ -86,6 +88,7 @@ router.get('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       displayLang: settings.displayLang,
       libreEndpoint: settings.libreEndpoint,
       autoTranslate: settings.autoTranslate,
+      llmSystemPrompt: settings.llmSystemPrompt,
     });
   } catch (error) {
     console.error('[TranslateRoute] Error getting settings:', error);
@@ -96,14 +99,14 @@ router.get('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
 /**
  * PUT /api/translate/settings
  * Обновить настройки перевода пользователя
- * Body: { provider?, displayLang?, enabled?, libreEndpoint?, autoTranslate? }
+ * Body: { provider?, displayLang?, enabled?, libreEndpoint?, autoTranslate?, llmSystemPrompt? }
  */
 router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { provider, displayLang, enabled, libreEndpoint, autoTranslate } = req.body;
+    const { provider, displayLang, enabled, libreEndpoint, autoTranslate, llmSystemPrompt } = req.body;
 
-    const validProviders = ['google', 'yandex', 'libre'];
+    const validProviders = ['google', 'yandex', 'libre', 'llm'];
 
     // Save each setting to the database
     const saveSetting = (key: string, value: string | null) => {
@@ -141,6 +144,10 @@ router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       saveSetting('translation_auto_translate', String(autoTranslate));
     }
 
+    if (llmSystemPrompt !== undefined) {
+      saveSetting('translation_llm_system_prompt', String(llmSystemPrompt));
+    }
+
     // Invalidate cache so next translation uses new settings
     invalidateServiceCache(userId);
 
@@ -152,10 +159,139 @@ router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       displayLang: settings.displayLang,
       libreEndpoint: settings.libreEndpoint,
       autoTranslate: settings.autoTranslate,
+      llmSystemPrompt: settings.llmSystemPrompt,
     });
   } catch (error) {
     console.error('[TranslateRoute] Error updating settings:', error);
     res.status(500).json({ error: 'Failed to update translation settings' });
+  }
+});
+
+/**
+ * POST /api/translate/stream
+ * SSE streaming translation using LLM
+ *
+ * Request body:
+ * {
+ *   text: string;
+ *   targetLang: string;
+ *   sourceLang?: string;
+ * }
+ *
+ * Response: SSE stream with tokens
+ */
+router.post('/stream', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const { text, targetLang, sourceLang } = req.body;
+
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({
+        error: 'Invalid request',
+        message: 'Text is required and must be a string',
+      });
+    }
+
+    if (!targetLang || typeof targetLang !== 'string') {
+      return res.status(400).json({
+        error: 'Invalid request',
+        message: 'Target language is required',
+      });
+    }
+
+    const srcLang = sourceLang || (await detectLanguage(text));
+    if (srcLang === targetLang) {
+      // Send the text as-is in SSE format
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.write(`data: ${JSON.stringify({ token: text })}\n\n`);
+      res.write(`data: ${JSON.stringify({ done: true, fullText: text })}\n\n`);
+      return res.end();
+    }
+
+    const { settings } = getTranslationService(userId);
+
+    // Only LLM provider supports streaming
+    if (settings.provider !== 'llm') {
+      return res.status(400).json({
+        error: 'Streaming not supported',
+        message: 'Streaming translation is only available with LLM provider',
+      });
+    }
+
+    // Create LLM translator for streaming
+    // Inject the server's LLMClient so it uses the active connection
+    const llmTranslator = new LlmTranslator({
+      systemPrompt: settings.llmSystemPrompt,
+      timeout: 30000,
+    });
+    
+     // Inject the LLMClient from the server's llmService
+     // This ensures we use the active database connection (correct base_url, api_key, model)
+     try {
+       const connection = llmService.getActiveConnection(userId);
+       if (connection) {
+         const { LLMClient } = require('llm-client');
+         const injectedClient = new LLMClient({
+           baseURL: connection.base_url,
+           apiKey: connection.api_key_decrypted,
+           timeout: 900000,
+         });
+         llmTranslator.setLlmClient(injectedClient);
+       } else {
+         console.warn(`[TranslateRoute] No active LLM connection found for user ${userId}, falling back to defaults`);
+       }
+     } catch (error) {
+       console.error('[TranslateRoute] Error injecting LLMClient:', error);
+     }
+
+    // Set up SSE response
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    let fullText = '';
+    const stream = llmTranslator.translateStream(text, {
+      sourceLanguage: srcLang,
+      targetLanguage: targetLang,
+    });
+
+    try {
+      for await (const chunk of stream) {
+        if (res.writableEnded) break; // Client disconnected
+
+        if (chunk.done && chunk.fullText !== undefined) {
+          fullText = chunk.fullText;
+          res.write(`data: ${JSON.stringify({ done: true, fullText })}\n\n`);
+          res.end();
+        } else if (chunk.token) {
+          fullText += chunk.token;
+          res.write(`data: ${JSON.stringify({ token: chunk.token })}\n\n`);
+        }
+      }
+
+      // If stream ended without done signal, send it
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ done: true, fullText })}\n\n`);
+        res.end();
+      }
+    } catch (streamError) {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ error: 'Streaming failed', fullText })}\n\n`);
+        res.end();
+      }
+      console.error('[TranslateRoute] Stream error:', streamError);
+    }
+  } catch (error) {
+    if (!res.headersSent) {
+      console.error('[TranslateRoute] Stream setup error:', error);
+      res.status(500).json({
+        error: 'Translation failed',
+        message: 'An error occurred during streaming translation',
+      });
+    }
   }
 });
 

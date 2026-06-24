@@ -5,7 +5,7 @@
 /**
  * Поддерживаемые провайдеры перевода
  */
-export type TranslatorProvider = 'google' | 'yandex' | 'libre';
+export type TranslatorProvider = 'google' | 'yandex' | 'libre' | 'llm';
 
 /**
  * Информация о языке

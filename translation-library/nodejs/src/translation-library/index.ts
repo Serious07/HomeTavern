@@ -35,11 +35,16 @@ import { BaseTranslator } from './translators/base';
 import { GoogleTranslator } from './translators/google';
 import { YandexTranslator } from './translators/yandex';
 import { LibreTranslator } from './translators/libre';
+import { LlmTranslator } from './translators/llm';
 
 /**
  * Фабрика для создания переводчиков
  */
-function createTranslator(provider: TranslatorProvider, config: TranslationLibraryConfig): BaseTranslator {
+export interface TranslationLibraryConfigExtended extends TranslationLibraryConfig {
+  systemPrompt?: string;
+}
+
+function createTranslator(provider: TranslatorProvider, config: TranslationLibraryConfigExtended): BaseTranslator {
   switch (provider) {
     case 'google':
       return new GoogleTranslator({
@@ -61,6 +66,14 @@ function createTranslator(provider: TranslatorProvider, config: TranslationLibra
         endpoint: config.endpoint,
         timeout: config.timeout,
         retries: config.retries,
+      });
+    case 'llm':
+      return new LlmTranslator({
+        apiKey: config.apiKey,
+        endpoint: config.endpoint,
+        timeout: config.timeout,
+        retries: config.retries,
+        systemPrompt: (config as any).systemPrompt,
       });
     default:
       throw new TranslationError(
@@ -156,6 +169,15 @@ export class TranslationLibrary {
       hasEndpoint: !!this.translator.endpoint,
     };
   }
+
+  /**
+   * Inject an external LLMClient instance to avoid dependency issues
+   */
+  setLlmClient(client: any): void {
+    if (this.translator instanceof LlmTranslator) {
+      this.translator.setLlmClient(client);
+    }
+  }
 }
 
 // Экспорт типов
@@ -176,6 +198,7 @@ export { BaseTranslator } from './translators/base';
 export { GoogleTranslator } from './translators/google';
 export { YandexTranslator } from './translators/yandex';
 export { LibreTranslator } from './translators/libre';
+export { LlmTranslator } from './translators/llm';
 
 export {
   chunkText,

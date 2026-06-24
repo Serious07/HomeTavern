@@ -23,7 +23,7 @@ export const SUPPORTED_LANGUAGES = [
   { code: 'uk', name: 'Українська', flag: '🇺🇦' },
 ];
 
-type TranslationProvider = 'google' | 'yandex' | 'libre';
+type TranslationProvider = 'google' | 'yandex' | 'libre' | 'llm';
 
 export const DEFAULT_COMPRESSION_INSTRUCTIONS = `Ты — опытный редактор и летописец. Твоя задача — создавать структурированные, информативные краткие пересказы диалогов и событий.
 
@@ -66,7 +66,7 @@ const SettingsPage: React.FC = () => {
   const [translationProvider, setTranslationProvider] = useState<TranslationProvider>('google');
   const [translationDisplayLang, setTranslationDisplayLang] = useState<string>('ru');
   const [translationLibreEndpoint, setTranslationLibreEndpoint] = useState<string>('');
-  const [translationSettingsLoading, setTranslationSettingsLoading] = useState<boolean>(false);
+  const [translationLlmSystemPrompt, setTranslationLlmSystemPrompt] = useState<string>('');
   const [dialogTaggingEnabled, setDialogTaggingEnabled] = useState<boolean>(true);
   const [dialogTaggingLoading, setDialogTaggingLoading] = useState<boolean>(false);
 
@@ -104,6 +104,7 @@ const SettingsPage: React.FC = () => {
             setTranslationProvider(transData.data.provider || 'google');
             setTranslationDisplayLang(transData.data.displayLang || 'ru');
             setTranslationLibreEndpoint(transData.data.libreEndpoint || '');
+            setTranslationLlmSystemPrompt(transData.data.llmSystemPrompt || '');
           }
         } catch (transError) {
           console.warn('Failed to load translation settings:', transError);
@@ -536,8 +537,61 @@ const SettingsPage: React.FC = () => {
                   <option value="google">Google Translate (бесплатный)</option>
                   <option value="yandex">Yandex Translate (бесплатный)</option>
                   <option value="libre">LibreTranslate (свой сервер)</option>
+                  <option value="llm">LLM (через локальную модель)</option>
                 </select>
               </div>
+
+              {/* LLM System Prompt */}
+              {translationProvider === 'llm' && (
+                <div className="mb-6">
+                  <label htmlFor="llm-system-prompt" className="block text-sm font-medium text-gray-300 mb-2">
+                    Системный промпт для LLM перевода
+                  </label>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Настройте инструкцию для LLM. Используйте {'{sourceLang}'} и {'{targetLang}'} как переменные.
+                  </p>
+                  <textarea
+                    id="llm-system-prompt"
+                    value={translationLlmSystemPrompt}
+                    onChange={(e) => setTranslationLlmSystemPrompt(e.target.value)}
+                    onBlur={async () => {
+                      try {
+                        await api.put('/translate/settings', { llmSystemPrompt: translationLlmSystemPrompt });
+                      } catch (err) {
+                        console.error('Failed to save LLM system prompt:', err);
+                      }
+                    }}
+                    rows={5}
+                    placeholder={`You are a professional translator. Translate from {sourceLang} to {targetLang}. Output ONLY the translation.`}
+                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500 resize-y font-mono text-sm"
+                  />
+                  <div className="flex gap-2 mt-2">
+                    {translationLlmSystemPrompt === '' && (
+                      <button
+                        onClick={async () => {
+                          const def = `You are a professional translator. Translate the following text from {sourceLang} to {targetLang}. Output ONLY the translated text, nothing else. Do not add explanations, comments, or formatting. Preserve the original tone, style, and meaning. Keep any special formatting like line breaks.`;
+                          setTranslationLlmSystemPrompt(def);
+                          try { await api.put('/translate/settings', { llmSystemPrompt: def }); } catch (err) { console.error(err); }
+                        }}
+                        className="text-xs text-blue-400 hover:text-blue-300"
+                      >
+                        Использовать стандартный
+                      </button>
+                    )}
+                    {translationLlmSystemPrompt !== '' && (
+                      <button
+                        onClick={async () => {
+                          setTranslationLlmSystemPrompt('');
+                          try { await api.put('/translate/settings', { llmSystemPrompt: '' }); } catch (err) { console.error(err); }
+                        }}
+                        className="text-xs text-gray-400 hover:text-gray-300"
+                      >
+                        Сбросить
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* 3.3: LibreTranslate URL Input */}
               {translationProvider === 'libre' && (

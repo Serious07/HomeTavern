@@ -5,15 +5,17 @@
 
 import db from '../config/database';
 import { TranslationLibrary, TranslationLibraryConfig } from 'translation-library';
+import { llmService } from './llm.service';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface UserTranslationSettings {
   enabled: boolean;
-  provider: 'google' | 'yandex' | 'libre';
+  provider: 'google' | 'yandex' | 'libre' | 'llm';
   displayLang: string;
   libreEndpoint: string;
   autoTranslate: boolean;
+  llmSystemPrompt?: string;
 }
 
 export interface TranslationServiceInstance {
@@ -59,10 +61,11 @@ function getUserTranslationSettings(userId: number): UserTranslationSettings {
 
   return {
     enabled: map['translation_enabled'] !== 'false', // default true
-    provider: (map['translation_provider'] as 'google' | 'yandex' | 'libre') || 'google',
+    provider: (map['translation_provider'] as 'google' | 'yandex' | 'libre' | 'llm') || 'google',
     displayLang: map['translation_display_lang'] || 'ru',
     libreEndpoint: map['translation_libre_endpoint'] || '',
     autoTranslate: map['translation_auto_translate'] !== 'false', // default true
+    llmSystemPrompt: map['translation_llm_system_prompt'] || undefined,
   };
 }
 
@@ -103,10 +106,10 @@ const serviceCache = new ServiceCache();
 
 // ─── 1.3: Factory createTranslationService ──────────────────────────────────
 
-function buildLibrary(settings: UserTranslationSettings): TranslationLibrary {
-  const config: TranslationLibraryConfig = {
+function buildLibrary(settings: UserTranslationSettings, userId?: number): TranslationLibrary {
+  const config: any = {
     provider: settings.provider,
-    timeout: 10000,
+    timeout: 30000,
     retries: 3,
   };
 
@@ -114,7 +117,29 @@ function buildLibrary(settings: UserTranslationSettings): TranslationLibrary {
     config.endpoint = settings.libreEndpoint;
   }
 
-  return new TranslationLibrary(config);
+  if (settings.provider === 'llm' && settings.llmSystemPrompt) {
+    config.systemPrompt = settings.llmSystemPrompt;
+  }
+
+  const library = new TranslationLibrary(config);
+
+  if (settings.provider === 'llm' && userId) {
+    const connection = llmService.getActiveConnection(userId);
+    if (connection) {
+      config.model = connection.model;
+      const { LLMClient } = require('llm-client');
+      const client = new LLMClient({
+        baseURL: connection.base_url,
+        apiKey: connection.api_key_decrypted,
+        timeout: config.timeout || 60000,
+      });
+      (library as any).setLlmClient(client);
+    } else {
+      console.warn(`[TranslationService] No active LLM connection found for user ${userId}, falling back to defaults`);
+    }
+  }
+
+  return library;
 }
 
 /**
@@ -131,7 +156,7 @@ export function getTranslationService(userId: number): {
   }
 
   const settings = getUserTranslationSettings(userId);
-  const library = buildLibrary(settings);
+  const library = buildLibrary(settings, userId);
   serviceCache.set(userId, library, settings);
 
   return { library, settings };
