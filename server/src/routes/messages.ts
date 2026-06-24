@@ -2,7 +2,12 @@ import { Router, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { messageService } from '../services/message.service';
 import { chatService } from '../services/chat.service';
-import { translationService } from '../services/translation.service';
+import {
+  translateForUser,
+  detectLanguage,
+  getTranslationService,
+  translationService,
+} from '../services/translation.service';
 import { messageRepository, UpdateMessageParams } from '../repositories/message.repository';
 import { chatRepository } from '../repositories/chat.repository';
 import db from '../config/database';
@@ -53,29 +58,27 @@ router.post('/chats/:chatId/messages', async (req: AuthenticatedRequest, res: Re
       return res.status(400).json({ error: 'role and content are required' });
     }
 
-    // Автоматический перевод сообщения пользователя на английский
+    // 2.3: Автоматический перевод сообщения пользователя на английский (per-user)
     let translatedContent = translated_content;
     if (role === 'user' && !translatedContent) {
-      // Проверяем настройку перевода
-      const settings = db.prepare('SELECT value FROM settings WHERE user_id = ? AND key = ?').all(userId, 'translation_enabled') as Array<{ value: string | null }>;
-      const translationEnabled = settings.length === 0 || settings[0].value === 'true'; // По умолчанию включен
-      
-      if (translationEnabled) {
+      const { settings } = getTranslationService(userId);
+
+      if (settings.enabled) {
         try {
-          const detectedLang = await translationService.detectLanguage(content);
+          const detectedLang = await detectLanguage(content);
           if (detectedLang !== 'en') {
-            translatedContent = await translationService.translate(content, { sourceLang: detectedLang, targetLang: 'en' }).then(r => r.translatedText);
+            translatedContent = await translateForUser(userId, content, detectedLang, 'en');
             console.log(`[Translation] Translated user message from ${detectedLang} to en:`, translatedContent);
           } else {
             translatedContent = content; // Уже на английском
           }
         } catch (translateError) {
           console.error('[Translation] Translation error:', translateError);
-          // Если перевод не удался, используем оригинал
           translatedContent = content;
         }
       } else {
         console.log('[Translation] Translation is disabled for this user, using original content');
+        translatedContent = content;
       }
     }
 
@@ -278,64 +281,65 @@ router.put('/chats/:chatId/messages/:id/translate-bidirectional', async (req: Au
 
     let updatedMessage = { ...message };
 
+    // 2.5: Двунаправленный перевод (per-user с displayLang)
+    const { settings: userSettings } = getTranslationService(userId);
+    const displayLang = userSettings.displayLang;
+
     // Определяем роль сообщения для логики перевода
     const isUserMessage = message.role === 'user';
 
-    // User сообщения: RU = content (оригинал), EN = translated_content (перевод)
-    // Assistant сообщения: EN = content (оригинал), RU = translated_content (перевод)
+    // User сообщения: displayLang = content (оригинал), EN = translated_content (перевод)
+    // Assistant сообщения: EN = content (оригинал), displayLang = translated_content (перевод)
     if (isUserMessage) {
       // Пользовательское сообщение
       if (content !== undefined && content !== message.content) {
-        // Обновлен оригинал (RU) - переводим на EN
+        // Обновлен оригинал (displayLang) - переводим на EN
         try {
-          const translation = await translationService.translateToEnglish(content);
+          const srcLang = await detectLanguage(content);
+          const translation = await translateForUser(userId, content, srcLang, 'en');
           updatedMessage.content = content;
           updatedMessage.translated_content = translation;
-          console.log(`[Bidirectional Translation] User message RU->EN:`, translation.substring(0, 50));
+          console.log(`[Bidirectional Translation] User message ${srcLang}->EN:`, translation.substring(0, 50));
         } catch (translateErr) {
           console.error('[Bidirectional Translation] Translation to English failed:', translateErr);
-          // Если перевод не удался, оставляем как есть
           updatedMessage.translated_content = message.translated_content;
         }
       }
       if (translated_content !== undefined && translated_content !== message.translated_content && translated_content) {
-        // Обновлен перевод (EN) - переводим обратно на RU
+        // Обновлен перевод (EN) - переводим обратно на displayLang
         try {
-          const translation = await translationService.translateToRussian(translated_content);
+          const translation = await translateForUser(userId, translated_content, 'en', displayLang);
           updatedMessage.content = translation;
           updatedMessage.translated_content = translated_content;
-          console.log(`[Bidirectional Translation] User message EN->RU:`, translation.substring(0, 50));
+          console.log(`[Bidirectional Translation] User message EN->${displayLang}:`, translation.substring(0, 50));
         } catch (translateErr) {
-          console.error('[Bidirectional Translation] Translation to Russian failed:', translateErr);
-          // Если перевод не удался, оставляем как есть
+          console.error('[Bidirectional Translation] Translation to displayLang failed:', translateErr);
           updatedMessage.content = message.content;
         }
       }
     } else {
       // Assistant сообщение
       if (content !== undefined && content !== message.content) {
-        // Обновлен оригинал (EN) - переводим на RU
+        // Обновлен оригинал (EN) - переводим на displayLang
         try {
-          const translation = await translationService.translateToRussian(content);
+          const translation = await translateForUser(userId, content, 'en', displayLang);
           updatedMessage.content = content;
           updatedMessage.translated_content = translation;
-          console.log(`[Bidirectional Translation] Assistant message EN->RU:`, translation.substring(0, 50));
+          console.log(`[Bidirectional Translation] Assistant message EN->${displayLang}:`, translation.substring(0, 50));
         } catch (translateErr) {
-          console.error('[Bidirectional Translation] Translation to Russian failed:', translateErr);
-          // Если перевод не удался, оставляем как есть
+          console.error('[Bidirectional Translation] Translation to displayLang failed:', translateErr);
           updatedMessage.translated_content = message.translated_content;
         }
       }
       if (translated_content !== undefined && translated_content !== message.translated_content && translated_content) {
-        // Обновлен перевод (RU) - переводим обратно на EN
+        // Обновлен перевод (displayLang) - переводим обратно на EN
         try {
-          const translation = await translationService.translateToEnglish(translated_content);
+          const translation = await translateForUser(userId, translated_content, displayLang, 'en');
           updatedMessage.content = translation;
           updatedMessage.translated_content = translated_content;
-          console.log(`[Bidirectional Translation] Assistant message RU->EN:`, translation.substring(0, 50));
+          console.log(`[Bidirectional Translation] Assistant message ${displayLang}->EN:`, translation.substring(0, 50));
         } catch (translateErr) {
           console.error('[Bidirectional Translation] Translation to English failed:', translateErr);
-          // Если перевод не удался, оставляем как есть
           updatedMessage.content = message.content;
         }
       }

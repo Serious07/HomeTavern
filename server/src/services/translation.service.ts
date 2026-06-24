@@ -1,7 +1,26 @@
 /**
- * Translation Service - Integration with translation-library
- * Provides translation between Russian and English with caching
+ * Translation Service - Per-user translation with flexible provider support
+ * Each user can configure their own provider and display language
  */
+
+import db from '../config/database';
+import { TranslationLibrary, TranslationLibraryConfig } from 'translation-library';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export interface UserTranslationSettings {
+  enabled: boolean;
+  provider: 'google' | 'yandex' | 'libre';
+  displayLang: string;
+  libreEndpoint: string;
+  autoTranslate: boolean;
+}
+
+export interface TranslationServiceInstance {
+  service: TranslationLibrary;
+  settings: UserTranslationSettings;
+  timestamp: number;
+}
 
 export interface TranslationOptions {
   sourceLang?: string;
@@ -16,9 +35,255 @@ export interface TranslationResult {
   confidence?: number;
 }
 
+// ─── Defaults ────────────────────────────────────────────────────────────────
+
+const DEFAULT_SETTINGS: UserTranslationSettings = {
+  enabled: true,
+  provider: 'google',
+  displayLang: 'ru',
+  libreEndpoint: '',
+  autoTranslate: true,
+};
+
+// ─── 1.1: getUserTranslationSettings ────────────────────────────────────────
+
+function getUserTranslationSettings(userId: number): UserTranslationSettings {
+  const rows = db.prepare(
+    'SELECT key, value FROM settings WHERE user_id = ?'
+  ).all(userId) as Array<{ key: string; value: string | null }>;
+
+  const map: Record<string, string | null> = {};
+  for (const row of rows) {
+    map[row.key] = row.value;
+  }
+
+  return {
+    enabled: map['translation_enabled'] !== 'false', // default true
+    provider: (map['translation_provider'] as 'google' | 'yandex' | 'libre') || 'google',
+    displayLang: map['translation_display_lang'] || 'ru',
+    libreEndpoint: map['translation_libre_endpoint'] || '',
+    autoTranslate: map['translation_auto_translate'] !== 'false', // default true
+  };
+}
+
+// ─── 1.2: Service Cache with TTL ────────────────────────────────────────────
+
+class ServiceCache {
+  private cache: Map<number, TranslationServiceInstance> = new Map();
+  private readonly TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+  get(userId: number): TranslationServiceInstance | undefined {
+    const entry = this.cache.get(userId);
+    if (!entry) return undefined;
+    if (Date.now() - entry.timestamp > this.TTL_MS) {
+      this.cache.delete(userId);
+      return undefined;
+    }
+    return entry;
+  }
+
+  set(userId: number, service: TranslationLibrary, settings: UserTranslationSettings): void {
+    this.cache.set(userId, {
+      service,
+      settings,
+      timestamp: Date.now(),
+    });
+  }
+
+  invalidate(userId: number): void {
+    this.cache.delete(userId);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+const serviceCache = new ServiceCache();
+
+// ─── 1.3: Factory createTranslationService ──────────────────────────────────
+
+function buildLibrary(settings: UserTranslationSettings): TranslationLibrary {
+  const config: TranslationLibraryConfig = {
+    provider: settings.provider,
+    timeout: 10000,
+    retries: 3,
+  };
+
+  if (settings.provider === 'libre' && settings.libreEndpoint) {
+    config.endpoint = settings.libreEndpoint;
+  }
+
+  return new TranslationLibrary(config);
+}
+
 /**
- * Простое кэширование переводов в памяти
+ * Get or create a translation service for a specific user.
+ * Uses cached instance with 5-min TTL.
  */
+export function getTranslationService(userId: number): {
+  library: TranslationLibrary;
+  settings: UserTranslationSettings;
+} {
+  const cached = serviceCache.get(userId);
+  if (cached) {
+    return { library: cached.service, settings: cached.settings };
+  }
+
+  const settings = getUserTranslationSettings(userId);
+  const library = buildLibrary(settings);
+  serviceCache.set(userId, library, settings);
+
+  return { library, settings };
+}
+
+/**
+ * Invalidate cached service for a user (call after settings change)
+ */
+export function invalidateServiceCache(userId: number): void {
+  serviceCache.invalidate(userId);
+}
+
+/**
+ * Clear all cached services
+ */
+export function clearServiceCache(): void {
+  serviceCache.clear();
+}
+
+// ─── Text-level translation cache (in-memory) ───────────────────────────────
+
+class TextTranslationCache {
+  private cache: Map<string, { text: string; ts: number }> = new Map();
+  private readonly MAX_SIZE = 2000;
+  private readonly TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+  get(key: string): string | undefined {
+    const entry = this.cache.get(key);
+    if (!entry) return undefined;
+    if (Date.now() - entry.ts > this.TTL_MS) {
+      this.cache.delete(key);
+      return undefined;
+    }
+    return entry.text;
+  }
+
+  set(key: string, value: string): void {
+    if (this.cache.size >= this.MAX_SIZE) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) {
+        this.cache.delete(firstKey);
+      }
+    }
+    this.cache.set(key, { text: value, ts: Date.now() });
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+const textCache = new TextTranslationCache();
+
+// ─── Language Detection (server-side, no API call) ──────────────────────────
+
+/**
+ * Detect language of text based on character analysis (no API call needed)
+ */
+export async function detectLanguage(text: string): Promise<string> {
+  const trimmedText = text.trim();
+  if (!trimmedText) {
+    return 'en';
+  }
+
+  const plainText = trimmedText
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\[.*?\]/g, ' ')
+    .replace(/[|]/g, ' ')
+    .replace(/—/g, ' ')
+    .trim();
+
+  const russianWords = plainText.match(/[а-яА-ЯёЁ]+/g) || [];
+  const englishWords = plainText.match(/[a-zA-Z]+/g) || [];
+
+  const ruCount = russianWords.length;
+  const enCount = englishWords.length;
+  const total = ruCount + enCount;
+
+  if (total === 0) {
+    const hasCyrillic = /[а-яА-ЯёЁ]/.test(trimmedText);
+    return hasCyrillic ? 'ru' : 'en';
+  }
+
+  const ruRatio = ruCount / total;
+  const enRatio = enCount / total;
+
+  if (enRatio > ruRatio) {
+    return 'en';
+  } else if (ruRatio > enRatio) {
+    return 'ru';
+  } else {
+    return total > 4 ? 'ru' : 'en';
+  }
+}
+
+// ─── 1.4 / 1.5: Universal translate method ──────────────────────────────────
+
+/**
+ * Universal translate: translate text from sourceLang to targetLang using user's configured provider.
+ * This replaces the old translateToEnglish() and translateToRussian() methods.
+ */
+export async function translateForUser(
+  userId: number,
+  text: string,
+  sourceLang: string,
+  targetLang: string,
+): Promise<string> {
+  if (!text || !text.trim()) {
+    return text;
+  }
+
+  if (sourceLang === targetLang) {
+    return text;
+  }
+
+  // Check text cache
+  const cacheKey = `${sourceLang}->${targetLang}:${text}`;
+  const cached = textCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const { library } = getTranslationService(userId);
+
+  try {
+    const result = await library.translate(text, targetLang, {
+      sourceLanguage: sourceLang,
+    });
+    const translatedText = result.text || text;
+
+    // Save to cache
+    textCache.set(cacheKey, translatedText);
+
+    return translatedText;
+  } catch (error) {
+    console.error(`[TranslationService] translateForUser (${sourceLang}->${targetLang}) ERROR:`, error);
+    return text; // Fallback: return original
+  }
+}
+
+/**
+ * Clear text translation cache
+ */
+export function clearTextCache(): void {
+  textCache.clear();
+}
+
+// ─── 1.6: Legacy exports for backward compatibility ─────────────────────────
+
+// Keep the old singleton-style exports for gradual migration
+// These will be removed once all routes are migrated to per-user services.
+
 class TranslationCache {
   private cache: Map<string, string> = new Map();
   private readonly MAX_SIZE = 1000;
@@ -29,7 +294,6 @@ class TranslationCache {
 
   set(key: string, value: string): void {
     if (this.cache.size >= this.MAX_SIZE) {
-      // Удаляем первый элемент при достижении лимита
       const firstKey = this.cache.keys().next().value;
       if (firstKey) {
         this.cache.delete(firstKey);
@@ -47,14 +311,13 @@ export class TranslationService {
   private provider: string;
   private apiKey: string | null;
   private cache: TranslationCache;
-  private translationLibrary: any; // TranslationLibrary instance
+  private translationLibrary: any;
 
   constructor() {
     this.provider = process.env.TRANSLATION_PROVIDER || 'google';
     this.apiKey = process.env.TRANSLATION_API_KEY || null;
     this.cache = new TranslationCache();
 
-    // Инициализация TranslationLibrary
     try {
       const { TranslationLibrary } = require('translation-library');
       this.translationLibrary = new TranslationLibrary({
@@ -68,164 +331,67 @@ export class TranslationService {
     }
   }
 
-  /**
-   * Определение языка текста на основе большинства слов
-   * @param text - Текст для анализа
-   * @returns Код языка ('ru', 'en' или другой)
-   */
   async detectLanguage(text: string): Promise<string> {
-    const trimmedText = text.trim();
-    if (!trimmedText) {
-      console.log('[TranslationService] detectLanguage: empty text, returning "en"');
-      return 'en';
-    }
-
-    // Извлекаем только текстовое содержимое, игнорируя теги (<narration>, <speech>, [Calendar:], и т.д.)
-    const plainText = trimmedText
-      .replace(/<[^>]+>/g, ' ')       // Убираем угловые теги
-      .replace(/\[.*?\]/g, ' ')        // Убираем текст в квадратных скобках целиком
-      .replace(/[|]/g, ' ')            // Убираем вертикальные черты
-      .replace(/—/g, ' ')              // Убираем тире
-      .trim();
-
-    // Разбиваем на слова (последовательности букв)
-    const russianWords = plainText.match(/[а-яА-ЯёЁ]+/g) || [];
-    const englishWords = plainText.match(/[a-zA-Z]+/g) || [];
-
-    const ruCount = russianWords.length;
-    const enCount = englishWords.length;
-    const total = ruCount + enCount;
-
-    if (total === 0) {
-      // Нет ни русских, ни английских слов — проверяем наличие кириллицы как fallback
-      const hasCyrillic = /[а-яА-ЯёЁ]/.test(trimmedText);
-      console.log(`[TranslationService] detectLanguage: no word tokens found, hasCyrillic=${hasCyrillic}, returning "${hasCyrillic ? 'ru' : 'en'}"`);
-      return hasCyrillic ? 'ru' : 'en';
-    }
-
-    const ruRatio = ruCount / total;
-    const enRatio = enCount / total;
-
-    let detected: string;
-    if (enRatio > ruRatio) {
-      detected = 'en';
-    } else if (ruRatio > enRatio) {
-      detected = 'ru';
-    } else {
-      // При равенстве — смотрим на абсолютные числа
-      // Если слов немного (короткая фраза), по умолчанию считаем русским (так как русские слова чаще содержат спецсимволы)
-      detected = total > 4 ? 'ru' : 'en';
-    }
-
-    console.log(`[TranslationService] detectLanguage: ruWords=${ruCount}, enWords=${enCount}, total=${total}, ruRatio=${ruRatio.toFixed(2)}, enRatio=${enRatio.toFixed(2)}, detected="${detected}"`);
-    return detected;
+    return detectLanguage(text);
   }
 
-  /**
-   * Перевод текста с русского на английский
-   * @param text - Текст на русском языке
-   * @returns Переведённый текст на английском
-   */
   async translateToEnglish(text: string): Promise<string> {
-    if (!text || !text.trim()) {
-      console.log('[TranslationService] translateToEnglish: empty text, returning as-is');
-      return text;
-    }
+    if (!text || !text.trim()) return text;
 
-    console.log('[TranslationService] translateToEnglish: START -', text.substring(0, 50) + (text.length > 50 ? '...' : ''));
-
-    // Проверяем кэш
     const cacheKey = `ru->en:${text}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) {
-      console.log('[TranslationService] translateToEnglish: CACHE HIT');
-      return cached;
-    }
+    if (cached) return cached;
 
     let translatedText: string;
 
     if (this.translationLibrary) {
-      console.log('[TranslationService] translateToEnglish: using translation-library');
       try {
         const result = await this.translationLibrary.translate(text, 'en', {
           sourceLanguage: 'ru',
         });
         translatedText = result.text || result.translatedText || text;
-        console.log('[TranslationService] translateToEnglish: SUCCESS -', translatedText.substring(0, 50) + (translatedText.length > 50 ? '...' : ''));
       } catch (error) {
         console.error('[TranslationService] translateToEnglish ERROR:', error);
-        translatedText = text; // Fallback: возвращаем оригинал
+        translatedText = text;
       }
     } else {
-      // Fallback: простая эмуляция (в реальности нужен реальный перевод)
-      console.log('[TranslationService] translateToEnglish: using FALLBACK (library not available)');
-      translatedText = text; // Placeholder
+      translatedText = text;
     }
 
-    // Сохраняем в кэш
     this.cache.set(cacheKey, translatedText);
-    console.log('[TranslationService] translateToEnglish: COMPLETED');
-
     return translatedText;
   }
 
-  /**
-   * Перевод текста с английского на русский
-   * @param text - Текст на английском языке
-   * @returns Переведённый текст на русском
-   */
   async translateToRussian(text: string): Promise<string> {
-    if (!text || !text.trim()) {
-      console.log('[TranslationService] translateToRussian: empty text, returning as-is');
-      return text;
-    }
+    if (!text || !text.trim()) return text;
 
-    console.log('[TranslationService] translateToRussian: START -', text.substring(0, 50) + (text.length > 50 ? '...' : ''));
-
-    // Проверяем кэш
     const cacheKey = `en->ru:${text}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) {
-      console.log('[TranslationService] translateToRussian: CACHE HIT');
-      return cached;
-    }
+    if (cached) return cached;
 
     let translatedText: string;
 
     if (this.translationLibrary) {
-      console.log('[TranslationService] translateToRussian: using translation-library');
       try {
         const result = await this.translationLibrary.translate(text, 'ru', {
           sourceLanguage: 'en',
         });
         translatedText = result.text || result.translatedText || text;
-        console.log('[TranslationService] translateToRussian: SUCCESS -', translatedText.substring(0, 50) + (translatedText.length > 50 ? '...' : ''));
       } catch (error) {
         console.error('[TranslationService] translateToRussian ERROR:', error);
-        translatedText = text; // Fallback: возвращаем оригинал
+        translatedText = text;
       }
     } else {
-      // Fallback: простая эмуляция (в реальности нужен реальный перевод)
-      console.log('[TranslationService] translateToRussian: using FALLBACK (library not available)');
-      translatedText = text; // Placeholder
+      translatedText = text;
     }
 
-    // Сохраняем в кэш
     this.cache.set(cacheKey, translatedText);
-    console.log('[TranslationService] translateToRussian: COMPLETED');
-
     return translatedText;
   }
 
-  /**
-   * Универсальный метод перевода
-   * @param text - Текст для перевода
-   * @param options - Опции перевода
-   * @returns Результат перевода
-   */
   async translate(
     text: string,
-    options: TranslationOptions = {}
+    options: TranslationOptions = {},
   ): Promise<TranslationResult> {
     const sourceLang = options.sourceLang || (await this.detectLanguage(text));
     const targetLang = options.targetLang || 'en';
@@ -249,15 +415,11 @@ export class TranslationService {
     };
   }
 
-  /**
-   * Перевод в указанную целевую языковую локаль
-   */
   private async translateToLanguage(
     text: string,
     sourceLang: string,
-    targetLang: string
+    targetLang: string,
   ): Promise<string> {
-    // Основной поток: ru <-> en
     if (sourceLang === 'ru' && targetLang === 'en') {
       return this.translateToEnglish(text);
     }
@@ -265,7 +427,6 @@ export class TranslationService {
       return this.translateToRussian(text);
     }
 
-    // Для других языков используем библиотеку или возвращаем оригинал
     if (this.translationLibrary) {
       try {
         const result = await this.translationLibrary.translate(text, targetLang, {
@@ -281,19 +442,14 @@ export class TranslationService {
     return text;
   }
 
-  /**
-   * Получение поддерживаемых языков
-   */
   async getSupportedLanguages(): Promise<string[]> {
     return ['en', 'ru', 'es', 'fr', 'de', 'ja', 'zh', 'pt', 'it', 'ko'];
   }
 
-  /**
-   * Очистка кэша переводов
-   */
   clearCache(): void {
     this.cache.clear();
   }
 }
 
+// Singleton for backward compatibility
 export const translationService = new TranslationService();

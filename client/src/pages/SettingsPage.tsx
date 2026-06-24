@@ -6,6 +6,25 @@ import AppHeader from '../components/common/AppHeader';
 import { getVisibleMessageLimit, setVisibleMessageLimit } from '../components/chat/MessageList';
 import { CompressionMethod } from '../types/compression';
 
+// 3.1: Supported languages for translation
+export const SUPPORTED_LANGUAGES = [
+  { code: 'en', name: 'English', flag: '🇺🇸' },
+  { code: 'ru', name: 'Русский', flag: '🇷🇺' },
+  { code: 'es', name: 'Español', flag: '🇪🇸' },
+  { code: 'fr', name: 'Français', flag: '🇫🇷' },
+  { code: 'de', name: 'Deutsch', flag: '🇩🇪' },
+  { code: 'ja', name: '日本語', flag: '🇯🇵' },
+  { code: 'zh', name: '中文', flag: '🇨🇳' },
+  { code: 'pt', name: 'Português', flag: '🇧🇷' },
+  { code: 'it', name: 'Italiano', flag: '🇮🇹' },
+  { code: 'ko', name: '한국어', flag: '🇰🇷' },
+  { code: 'tr', name: 'Türkçe', flag: '🇹🇷' },
+  { code: 'pl', name: 'Polski', flag: '🇵🇱' },
+  { code: 'uk', name: 'Українська', flag: '🇺🇦' },
+];
+
+type TranslationProvider = 'google' | 'yandex' | 'libre';
+
 export const DEFAULT_COMPRESSION_INSTRUCTIONS = `Ты — опытный редактор и летописец. Твоя задача — создавать структурированные, информативные краткие пересказы диалогов и событий.
 
 ПРАВИЛА ФОРМАТИРОВАНИЯ ПЕРЕСКАЗА:
@@ -42,6 +61,12 @@ const SettingsPage: React.FC = () => {
   const [notificationVolume, setNotificationVolume] = useState<number>(70);
   const [translationEnabled, setTranslationEnabled] = useState<boolean>(true);
   const [translationLoading, setTranslationLoading] = useState<boolean>(false);
+  
+  // 3.2-3.4: Translation settings state
+  const [translationProvider, setTranslationProvider] = useState<TranslationProvider>('google');
+  const [translationDisplayLang, setTranslationDisplayLang] = useState<string>('ru');
+  const [translationLibreEndpoint, setTranslationLibreEndpoint] = useState<string>('');
+  const [translationSettingsLoading, setTranslationSettingsLoading] = useState<boolean>(false);
   const [dialogTaggingEnabled, setDialogTaggingEnabled] = useState<boolean>(true);
   const [dialogTaggingLoading, setDialogTaggingLoading] = useState<boolean>(false);
 
@@ -71,6 +96,17 @@ const SettingsPage: React.FC = () => {
         }
         if (data?.translation_enabled !== undefined) {
           setTranslationEnabled(data.translation_enabled === 'true');
+        }
+        // 3.2-3.4: Load translation settings from dedicated endpoint
+        try {
+          const transData = await api.get('/translate/settings');
+          if (transData?.data) {
+            setTranslationProvider(transData.data.provider || 'google');
+            setTranslationDisplayLang(transData.data.displayLang || 'ru');
+            setTranslationLibreEndpoint(transData.data.libreEndpoint || '');
+          }
+        } catch (transError) {
+          console.warn('Failed to load translation settings:', transError);
         }
         if (data?.dialog_tagging_enabled !== undefined) {
           setDialogTaggingEnabled(data.dialog_tagging_enabled === 'true');
@@ -452,11 +488,12 @@ const SettingsPage: React.FC = () => {
             <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
               <h2 className="text-xl font-bold text-white mb-6">Перевод</h2>
               
-              <div className="flex items-center justify-between">
+              {/* Translation Toggle */}
+              <div className="flex items-center justify-between mb-6">
                 <div>
-                  <p className="text-gray-300 font-medium">Перевод сообщений на английский</p>
+                  <p className="text-gray-300 font-medium">Автоматический перевод</p>
                   <p className="text-sm text-gray-400 mt-1">
-                    Автоматически переводить сообщения с русского на английский для отправки ИИ. При отключении ИИ будет получать сообщения на исходном языке.
+                    Переводить сообщения для отправки ИИ. При отключении ИИ будет получать сообщения на исходном языке.
                   </p>
                 </div>
                 <button
@@ -475,6 +512,88 @@ const SettingsPage: React.FC = () => {
                     } inline-block h-6 w-6 transform rounded-full bg-white shadow transition duration-200 ease-in-out`}
                   />
                 </button>
+              </div>
+
+              {/* 3.2: Provider Dropdown */}
+              <div className="mb-6">
+                <label htmlFor="translation-provider" className="block text-sm font-medium text-gray-300 mb-2">
+                  Провайдер перевода
+                </label>
+                <select
+                  id="translation-provider"
+                  value={translationProvider}
+                  onChange={async (e) => {
+                    setTranslationProvider(e.target.value as TranslationProvider);
+                    try {
+                      await api.put('/translate/settings', { provider: e.target.value });
+                    } catch (err) {
+                      console.error('Failed to save provider:', err);
+                      setTranslationProvider('google');
+                    }
+                  }}
+                  className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
+                >
+                  <option value="google">Google Translate (бесплатный)</option>
+                  <option value="yandex">Yandex Translate (бесплатный)</option>
+                  <option value="libre">LibreTranslate (свой сервер)</option>
+                </select>
+              </div>
+
+              {/* 3.3: LibreTranslate URL Input */}
+              {translationProvider === 'libre' && (
+                <div className="mb-6">
+                  <label htmlFor="libre-endpoint" className="block text-sm font-medium text-gray-300 mb-2">
+                    LibreTranslate URL
+                  </label>
+                  <input
+                    type="text"
+                    id="libre-endpoint"
+                    value={translationLibreEndpoint}
+                    onChange={async (e) => {
+                      setTranslationLibreEndpoint(e.target.value);
+                      try {
+                        await api.put('/translate/settings', { libreEndpoint: e.target.value });
+                      } catch (err) {
+                        console.error('Failed to save LibreTranslate URL:', err);
+                      }
+                    }}
+                    placeholder="https://libretranslate.example.com"
+                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-2">
+                    URL вашего LibreTranslate сервера (должен быть доступен из браузера)
+                  </p>
+                </div>
+              )}
+
+              {/* 3.4: Display Language Dropdown */}
+              <div className="mb-4">
+                <label htmlFor="display-lang" className="block text-sm font-medium text-gray-300 mb-2">
+                  Язык отображения
+                </label>
+                <p className="text-xs text-gray-400 mb-3">
+                  Язык на котором вы видите сообщения от ИИ. Сообщения пользователя будут переводиться на этот язык.
+                </p>
+                <select
+                  id="display-lang"
+                  value={translationDisplayLang}
+                  onChange={async (e) => {
+                    setTranslationDisplayLang(e.target.value);
+                    try {
+                      await api.put('/translate/settings', { displayLang: e.target.value });
+                    } catch (err) {
+                      console.error('Failed to save display language:', err);
+                      setTranslationDisplayLang('ru');
+                    }
+                  }}
+                  className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
+                >
+                  {SUPPORTED_LANGUAGES.map((lang) => (
+                    <option key={lang.code} value={lang.code}>
+                      {lang.flag} {lang.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
