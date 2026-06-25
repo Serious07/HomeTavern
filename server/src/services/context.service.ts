@@ -254,6 +254,10 @@ export class ContextService {
 
   /**
    * Поиск активного слота для текущего чата
+   * 
+   * Доверяем данным слота ТОЛЬКО когда is_processing = true (идёт активная генерация).
+   * Если is_processing = false, данные слота могут быть остатками от перевода
+   * или других LLM-запросов, поэтому возвращаем null для использования tokenize fallback.
    */
   private findActiveSlot(slots: LlamaSlot[]): LlamaSlot | null {
     if (!slots || slots.length === 0) {
@@ -261,38 +265,17 @@ export class ContextService {
       return null;
     }
 
-    // Стратегия 1: Ищем слоты, которые активно используются
+    // Стратегия 1: Ищем слоты, которые активно используются (is_processing = true)
     const processingSlots = slots.filter(slot => slot.is_processing);
     if (processingSlots.length > 0) {
       console.log(`[ContextService] Found ${processingSlots.length} processing slot(s)`);
       return processingSlots[0];
     }
 
-    // Стратегия 2: Ищем слоты с сгенерированными токенами
-    const decodedSlots = slots.filter(slot => (slot.next_token?.[0]?.n_decoded ?? 0) > 0);
-    if (decodedSlots.length > 0) {
-      console.log(`[ContextService] Found ${decodedSlots.length} slot(s) with decoded tokens`);
-      return decodedSlots[0];
-    }
-
-    // Стратегия 3: Ищем слоты где n_remain < n_ctx (контекст занят)
-    const occupiedSlots = slots.filter(slot => {
-      const nRemain = slot.next_token?.[0]?.n_remain ?? 0;
-      return slot.n_ctx > 0 && nRemain > 0 && nRemain < slot.n_ctx;
-    });
-    if (occupiedSlots.length > 0) {
-      console.log(`[ContextService] Found ${occupiedSlots.length} occupied slot(s)`);
-      return occupiedSlots[0];
-    }
-
-    // Стратегия 4: Возвращаем первый слот с n_ctx > 0
-    const firstSlot = slots.find(slot => slot.n_ctx > 0);
-    if (firstSlot) {
-      console.log(`[ContextService] Using first available slot ${firstSlot.id} (idle, will use tokenize fallback)`);
-      return firstSlot;
-    }
-
-    console.log('[ContextService] No valid slots found');
+    // Если нет активных слотов — возвращаем null.
+    // getChatContextStats использует tokenize промпта чата вместо данных слота,
+    // чтобы избежать учёта остатков от переводов и других LLM-запросов.
+    console.log('[ContextService] No processing slots found, will use tokenize fallback');
     return null;
   }
 

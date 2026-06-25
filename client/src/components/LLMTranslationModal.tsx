@@ -32,6 +32,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string>('');
   const abortControllerRef = useRef<AbortController | null>(null);
   const onCompleteRef = useRef(onComplete);
+  const translationContainerRef = useRef<HTMLDivElement>(null);
   onCompleteRef.current = onComplete;
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
@@ -163,6 +164,13 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
     }
   }, [status, displayText]);
 
+  // Автоматический скролл вниз при появлении нового текста
+  useEffect(() => {
+    if (translationContainerRef.current && displayText) {
+      translationContainerRef.current.scrollTop = translationContainerRef.current.scrollHeight;
+    }
+  }, [displayText]);
+
   const handleCancel = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -193,7 +201,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
         </div>
 
         {/* Translation output */}
-        <div className="mb-4 p-3 bg-gray-900/50 rounded-lg border border-blue-800/50 min-h-[100px] max-h-[300px] overflow-y-auto">
+        <div ref={translationContainerRef} className="mb-4 p-3 bg-gray-900/50 rounded-lg border border-blue-800/50 min-h-[100px] max-h-[300px] overflow-y-auto">
           <p className="text-xs text-blue-400 mb-1">Перевод:</p>
           {status === 'translating' && (
             <div>
