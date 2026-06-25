@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { STORAGE_KEYS } from '../constants/storage';
 
 // Глобальный Map для отслеживания уже запущенных переводов (для внутреннего режима)
@@ -178,8 +179,11 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
     onCancelRef.current();
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+  // Используем React Portal для рендеринга модалки в document.body
+  // Это решает проблему с отображением на мобильных устройствах, где
+  // overflow-hidden на родителе может обрезать fixed дочерние элементы
+  return createPortal(
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[9999]">
       <div className="bg-gray-800 rounded-2xl p-6 max-w-lg w-full border border-gray-700 shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
@@ -245,7 +249,8 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
