@@ -1,12 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { STORAGE_KEYS } from '../constants/storage';
 
+// Глобальный Map для отслеживания уже запущенных переводов (для внутреннего режима)
+const activeTranslations = new Map<string, AbortController>();
+const completedTranslations = new Set<string>();
+
 interface LLMTranslationModalProps {
   text: string;
   sourceLang: string;
   targetLang: string;
   onComplete: (translatedText: string) => void;
   onCancel: () => void;
+  // Внешний стриминг (от SSE events)
+  externalStream?: {
+    displayText: string;
+    status: 'translating' | 'done' | 'error';
+    errorMessage?: string;
+  };
 }
 
 const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
@@ -15,11 +25,20 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   targetLang,
   onComplete,
   onCancel,
+  externalStream,
 }) => {
   const [displayText, setDisplayText] = useState<string>('');
   const [status, setStatus] = useState<'translating' | 'error' | 'done'>('translating');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const abortControllerRef = useRef<AbortController | null>(null);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+  const translationKey = `${text}|${sourceLang}|${targetLang}`;
+  const isRegisteredRef = useRef(false);
+  // Для отслеживания внешнего режима
+  const isExternalMode = !!externalStream;
 
   const langNames: Record<string, string> = {
     en: 'English',
@@ -40,9 +59,32 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   const sourceLangName = langNames[sourceLang] || sourceLang;
   const targetLangName = langNames[targetLang] || targetLang;
 
+  // Синхронизация с внешним стримингом
   useEffect(() => {
+    if (externalStream) {
+      setDisplayText(externalStream.displayText);
+      setStatus(externalStream.status);
+      if (externalStream.errorMessage) {
+        setErrorMessage(externalStream.errorMessage);
+      }
+    }
+  }, [externalStream]);
+
+  // Внутренний режим - запускаем свой fetch
+  useEffect(() => {
+    if (isExternalMode) return; // Внешний режим - не запускаем fetch
+
+    if (activeTranslations.has(translationKey)) {
+      return;
+    }
+    if (completedTranslations.has(translationKey)) {
+      return;
+    }
+
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    activeTranslations.set(translationKey, controller);
+    isRegisteredRef.current = true;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const apiBase = (import.meta as any).env?.VITE_API_URL || window.location.origin;
@@ -53,43 +95,36 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${localStorage.getItem(STORAGE_KEYS.TOKEN)}`,
       },
-      body: JSON.stringify({
-        text,
-        sourceLang,
-        targetLang,
-      }),
+      body: JSON.stringify({ text, sourceLang, targetLang }),
       signal: controller.signal,
     })
       .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-
         if (!reader) throw new Error('No reader');
 
         const read = async () => {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
             buffer = lines.pop() || '';
-
             for (const line of lines) {
               if (!line.startsWith('data: ')) continue;
               const dataStr = line.slice(6);
               if (dataStr === '[DONE]') continue;
-
               try {
                 const data = JSON.parse(dataStr);
                 if (data.done) {
-                  setDisplayText(data.fullText || '');
+                  const finalText = data.fullText || '';
+                  setDisplayText(finalText);
                   setStatus('done');
-                  onComplete(data.fullText || '');
+                  completedTranslations.add(translationKey);
+                  activeTranslations.delete(translationKey);
+                  isRegisteredRef.current = false;
                   return;
                 }
                 if (data.token) {
@@ -111,14 +146,28 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
 
     return () => {
       controller.abort();
+      if (isRegisteredRef.current) {
+        activeTranslations.delete(translationKey);
+        isRegisteredRef.current = false;
+      }
     };
-  }, [text, sourceLang, targetLang, onComplete]);
+  }, [text, sourceLang, targetLang, translationKey, isExternalMode]);
+
+  // Автоматическое закрытие после завершения перевода
+  useEffect(() => {
+    if (status === 'done') {
+      const timer = setTimeout(() => {
+        onCompleteRef.current(displayText);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [status, displayText]);
 
   const handleCancel = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    onCancel();
+    onCancelRef.current();
   };
 
   return (
@@ -174,10 +223,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
         <div className="flex gap-3">
           {status === 'error' && (
             <button
-              onClick={() => {
-                // Close and let parent handle retry
-                onCancel();
-              }}
+              onClick={() => { onCancelRef.current(); }}
               className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold text-white transition"
             >
               Попробовать снова

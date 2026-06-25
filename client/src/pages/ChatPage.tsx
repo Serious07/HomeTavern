@@ -104,13 +104,43 @@ const ChatPage: React.FC = () => {
   // Translation provider setting
   const [translationProvider, setTranslationProvider] = useState<string>('google');
   
-  // LLM translation modal state
-  const [llmTranslationState, setLlmTranslationState] = useState<{
+  // LLM translation modal state - используем одно состояние для очереди переводов
+  // Приоритет: сообщение пользователя > ответ LLM
+  const [userMessageTranslation, setUserMessageTranslation] = useState<{
     text: string;
     sourceLang: string;
     targetLang: string;
     messageId: number;
   } | null>(null);
+  const [llmResponseTranslation, setLlmResponseTranslation] = useState<{
+    text: string;
+    sourceLang: string;
+    targetLang: string;
+    messageId: number;
+  } | null>(null);
+  // Ref для хранения ожидающего перевода ответа LLM (пока открыто окно перевода сообщения)
+  const pendingLlmResponseTranslationRef = useRef<{
+    text: string;
+    sourceLang: string;
+    targetLang: string;
+    messageId: number;
+  } | null>(null);
+  // Ref для отслеживания текущего состояния перевода сообщения (для использования в замыканиях)
+  const userMessageTranslationRef = useRef<typeof userMessageTranslation>(null);
+  userMessageTranslationRef.current = userMessageTranslation;
+  
+  // Состояние для стриминга перевода ответа LLM через SSE (открывает модалку)
+  const [streamingTranslation, setStreamingTranslation] = useState<{
+    text: string;
+    sourceLang: string;
+    targetLang: string;
+    displayText: string;
+    status: 'translating' | 'done' | 'error';
+    errorMessage?: string;
+  } | null>(null);
+  
+  // Ref для messageId текущего стримингового перевода
+  const streamingTranslationMessageIdRef = useRef<number | null>(null);
   
   // Compression method setting
   const [compressionMethod, setCompressionMethod] = useState<CompressionMethod>('fixed');
@@ -168,6 +198,8 @@ const ChatPage: React.FC = () => {
   const lastMessageIdRef = useRef<number | null>(null);
   // Ref для отслеживания уже запущенных переводов, чтобы избежать дублей
   const translatedMessagesRef = useRef<Set<number>>(new Set());
+  // Ref для отслеживания переводов, которые сейчас выполняются (для блокировки повторных)
+  const translatingMessagesRef = useRef<Set<number>>(new Set());
 
   // memoized messages to prevent unnecessary MessageList re-renders (Optimization A)
   const memoizedMessages = useMemo(() => messages, [messages]);
@@ -243,20 +275,6 @@ const ChatPage: React.FC = () => {
       lastMessageIdRef.current = messageId;
     }
 
-    // Автоматический запуск LLM-перевода для ответа LLM (EN -> DisplayLang), если провайдер LLM
-    if (translationEnabled && translationProvider === 'llm' && messageId) {
-      if (!translatedMessagesRef.current.has(messageId)) {
-        translatedMessagesRef.current.add(messageId);
-        const displayLang = (window as any).__translationDisplayLang || 'ru';
-        setLlmTranslationState({
-          text: message.content,
-          sourceLang: 'en',
-          targetLang: displayLang,
-          messageId,
-        });
-      }
-    }
-
     // Затем обновляем сообщения без показа загрузки
     await fetchMessages(false);
     
@@ -276,7 +294,33 @@ const ChatPage: React.FC = () => {
     setTimeout(() => {
       setInputAutoFocus(true);
     }, 100);
-  }, [fetchMessages, syncContextStats, soundEnabled]);
+
+    // Автоматический запуск LLM-перевода для ответа LLM (EN -> DisplayLang), если провайдер LLM
+    // ВАЖНО: Запускаем ПОСЛЕ всех setState чтобы модалка открылась сразу
+    // НО: если сервер уже прислал перевод через SSE (message.translated_content), не запускаем модалку
+    const serverTranslation = message.translated_content;
+    const hasServerTranslation = serverTranslation && serverTranslation.trim() !== '' && serverTranslation !== message.content;
+    
+    if (translationEnabled && translationProvider === 'llm' && messageId && !hasServerTranslation) {
+      if (!translatedMessagesRef.current.has(messageId)) {
+        translatedMessagesRef.current.add(messageId);
+        const displayLang = (window as any).__translationDisplayLang || 'ru';
+        const translationData = {
+          text: message.content,
+          sourceLang: 'en',
+          targetLang: displayLang,
+          messageId,
+        };
+        
+        // Если уже открыто окно перевода сообщения, сохраняем в очередь
+        if (userMessageTranslationRef.current) {
+          pendingLlmResponseTranslationRef.current = translationData;
+        } else {
+          setLlmResponseTranslation(translationData);
+        }
+      }
+    }
+  }, [fetchMessages, syncContextStats, soundEnabled, translationEnabled, translationProvider]);
 
   const handleStreamingError = useCallback(async (errorMessage: string) => {
     console.error('[ChatPage] Streaming error:', errorMessage);
@@ -401,20 +445,7 @@ const ChatPage: React.FC = () => {
         role: 'user',
       });
       const newMessage = response.data;
-
-      // Автоматический запуск LLM-перевода для сообщения пользователя, если провайдер LLM
-      if (translationEnabled && translationProvider === 'llm' && newMessage?.id) {
-        if (!translatedMessagesRef.current.has(newMessage.id)) {
-          translatedMessagesRef.current.add(newMessage.id);
-          const displayLang = (window as any).__translationDisplayLang || 'ru';
-          setLlmTranslationState({
-            text: messageToSend,
-            sourceLang: displayLang,
-            targetLang: 'en',
-            messageId: newMessage.id,
-          });
-        }
-      }
+      const newMessageId = newMessage?.id;
 
       // Сбрасываем значение ввода
       currentInputRef.current = '';
@@ -432,11 +463,30 @@ const ChatPage: React.FC = () => {
       setInputClearKey(prev => prev + 1);
       // Снимаем фокус во время стриминга
       setInputAutoFocus(false);
+
+      // Автоматический запуск LLM-перевода для сообщения пользователя, если провайдер LLM
+      // ВАЖНО: Запускаем ПОСЛЕ всех setState чтобы модалка открылась сразу
+      // Проверяем ТРИ условия: не переведено, не переводится сейчас, и есть messageId
+      if (translationEnabled && translationProvider === 'llm' && newMessageId) {
+        const isAlreadyTranslated = translatedMessagesRef.current.has(newMessageId);
+        const isCurrentlyTranslating = translatingMessagesRef.current.has(newMessageId);
+        
+        if (!isAlreadyTranslated && !isCurrentlyTranslating) {
+          translatingMessagesRef.current.add(newMessageId);
+          const displayLang = (window as any).__translationDisplayLang || 'ru';
+          setUserMessageTranslation({
+            text: messageToSend,
+            sourceLang: displayLang,
+            targetLang: 'en',
+            messageId: newMessageId,
+          });
+        }
+      }
     } catch (err: any) {
       console.error('Error sending message:', err);
       setIsSending(false);
     }
-  }, [chatId, isSending, isStreaming, fetchMessages, syncContextStats]);
+  }, [chatId, isSending, isStreaming, fetchMessages, syncContextStats, translationEnabled, translationProvider]);
 
   // Callback для ChatInputArea
   const handleInputChanged = useCallback((value: string) => {
@@ -571,12 +621,22 @@ const ChatPage: React.FC = () => {
       const sourceLang = message.role === 'user' ? displayLang : 'en';
       const targetLang = message.role === 'user' ? 'en' : displayLang;
 
-      setLlmTranslationState({
-        text: message.content,
-        sourceLang,
-        targetLang,
-        messageId,
-      });
+      // Используем appropriate state в зависимости от роли сообщения
+      if (message.role === 'user') {
+        setUserMessageTranslation({
+          text: message.content,
+          sourceLang,
+          targetLang,
+          messageId,
+        });
+      } else {
+        setLlmResponseTranslation({
+          text: message.content,
+          sourceLang,
+          targetLang,
+          messageId,
+        });
+      }
       return;
     }
 
@@ -599,10 +659,10 @@ const ChatPage: React.FC = () => {
     }
   };
 
-  // LLM translation callbacks
-  const handleLlmTranslationComplete = async (translatedText: string) => {
-    if (!llmTranslationState || !chatId) return;
-    const { messageId } = llmTranslationState;
+  // LLM translation callbacks - обрабатывают оба типа переводов
+  const handleUserMessageTranslationComplete = async (translatedText: string) => {
+    if (!userMessageTranslation || !chatId) return;
+    const { messageId } = userMessageTranslation;
 
     // Update the message with translated content via API
     try {
@@ -618,13 +678,132 @@ const ChatPage: React.FC = () => {
     } catch (err: any) {
       console.error('Error saving LLM translation:', err);
     } finally {
-      setLlmTranslationState(null);
+      // Помечаем сообщение как переведённое
+      translatedMessagesRef.current.add(messageId);
+      // Удаляем из списка переводящихся
+      translatingMessagesRef.current.delete(messageId);
+      
+      setUserMessageTranslation(null);
+      
+      // Проверяем, есть ли ожидающий перевод ответа LLM в очереди
+      if (pendingLlmResponseTranslationRef.current) {
+        const pendingTranslation = pendingLlmResponseTranslationRef.current;
+        pendingLlmResponseTranslationRef.current = null;
+        // Небольшая задержка перед открытием следующего окна
+        setTimeout(() => {
+          setLlmResponseTranslation(pendingTranslation);
+        }, 300);
+      }
+    }
+  };
+
+  const handleLlmResponseTranslationComplete = async (translatedText: string) => {
+    if (!llmResponseTranslation || !chatId) return;
+    const { messageId } = llmResponseTranslation;
+
+    // Update the message with translated content via API
+    try {
+      await chatsApi.updateMessage(parseInt(chatId), messageId, {
+        translated_content: translatedText,
+      });
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId ? { ...m, translated_content: translatedText } : m
+        )
+      );
+      await syncContextStats();
+    } catch (err: any) {
+      console.error('Error saving LLM translation:', err);
+    } finally {
+      // Помечаем сообщение как переведённое
+      translatedMessagesRef.current.add(messageId);
+      // Удаляем из списка переводящихся
+      translatingMessagesRef.current.delete(messageId);
+      
+      setLlmResponseTranslation(null);
     }
   };
 
   const handleLlmTranslationCancel = () => {
-    setLlmTranslationState(null);
+    // Удаляем из списка переводящихся при отмене
+    if (userMessageTranslation) {
+      translatingMessagesRef.current.delete(userMessageTranslation.messageId);
+    }
+    if (llmResponseTranslation) {
+      translatingMessagesRef.current.delete(llmResponseTranslation.messageId);
+    }
+    if (streamingTranslation) {
+      translatingMessagesRef.current.delete(streamingTranslationMessageIdRef.current || 0);
+    }
+    
+    // Сбрасываем все состояния
+    setUserMessageTranslation(null);
+    setLlmResponseTranslation(null);
+    setStreamingTranslation(null);
+    streamingTranslationMessageIdRef.current = null;
   };
+
+  // Callbacks для стриминга перевода через SSE (от сервера)
+  const handleTranslationStart = useCallback((data: { from: string; to: string; text: string }) => {
+    // Открываем модалку стримингового перевода
+    setStreamingTranslation({
+      text: data.text,
+      sourceLang: data.from,
+      targetLang: data.to,
+      displayText: '',
+      status: 'translating',
+    });
+    // messageId будет установлен в handleStreamingComplete через messageIdRef
+  }, []);
+
+  const handleTranslationToken = useCallback((token: string) => {
+    setStreamingTranslation(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        displayText: prev.displayText + token,
+      };
+    });
+  }, []);
+
+  const handleTranslationDone = useCallback((translatedText: string) => {
+    setStreamingTranslation(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        displayText: translatedText,
+        status: 'done',
+      };
+    });
+  }, []);
+
+  // Callback когда стриминговый перевод завершён (модалка закрывается автоматически)
+  const handleStreamingTranslationComplete = useCallback(async (translatedText: string) => {
+    if (!chatId) return;
+    const messageId = streamingTranslationMessageIdRef.current;
+    
+    // Сохраняем перевод в БД
+    if (messageId) {
+      try {
+        await chatsApi.updateMessage(parseInt(chatId), messageId, {
+          translated_content: translatedText,
+        });
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === messageId ? { ...m, translated_content: translatedText } : m
+          )
+        );
+        translatedMessagesRef.current.add(messageId);
+        translatingMessagesRef.current.delete(messageId);
+      } catch (err: any) {
+        console.error('Error saving streaming translation:', err);
+      }
+    }
+    
+    setStreamingTranslation(null);
+    streamingTranslationMessageIdRef.current = null;
+    await syncContextStats();
+  }, [chatId, syncContextStats]);
 
   const handleSelectChat = (chat: Chat) => {
     setCurrentChat(chat);
@@ -999,6 +1178,10 @@ const ChatPage: React.FC = () => {
                     onError={handleStreamingError}
                     showThinking={streamingMessageThinkingRef.current}
                     onToggleThinking={handleStreamingToggleThinking}
+                    onTranslationStart={handleTranslationStart}
+                    onTranslationToken={handleTranslationToken}
+                    onTranslationDone={handleTranslationDone}
+                    onMessageId={(id) => { streamingTranslationMessageIdRef.current = id; }}
                   />
                 </div>
               )}
@@ -1120,16 +1303,41 @@ const ChatPage: React.FC = () => {
         progress={compressionProgress}
       />
 
-      {/* LLM Translation Modal */}
-      {llmTranslationState && (
+      {/* LLM Translation Modal - показываем только одно окно за раз
+          Приоритет: стриминговый перевод (от сервера) > сообщение пользователя > ответ LLM */}
+      {streamingTranslation ? (
         <LLMTranslationModal
-          text={llmTranslationState.text}
-          sourceLang={llmTranslationState.sourceLang}
-          targetLang={llmTranslationState.targetLang}
-          onComplete={handleLlmTranslationComplete}
+          key={`streaming-${streamingTranslationMessageIdRef.current}`}
+          text={streamingTranslation.text}
+          sourceLang={streamingTranslation.sourceLang}
+          targetLang={streamingTranslation.targetLang}
+          onComplete={handleStreamingTranslationComplete}
+          onCancel={handleLlmTranslationCancel}
+          externalStream={{
+            displayText: streamingTranslation.displayText,
+            status: streamingTranslation.status,
+            errorMessage: streamingTranslation.errorMessage,
+          }}
+        />
+      ) : userMessageTranslation ? (
+        <LLMTranslationModal
+          key={`user-${userMessageTranslation.messageId}`}
+          text={userMessageTranslation.text}
+          sourceLang={userMessageTranslation.sourceLang}
+          targetLang={userMessageTranslation.targetLang}
+          onComplete={handleUserMessageTranslationComplete}
           onCancel={handleLlmTranslationCancel}
         />
-      )}
+      ) : llmResponseTranslation ? (
+        <LLMTranslationModal
+          key={`llm-${llmResponseTranslation.messageId}`}
+          text={llmResponseTranslation.text}
+          sourceLang={llmResponseTranslation.sourceLang}
+          targetLang={llmResponseTranslation.targetLang}
+          onComplete={handleLlmResponseTranslationComplete}
+          onCancel={handleLlmTranslationCancel}
+        />
+      ) : null}
     </div>
   );
 };

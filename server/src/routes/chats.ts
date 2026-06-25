@@ -211,15 +211,77 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     fullContent = stripThoughtTags(fullContent);
 
     // 2.7: Переводим ответ на displayLang (если оригинал на английском и перевод включен)
+    // Для LLM провайдера - стримим перевод токенами через SSE
     if (translationEnabled) {
       const responseLang = await detectLanguage(fullContent);
       if (responseLang !== userSettings.displayLang) {
-        sendSSEEvent(res, 'translation', {
+        // Отправляем событие начала перевода
+        sendSSEEvent(res, 'translation_start', {
           type: 'assistant_message_translation',
           from: responseLang,
-          to: userSettings.displayLang
+          to: userSettings.displayLang,
+          text: fullContent
         });
-        translatedText = await translateForUser(userId, fullContent, responseLang, userSettings.displayLang);
+        
+        // Для LLM провайдера - стримим перевод
+        if (userSettings.provider === 'llm') {
+          const { LlmTranslator } = require('translation-library');
+          const llmTranslator = new LlmTranslator({
+            systemPrompt: userSettings.llmSystemPrompt,
+            timeout: 30000,
+          });
+          
+          // Инжектируем LLMClient из llmService
+          try {
+            const connection = llmService.getActiveConnection(userId);
+            if (connection) {
+              const { LLMClient } = require('llm-client');
+              const injectedClient = new LLMClient({
+                baseURL: connection.base_url,
+                apiKey: connection.api_key_decrypted,
+                timeout: 900000,
+              });
+              llmTranslator.setLlmClient(injectedClient);
+            }
+          } catch (error) {
+            console.error('[ChatsRoute] Error injecting LLMClient for translation:', error);
+          }
+          
+          // Стримим перевод токенами
+          const translationStream = llmTranslator.translateStream(fullContent, {
+            sourceLanguage: responseLang,
+            targetLanguage: userSettings.displayLang,
+          });
+          
+          try {
+            for await (const chunk of translationStream) {
+              if (res.writableEnded) break;
+              
+              if (chunk.done && chunk.fullText !== undefined) {
+                translatedText = chunk.fullText;
+                sendSSEEvent(res, 'translation_done', { translatedText });
+              } else if (chunk.token) {
+                translatedText += chunk.token;
+                sendSSEEvent(res, 'translation_token', { token: chunk.token });
+              }
+            }
+            
+            // Если стрим закончился без done сигнала
+            if (!translatedText) {
+              translatedText = fullContent;
+              sendSSEEvent(res, 'translation_done', { translatedText });
+            }
+          } catch (streamError) {
+            console.error('[ChatsRoute] Translation stream error:', streamError);
+            translatedText = fullContent;
+            sendSSEEvent(res, 'translation_done', { translatedText });
+          }
+        } else {
+          // Для не-LLM провайдеров - переводим целиком
+          translatedText = await translateForUser(userId, fullContent, responseLang, userSettings.displayLang);
+          sendSSEEvent(res, 'translation_done', { translatedText });
+        }
+        
         console.log(`Translated assistant response: "${fullContent}" -> "${translatedText}"`);
       } else {
         translatedText = fullContent;

@@ -10,6 +10,10 @@ interface StreamingResponseProps {
   onError?: (error: string) => void;
   showThinking?: boolean;  // Внешнее состояние showThinking (опционально для обратной совместимости)
   onToggleThinking?: () => void;  // Callback для переключения состояния
+  onTranslationStart?: (data: { from: string; to: string; text: string }) => void;
+  onTranslationToken?: (token: string) => void;
+  onTranslationDone?: (translatedText: string) => void;
+  onMessageId?: (messageId: number) => void;
 }
 
 const StreamingResponse: React.FC<StreamingResponseProps> = ({
@@ -19,6 +23,10 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   onError,
   showThinking: externalShowThinking,
   onToggleThinking,
+  onTranslationStart,
+  onTranslationToken,
+  onTranslationDone,
+  onMessageId,
 }) => {
   const [isStreaming, setIsStreaming] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +56,20 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   // Ref для chatId (чтобы использовать в handleStop)
   const chatIdRef = useRef(chatId);
   chatIdRef.current = chatId;
+  
+  // Ref для callbacks чтобы предотвратить повторное создание EventSource при re-render
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+  const onTranslationStartRef = useRef(onTranslationStart);
+  onTranslationStartRef.current = onTranslationStart;
+  const onTranslationTokenRef = useRef(onTranslationToken);
+  onTranslationTokenRef.current = onTranslationToken;
+  const onTranslationDoneRef = useRef(onTranslationDone);
+  onTranslationDoneRef.current = onTranslationDone;
+  const onMessageIdRef = useRef(onMessageId);
+  onMessageIdRef.current = onMessageId;
   
   const eventSourceRef = useRef<EventSource | null>(null);
   const messageIdRef = useRef<number>(0);
@@ -116,6 +138,9 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       try {
         const data = JSON.parse(event.data);
         messageIdRef.current = data.messageId;
+        if (onMessageIdRef.current) {
+          onMessageIdRef.current(data.messageId);
+        }
       } catch (err) {
         // Ignore parse errors
       }
@@ -132,6 +157,46 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       }
     });
 
+    // Новые SSE events для стриминга перевода
+    eventSource.addEventListener('translation_start', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (onTranslationStartRef.current) {
+          onTranslationStartRef.current({ from: data.from, to: data.to, text: data.text });
+        }
+      } catch (err) {
+        // Ignore parse errors
+      }
+    });
+
+    eventSource.addEventListener('translation_token', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.token) {
+          translatedTextRef.current = (translatedTextRef.current || '') + data.token;
+          if (onTranslationTokenRef.current) {
+            onTranslationTokenRef.current(data.token);
+          }
+        }
+      } catch (err) {
+        // Ignore parse errors
+      }
+    });
+
+    eventSource.addEventListener('translation_done', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.translatedText) {
+          translatedTextRef.current = data.translatedText;
+          if (onTranslationDoneRef.current) {
+            onTranslationDoneRef.current(data.translatedText);
+          }
+        }
+      } catch (err) {
+        // Ignore parse errors
+      }
+    });
+
     eventSource.addEventListener('error', (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
@@ -142,9 +207,9 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
         eventSource.close();
         eventSourceRef.current = null;
 
-        // Notify parent of the error
-        if (onError) {
-          onError(errorMessage);
+        // Notify parent of the error (используем ref)
+        if (onErrorRef.current) {
+          onErrorRef.current(errorMessage);
         }
       } catch (err) {
         // If we can't parse the error event, treat it as a connection error
@@ -162,9 +227,9 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
         eventSource.close();
         eventSourceRef.current = null;
 
-        // Call onComplete with the final message
-        if (onComplete) {
-          onComplete({
+        // Call onComplete with the final message (используем ref)
+        if (onCompleteRef.current) {
+          onCompleteRef.current({
             id: messageIdRef.current || (data.messageId ? parseInt(data.messageId) : 0),
             chat_id: chatId,
             user_id: 0,
@@ -195,8 +260,8 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
         const errorMessage = 'Ошибка соединения с потоком ответа. Проверьте консоль сервера.';
         setError(errorMessage);
 
-        if (onError) {
-          onError(errorMessage);
+        if (onErrorRef.current) {
+          onErrorRef.current(errorMessage);
         }
       }
     };
@@ -207,7 +272,7 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
         eventSourceRef.current = null;
       }
     };
-  }, [chatId, onComplete, onError]);
+  }, [chatId]); // Только chatId в зависимостях - callbacks через ref
 
   // Функция остановки генерации
   const handleStop = async () => {
