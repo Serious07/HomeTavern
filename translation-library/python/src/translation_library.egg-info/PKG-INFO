@@ -17,7 +17,7 @@ Classifier: Programming Language :: Python :: 3.12
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 Requires-Dist: requests>=2.31.0
-Requires-Dist: googletrans==4.0.0-rc1
+Requires-Dist: deep-translator>=1.11.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
