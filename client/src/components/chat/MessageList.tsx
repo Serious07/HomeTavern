@@ -30,7 +30,7 @@ interface ExpandedBlockMessages {
 interface MessageListProps {
   messages: Message[];
   onRegenerate?: (messageId: number) => void;
-  onEdit?: (messageId: number, content: string, translatedContent?: string) => void;
+  onEdit?: (messageId: number, content: string, otherContent?: string, editingTranslated?: boolean) => void;
   onDelete?: (messageId: number) => void;
   showThinking?: Record<number, boolean>;
   onToggleThinking?: (messageId: number) => void;
@@ -63,7 +63,7 @@ const formatMessageTime = (dateString: string): string => {
 interface MessageItemProps {
   message: Message;
   onRegenerate?: (messageId: number) => void;
-  onEditStart?: (message: Message) => void;
+  onEditStart?: (message: Message, isTranslated?: boolean) => void;
   onDelete?: (messageId: number) => void;
   showThinking: Record<number, boolean>;
   onToggleThinking?: (messageId: number) => void;
@@ -374,7 +374,18 @@ const MessageItem = memo(({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onEditStart(message);
+                // Determine if we're viewing the translated version
+                let isViewingTranslated = false;
+                if (message.translated_content) {
+                  if (message.role === 'assistant') {
+                    // Assistant: by default shows translated, showOriginal toggles to content
+                    isViewingTranslated = !showOriginal;
+                  } else {
+                    // User: by default shows original content, showOriginal toggles to translated
+                    isViewingTranslated = showOriginal;
+                  }
+                }
+                onEditStart(message, isViewingTranslated);
               }}
               className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition"
               title="Редактировать"
@@ -454,6 +465,8 @@ const MessageList: React.FC<MessageListProps> = ({
   
   // Modal editing state (lifted from MessageItem)
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  // Track whether we're editing the translated content (true) or original content (false)
+  const [editingTranslated, setEditingTranslated] = useState(false);
   
   const visibleLimit = visibleLimitProp ?? getVisibleMessageLimit();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -476,8 +489,9 @@ const MessageList: React.FC<MessageListProps> = ({
   }, []);
 
   // Modal editing handlers
-  const handleEditStart = useCallback((message: Message) => {
+  const handleEditStart = useCallback((message: Message, isTranslated?: boolean) => {
     setEditingMessage(message);
+    setEditingTranslated(!!isTranslated);
   }, []);
 
   const handleEditCancel = useCallback(() => {
@@ -488,12 +502,22 @@ const MessageList: React.FC<MessageListProps> = ({
     if (onEdit) {
       const msg = messages.find(m => m.id === messageId);
       if (msg) {
-        const translatedContent = msg.translated_content !== null ? msg.translated_content : undefined;
-        onEdit(messageId, content, translatedContent);
+        // Determine which field was edited and pass the other for context
+        let newContent = content;
+        let otherContent: string | undefined;
+        if (editingTranslated) {
+          // User edited translated_content; pass original content as otherContent
+          otherContent = msg.content;
+        } else {
+          // User edited content; pass translated_content as otherContent
+          otherContent = msg.translated_content !== null ? msg.translated_content : undefined;
+        }
+        onEdit(messageId, newContent, otherContent, editingTranslated);
       }
     }
     setEditingMessage(null);
-  }, [onEdit, messages]);
+    setEditingTranslated(false);
+  }, [onEdit, messages, editingTranslated]);
 
   const messageToBlock = useMemo(() => {
     const map = new Map<number, ChatBlockWithParsedIds>();
@@ -714,7 +738,7 @@ const MessageList: React.FC<MessageListProps> = ({
         />
       );
     }
-  }, [expandedBlockMessages, lastAssistantIndex, translationEnabled, isSelectionMode, selectionStart, selectionEnd, onEditBlock, onToggleBlockCompression, onDeleteBlock, handleExpandBlock, handleCollapseBlock, handleEditStart, onRegenerate, onDelete, showThinking, onToggleThinking, translatingMessageId, onTranslate, handleSelectionClick]);
+  }, [expandedBlockMessages, lastAssistantIndex, translationEnabled, isSelectionMode, selectionStart, selectionEnd, onEditBlock, onToggleBlockCompression, onDeleteBlock, handleExpandBlock, handleCollapseBlock, handleEditStart, onRegenerate, onDelete, showThinking, onToggleThinking, translatingMessageId, onTranslate, handleSelectionClick, editingTranslated]);
 
   const hasMoreMessages = totalItemCount > displayCount;
 
@@ -787,7 +811,7 @@ const MessageList: React.FC<MessageListProps> = ({
     {editingMessage && (
       <MessageEditModal
         messageId={editingMessage.id}
-        content={editingMessage.content}
+        content={editingTranslated ? (editingMessage.translated_content || editingMessage.content) : editingMessage.content}
         onSave={handleEditSave}
         onCancel={handleEditCancel}
       />

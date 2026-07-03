@@ -31,6 +31,9 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   const [displayText, setDisplayText] = useState<string>('');
   const [status, setStatus] = useState<'translating' | 'error' | 'done'>('translating');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [hasReceivedToken, setHasReceivedToken] = useState(false);
+  // Фаза "размышления" — модель генерирует reasoning токены (клиент их не видит)
+  const [isThinking, setIsThinking] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const onCompleteRef = useRef(onComplete);
   const translationContainerRef = useRef<HTMLDivElement>(null);
@@ -91,6 +94,25 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const apiBase = (import.meta as any).env?.VITE_API_URL || window.location.origin;
 
+
+    // LLM модели с размышлениями (DeepSeek R1 и др.) могут долго генерировать
+    // reasoning токены, которые сервер фильтрует. Клиент видит тишину.
+    // Таймаут 120с — достаточно для даже самых медленных моделей.
+    const timeoutId = setTimeout(() => {
+      if (!hasReceivedToken && status === 'translating') {
+        setErrorMessage('Перевод не был получен (таймаут). Использован оригинальный текст.');
+        setStatus('error');
+        controller.abort();
+      }
+    }, 120000);
+
+    // Через 3с покажем индикатор "размышления" если токены ещё не пришли
+    const thinkingId = setTimeout(() => {
+      if (!hasReceivedToken) {
+        setIsThinking(true);
+      }
+    }, 3000);
+
     fetch(`${apiBase}/api/translate/stream`, {
       method: 'POST',
       headers: {
@@ -130,6 +152,10 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
                   return;
                 }
                 if (data.token) {
+                  setHasReceivedToken(true);
+                  setIsThinking(false);
+                  clearTimeout(timeoutId);
+                  clearTimeout(thinkingId);
                   setDisplayText((prev) => prev + data.token);
                 }
               } catch {
@@ -142,11 +168,15 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
       })
       .catch((err) => {
         if (err.name === 'AbortError') return;
+        clearTimeout(timeoutId);
+        clearTimeout(thinkingId);
         setErrorMessage(err.message || 'Ошибка перевода');
         setStatus('error');
       });
 
     return () => {
+      clearTimeout(timeoutId);
+      clearTimeout(thinkingId);
       controller.abort();
       if (isRegisteredRef.current) {
         activeTranslations.delete(translationKey);
@@ -219,7 +249,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
           {status === 'error' && (
             <p className="text-sm text-red-400">{errorMessage}</p>
           )}
-          {status === 'translating' && !displayText && (
+          {status === 'translating' && !displayText && !isThinking && (
             <div className="flex items-center gap-2 text-gray-500">
               <div className="flex gap-1">
                 <span className="animate-bounce" style={{ animationDelay: '0ms' }}>●</span>
@@ -227,6 +257,16 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
                 <span className="animate-bounce" style={{ animationDelay: '300ms' }}>●</span>
               </div>
               <span className="text-xs">Перевод...</span>
+            </div>
+          )}
+          {status === 'translating' && !displayText && isThinking && (
+            <div className="flex items-center gap-2 text-amber-400">
+              <div className="flex gap-1">
+                <span className="animate-pulse" style={{ animationDelay: '0ms' }}>💭</span>
+                <span className="animate-pulse" style={{ animationDelay: '200ms' }}>💭</span>
+                <span className="animate-pulse" style={{ animationDelay: '400ms' }}>💭</span>
+              </div>
+              <span className="text-xs">Модель размышляет (reasoning)...</span>
             </div>
           )}
         </div>

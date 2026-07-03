@@ -119,7 +119,12 @@ export class LlmTranslator extends BaseTranslator {
         });
 
         const completion = result as any;
-        const translatedText = completion.choices?.[0]?.message?.content || text;
+        let translatedText = completion.choices?.[0]?.message?.content || text;
+
+        // Очистка от <thinking>...</thinking> блоков у моделей с размышлениями (DeepSeek R1 и др.)
+        translatedText = translatedText.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+        // Также удаляем голые reasoning артефакты типа <thought>...</thought>
+        translatedText = translatedText.replace(/<thought>[\s\S]*?<\/thought>/gi, '');
 
         return {
           text: translatedText,
@@ -169,13 +174,24 @@ export class LlmTranslator extends BaseTranslator {
       const stream = result as AsyncIterable<any>;
 
       // Consume the stream
+      // Для моделей с размышлениями (DeepSeek R1 и др.) нужно фильтровать reasoning_content
       for await (const chunk of stream) {
-        const token = chunk.choices?.[0]?.delta?.content || '';
+        const delta = chunk.choices?.[0]?.delta;
+        // Если чанк содержит reasoning_content, пропускаем его (это размышления модели)
+        if (delta && 'reasoning_content' in delta && delta.reasoning_content) {
+          continue;
+        }
+        const token = delta?.content || '';
         if (token) {
           fullText += token;
           yield { token };
         }
       }
+
+      // Очистка final text от <thinking>...</thinking> блоков на случай,
+      // если они всё же попали в content (некоторые модели смешивают)
+      fullText = fullText.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+      fullText = fullText.replace(/<thought>[\s\S]*?<\/thought>/gi, '');
 
       // Final chunk with full text
       yield { token: '', done: true, fullText };

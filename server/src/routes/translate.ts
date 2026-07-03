@@ -224,7 +224,7 @@ router.post('/stream', authenticate, async (req: AuthenticatedRequest, res: Resp
     // Inject the server's LLMClient so it uses the active connection
     const llmTranslator = new LlmTranslator({
       systemPrompt: settings.llmSystemPrompt,
-      timeout: 30000,
+      timeout: 300000, // 5 минут — модели с reasoning могут долго думать
     });
     
      // Inject the LLMClient from the server's llmService
@@ -258,16 +258,29 @@ router.post('/stream', authenticate, async (req: AuthenticatedRequest, res: Resp
       targetLanguage: targetLang,
     });
 
+    // Keep-alive таймер: отправляет SSE комментарии каждую секунду
+    // чтобы HTTP-соединение не прерывалось во время длинных пауз
+    // (например, когда модель генерирует reasoning токены)
+    let lastActivity = Date.now();
+    const keepAliveTimer = setInterval(() => {
+      if (!res.writableEnded && Date.now() - lastActivity > 5000) {
+        // SSE comment — игнорируется клиентом, но держит соединение живым
+        try { res.write(': keepalive\n\n'); } catch { /* ignore */ }
+      }
+    }, 1000);
+
     try {
       for await (const chunk of stream) {
         if (res.writableEnded) break; // Client disconnected
 
         if (chunk.done && chunk.fullText !== undefined) {
           fullText = chunk.fullText;
+          lastActivity = Date.now();
           res.write(`data: ${JSON.stringify({ done: true, fullText })}\n\n`);
           res.end();
         } else if (chunk.token) {
           fullText += chunk.token;
+          lastActivity = Date.now();
           res.write(`data: ${JSON.stringify({ token: chunk.token })}\n\n`);
         }
       }
@@ -283,6 +296,8 @@ router.post('/stream', authenticate, async (req: AuthenticatedRequest, res: Resp
         res.end();
       }
       console.error('[TranslateRoute] Stream error:', streamError);
+    } finally {
+      clearInterval(keepAliveTimer);
     }
   } catch (error) {
     if (!res.headersSent) {

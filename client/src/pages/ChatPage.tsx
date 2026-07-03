@@ -142,6 +142,14 @@ const ChatPage: React.FC = () => {
   // Ref для messageId текущего стримингового перевода
   const streamingTranslationMessageIdRef = useRef<number | null>(null);
   
+  // Ref для кастомного callback при редактировании сообщения
+  // Позволяет переопределить стандартный onComplete чтобы сохранить результат в правильное поле
+  const editTranslationCallbackRef = useRef<{
+    messageId: number;
+    targetField: 'content' | 'translated_content';
+    onComplete: (translatedText: string) => Promise<void>;
+  } | null>(null);
+  
   // Compression method setting
   const [compressionMethod, setCompressionMethod] = useState<CompressionMethod>('fixed');
   
@@ -466,8 +474,9 @@ const ChatPage: React.FC = () => {
 
       // Автоматический запуск LLM-перевода для сообщения пользователя, если провайдер LLM
       // ВАЖНО: Запускаем ПОСЛЕ всех setState чтобы модалка открылась сразу
-      // Проверяем ТРИ условия: не переведено, не переводится сейчас, и есть messageId
-      if (translationEnabled && translationProvider === 'llm' && newMessageId) {
+      // Проверяем ЧЕТЫРЕ условия: не переведено, не переводится сейчас, есть messageId,
+      // и длина сообщения >= 3 символов (для очень коротких сообщений LLM-перевод нецелесообразен)
+      if (translationEnabled && translationProvider === 'llm' && newMessageId && messageToSend.length >= 3) {
         const isAlreadyTranslated = translatedMessagesRef.current.has(newMessageId);
         const isCurrentlyTranslating = translatingMessagesRef.current.has(newMessageId);
         
@@ -535,7 +544,7 @@ const ChatPage: React.FC = () => {
     }
   };
 
-  const handleEditMessage = async (messageId: number, newContent: string, translatedContent?: string) => {
+  const handleEditMessage = async (messageId: number, newContent: string, otherContent?: string, editingTranslated?: boolean) => {
     if (!chatId) return;
 
     try {
@@ -543,12 +552,133 @@ const ChatPage: React.FC = () => {
       const message = messages.find((m) => m.id === messageId);
       if (!message) return;
 
-      // Используем новый endpoint для двунаправленного перевода
+      // Для LLM провайдера открываем модальное окно перевода (клиентский стриминг)
+      // чтобы пользователь видел процесс перевода в реальном времени
+      if (translationProvider === 'llm' && newContent.length >= 3) {
+        const displayLang = (window as any).__translationDisplayLang || 'ru';
+
+        // Модель данных:
+        // User:      content = DisplayLang (RU),  translated_content = EN
+        // Assistant: content = EN,                translated_content = DisplayLang (RU)
+        //
+        // Пользователь всегда видит свой язык по умолчанию:
+        // User:      видит content (RU)
+        // Assistant: видит translated_content (RU)
+        //
+        // editingTranslated=true  → редактируем translated_content
+        // editingTranslated=false → редактируем content
+
+        const isUser = message.role === 'user';
+
+        // Определяем:
+        // 1) Какое поле было отредактировано (save this immediately)
+        // 2) Какое поле нужно заполнить результатом перевода
+        // 3) Направление перевода
+
+        let editedField: 'content' | 'translated_content';
+        let targetField: 'content' | 'translated_content';
+        let sourceLang: string;
+        let targetLang: string;
+
+        if (editingTranslated) {
+          // Редактируем translated_content
+          editedField = 'translated_content';
+          targetField = 'content';
+
+          if (isUser) {
+            // User edited translated_content (EN) → translate to content (DisplayLang)
+            sourceLang = 'en';
+            targetLang = displayLang;
+          } else {
+            // Assistant edited translated_content (DisplayLang) → translate to content (EN)
+            sourceLang = displayLang;
+            targetLang = 'en';
+          }
+        } else {
+          // Редактируем content
+          editedField = 'content';
+          targetField = 'translated_content';
+
+          if (isUser) {
+            // User edited content (DisplayLang) → translate to translated_content (EN)
+            sourceLang = displayLang;
+            targetLang = 'en';
+          } else {
+            // Assistant edited content (EN) → translate to translated_content (DisplayLang)
+            sourceLang = 'en';
+            targetLang = displayLang;
+          }
+        }
+
+        // Сохраняем отредактированное поле сразу
+        await chatsApi.updateMessage(parseInt(chatId), messageId, {
+          [editedField]: newContent,
+        });
+
+        translatingMessagesRef.current.add(messageId);
+
+        // Создаем inline-обработчик который сохраняет результат в ПРАВИЛЬНОЕ поле
+        const handleEditTranslationComplete = async (translatedText: string) => {
+          try {
+            await chatsApi.updateMessage(parseInt(chatId), messageId, {
+              [targetField]: translatedText,
+            });
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === messageId ? { ...m, [targetField]: translatedText } : m
+              )
+            );
+          } catch (err: any) {
+            console.error('Error saving edit translation:', err);
+          } finally {
+            translatedMessagesRef.current.add(messageId);
+            translatingMessagesRef.current.delete(messageId);
+            // Закрыть модалку (сбросить оба состояния на случай неясно какое использовалось)
+            setUserMessageTranslation(null);
+            setLlmResponseTranslation(null);
+            setTimeout(async () => {
+              await syncContextStats();
+            }, 300);
+          }
+        };
+
+        // Устанавливаем кастомный callback для редактирования
+        // чтобы результат перевода был сохранен в ПРАВИЛЬНОЕ поле (content или translated_content)
+        editTranslationCallbackRef.current = {
+          messageId,
+          targetField,
+          onComplete: handleEditTranslationComplete,
+        };
+
+        // Открываем модалку перевода
+        // Используем setLlmResponseTranslation для sourceLang='en' (EN→DisplayLang)
+        // и setUserMessageTranslation для sourceLang≠'en' (DisplayLang→EN)
+        if (sourceLang === 'en') {
+          setLlmResponseTranslation({
+            text: newContent,
+            sourceLang,
+            targetLang,
+            messageId,
+          });
+        } else {
+          setUserMessageTranslation({
+            text: newContent,
+            sourceLang,
+            targetLang,
+            messageId,
+          });
+        }
+
+        await fetchMessages(false);
+        return;
+      }
+
+      // Для не-LLM провайдеров используем серверный перевод (один HTTP запрос)
       setTranslatingMessageId(messageId);
       try {
         const response = await chatsApi.translateMessageBidirectional(parseInt(chatId), messageId, {
           content: newContent,
-          translated_content: translatedContent,
+          translated_content: otherContent,
         });
 
         // Обновляем сообщение в списке локально
@@ -661,6 +791,15 @@ const ChatPage: React.FC = () => {
 
   // LLM translation callbacks - обрабатывают оба типа переводов
   const handleUserMessageTranslationComplete = async (translatedText: string) => {
+    // Проверяем, есть ли кастомный callback для редактирования
+    if (editTranslationCallbackRef.current && userMessageTranslation && editTranslationCallbackRef.current.messageId === userMessageTranslation.messageId) {
+      const callback = editTranslationCallbackRef.current;
+      editTranslationCallbackRef.current = null;
+      await callback.onComplete(translatedText);
+      setUserMessageTranslation(null);
+      return;
+    }
+
     if (!userMessageTranslation || !chatId) return;
     const { messageId } = userMessageTranslation;
 
@@ -674,7 +813,6 @@ const ChatPage: React.FC = () => {
           m.id === messageId ? { ...m, translated_content: translatedText } : m
         )
       );
-      await syncContextStats();
     } catch (err: any) {
       console.error('Error saving LLM translation:', err);
     } finally {
@@ -684,6 +822,12 @@ const ChatPage: React.FC = () => {
       translatingMessagesRef.current.delete(messageId);
       
       setUserMessageTranslation(null);
+      
+      // Синхронизация контекста с задержкой чтобы сервер успел пересчитать токены
+      // (избегает гонки: клиент запрашивает stats до обновления сервером контекстного окна)
+      setTimeout(async () => {
+        await syncContextStats();
+      }, 300);
       
       // Проверяем, есть ли ожидающий перевод ответа LLM в очереди
       if (pendingLlmResponseTranslationRef.current) {
@@ -698,6 +842,15 @@ const ChatPage: React.FC = () => {
   };
 
   const handleLlmResponseTranslationComplete = async (translatedText: string) => {
+    // Проверяем, есть ли кастомный callback для редактирования
+    if (editTranslationCallbackRef.current && llmResponseTranslation && editTranslationCallbackRef.current.messageId === llmResponseTranslation.messageId) {
+      const callback = editTranslationCallbackRef.current;
+      editTranslationCallbackRef.current = null;
+      await callback.onComplete(translatedText);
+      setLlmResponseTranslation(null);
+      return;
+    }
+
     if (!llmResponseTranslation || !chatId) return;
     const { messageId } = llmResponseTranslation;
 
@@ -711,7 +864,6 @@ const ChatPage: React.FC = () => {
           m.id === messageId ? { ...m, translated_content: translatedText } : m
         )
       );
-      await syncContextStats();
     } catch (err: any) {
       console.error('Error saving LLM translation:', err);
     } finally {
@@ -721,6 +873,11 @@ const ChatPage: React.FC = () => {
       translatingMessagesRef.current.delete(messageId);
       
       setLlmResponseTranslation(null);
+      
+      // Синхронизация контекста с задержкой чтобы сервер успел пересчитать токены
+      setTimeout(async () => {
+        await syncContextStats();
+      }, 300);
     }
   };
 
@@ -802,7 +959,11 @@ const ChatPage: React.FC = () => {
     
     setStreamingTranslation(null);
     streamingTranslationMessageIdRef.current = null;
-    await syncContextStats();
+    
+    // Синхронизация контекста с задержкой чтобы сервер успел пересчитать токены
+    setTimeout(async () => {
+      await syncContextStats();
+    }, 300);
   }, [chatId, syncContextStats]);
 
   const handleSelectChat = (chat: Chat) => {
