@@ -107,6 +107,12 @@ export class LlmTranslator extends BaseTranslator {
       return await this.requestWithRetry(async () => {
         const client = this.getLlmClient();
 
+        // Для моделей с Reasoning нужно больше токенов — модель тратит часть на reasoning_content
+        const estimatedTokens = Math.max(text.length * 2, 1024);
+        const maxTokens = Math.max(estimatedTokens, 8192);
+        
+        console.log(`[LlmTranslator.translate] max_tokens: ${maxTokens}, text length: ${text.length}`);
+
         const result = await client.chatCompletionsCreate({
           model: this.model,
           messages: [
@@ -114,12 +120,19 @@ export class LlmTranslator extends BaseTranslator {
             { role: 'user', content: text },
           ],
           temperature: 0.3,
-          max_tokens: Math.min(text.length * 2, 4096),
+          max_tokens: maxTokens,
           stream: false,
         });
 
         const completion = result as any;
-        let translatedText = completion.choices?.[0]?.message?.content || text;
+        const message = completion.choices?.[0]?.message as any;
+        
+        // Логирование для отладки
+        console.log(`[LlmTranslator.translate] Response: content length=${message?.content?.length || 0}, reasoning_content length=${message?.reasoning_content?.length || 0}`);
+        
+        // Для моделей с Reasoning: если content пустой, используем reasoning_content
+        // Некоторые модели (DeepSeek R1 и др.) помещают весь ответ в reasoning_content
+        let translatedText = message?.content || message?.reasoning_content || text;
 
         // Очистка от <thinking>...</thinking> блоков у моделей с размышлениями (DeepSeek R1 и др.)
         translatedText = translatedText.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
@@ -145,11 +158,12 @@ export class LlmTranslator extends BaseTranslator {
 
   /**
    * Stream translation using LLM — returns an async iterator of tokens
+   * Для моделей с Reasoning: reasoning_content возвращается с флагом isReasoning
    */
   async *translateStream(
     text: string,
     options: TranslationOptions
-  ): AsyncGenerator<{ token: string; done?: boolean; fullText?: string }, void, undefined> {
+  ): AsyncGenerator<{ token: string; done?: boolean; fullText?: string; isReasoning?: boolean }, void, undefined> {
     this.validateInput(text, options.targetLanguage);
 
     const sourceLang = options.sourceLanguage || 'auto';
@@ -160,6 +174,13 @@ export class LlmTranslator extends BaseTranslator {
       const client = this.getLlmClient();
       let fullText = '';
 
+      // Для моделей с Reasoning нужно больше токенов — модель тратит часть на reasoning_content
+      // Минимум 8192 чтобы хватило и на мысли, и на перевод
+      const estimatedTokens = Math.max(text.length * 2, 1024);
+      const maxTokens = Math.max(estimatedTokens, 8192);
+      
+      console.log(`[LlmTranslator.translateStream] max_tokens: ${maxTokens}, text length: ${text.length}`);
+      
       const result = await client.chatCompletionsCreate({
         model: this.model,
         messages: [
@@ -167,26 +188,37 @@ export class LlmTranslator extends BaseTranslator {
           { role: 'user', content: text },
         ],
         temperature: 0.3,
-        max_tokens: Math.min(text.length * 2, 4096),
+        max_tokens: maxTokens,
         stream: true,
       });
 
       const stream = result as AsyncIterable<any>;
+      let reasoningTokenCount = 0;
+      let contentTokenCount = 0;
+
+      console.log(`[LlmTranslator.translateStream] Starting stream consumption...`);
 
       // Consume the stream
-      // Для моделей с размышлениями (DeepSeek R1 и др.) нужно фильтровать reasoning_content
+      // Для моделей с размышлениями (DeepSeek R1 и др.) возвращаем reasoning_content
       for await (const chunk of stream) {
         const delta = chunk.choices?.[0]?.delta;
-        // Если чанк содержит reasoning_content, пропускаем его (это размышления модели)
+        
+        // Если чанк содержит reasoning_content — возвращаем его с флагом isReasoning
         if (delta && 'reasoning_content' in delta && delta.reasoning_content) {
+          reasoningTokenCount++;
+          yield { token: delta.reasoning_content, isReasoning: true };
           continue;
         }
+        
         const token = delta?.content || '';
         if (token) {
+          contentTokenCount++;
           fullText += token;
           yield { token };
         }
       }
+
+      console.log(`[LlmTranslator.translateStream] Stream completed: ${reasoningTokenCount} reasoning tokens, ${contentTokenCount} content tokens`);
 
       // Очистка final text от <thinking>...</thinking> блоков на случай,
       // если они всё же попали в content (некоторые модели смешивают)

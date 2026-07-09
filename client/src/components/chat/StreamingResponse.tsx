@@ -12,7 +12,12 @@ interface StreamingResponseProps {
   onToggleThinking?: () => void;  // Callback для переключения состояния
   onTranslationStart?: (data: { from: string; to: string; text: string }) => void;
   onTranslationToken?: (token: string) => void;
+  onTranslationReasoningToken?: (token: string) => void;
   onTranslationDone?: (translatedText: string) => void;
+  onUserTranslationStart?: (data: { from: string; to: string; text: string }) => void;
+  onUserTranslationToken?: (token: string) => void;
+  onUserTranslationReasoningToken?: (token: string) => void;
+  onUserTranslationDone?: (translatedText: string) => void;
   onMessageId?: (messageId: number) => void;
 }
 
@@ -25,7 +30,12 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   onToggleThinking,
   onTranslationStart,
   onTranslationToken,
+  onTranslationReasoningToken,
   onTranslationDone,
+  onUserTranslationStart,
+  onUserTranslationToken,
+  onUserTranslationReasoningToken,
+  onUserTranslationDone,
   onMessageId,
 }) => {
   const [isStreaming, setIsStreaming] = useState(true);
@@ -66,8 +76,18 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   onTranslationStartRef.current = onTranslationStart;
   const onTranslationTokenRef = useRef(onTranslationToken);
   onTranslationTokenRef.current = onTranslationToken;
+  const onTranslationReasoningTokenRef = useRef(onTranslationReasoningToken);
+  onTranslationReasoningTokenRef.current = onTranslationReasoningToken;
   const onTranslationDoneRef = useRef(onTranslationDone);
   onTranslationDoneRef.current = onTranslationDone;
+  const onUserTranslationStartRef = useRef(onUserTranslationStart);
+  onUserTranslationStartRef.current = onUserTranslationStart;
+  const onUserTranslationTokenRef = useRef(onUserTranslationToken);
+  onUserTranslationTokenRef.current = onUserTranslationToken;
+  const onUserTranslationReasoningTokenRef = useRef(onUserTranslationReasoningToken);
+  onUserTranslationReasoningTokenRef.current = onUserTranslationReasoningToken;
+  const onUserTranslationDoneRef = useRef(onUserTranslationDone);
+  onUserTranslationDoneRef.current = onUserTranslationDone;
   const onMessageIdRef = useRef(onMessageId);
   onMessageIdRef.current = onMessageId;
   
@@ -176,6 +196,71 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
           translatedTextRef.current = (translatedTextRef.current || '') + data.token;
           if (onTranslationTokenRef.current) {
             onTranslationTokenRef.current(data.token);
+          }
+        }
+      } catch (err) {
+        // Ignore parse errors
+      }
+    });
+
+    // Reasoning токены при переводе (мысли модели)
+    eventSource.addEventListener('translation_reasoning_token', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.token) {
+          if (onTranslationReasoningTokenRef.current) {
+            onTranslationReasoningTokenRef.current(data.token);
+          }
+        }
+      } catch (err) {
+        // Ignore parse errors
+      }
+    });
+
+    // === События перевода сообщения пользователя ===
+    eventSource.addEventListener('user_translation_start', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (onUserTranslationStartRef.current) {
+          onUserTranslationStartRef.current({ from: data.from, to: data.to, text: data.text });
+        }
+      } catch (err) {
+        // Ignore parse errors
+      }
+    });
+
+    eventSource.addEventListener('user_translation_token', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.token) {
+          if (onUserTranslationTokenRef.current) {
+            onUserTranslationTokenRef.current(data.token);
+          }
+        }
+      } catch (err) {
+        // Ignore parse errors
+      }
+    });
+
+    eventSource.addEventListener('user_translation_reasoning_token', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.token) {
+          if (onUserTranslationReasoningTokenRef.current) {
+            onUserTranslationReasoningTokenRef.current(data.token);
+          }
+        }
+      } catch (err) {
+        // Ignore parse errors
+      }
+    });
+
+    eventSource.addEventListener('user_translation_done', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.translatedText) {
+          if (onUserTranslationDoneRef.current) {
+            onUserTranslationDoneRef.current(data.translatedText);
           }
         }
       } catch (err) {

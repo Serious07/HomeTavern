@@ -220,6 +220,8 @@ router.post('/stream', authenticate, async (req: AuthenticatedRequest, res: Resp
       });
     }
 
+    console.log(`[TranslateRoute] Starting streaming translation: "${text.substring(0, 50)}..." ${sourceLang} -> ${targetLang}`);
+
     // Create LLM translator for streaming
     // Inject the server's LLMClient so it uses the active connection
     const llmTranslator = new LlmTranslator({
@@ -232,6 +234,7 @@ router.post('/stream', authenticate, async (req: AuthenticatedRequest, res: Resp
      try {
        const connection = llmService.getActiveConnection(userId);
        if (connection) {
+         console.log(`[TranslateRoute] Found active connection: ${connection.base_url}`);
          const { LLMClient } = require('llm-client');
          const injectedClient = new LLMClient({
            baseURL: connection.base_url,
@@ -273,15 +276,20 @@ router.post('/stream', authenticate, async (req: AuthenticatedRequest, res: Resp
       for await (const chunk of stream) {
         if (res.writableEnded) break; // Client disconnected
 
-        if (chunk.done && chunk.fullText !== undefined) {
-          fullText = chunk.fullText;
+        const c = chunk as any;
+        if (c.done && c.fullText !== undefined) {
+          fullText = c.fullText;
           lastActivity = Date.now();
           res.write(`data: ${JSON.stringify({ done: true, fullText })}\n\n`);
           res.end();
-        } else if (chunk.token) {
-          fullText += chunk.token;
+        } else if (c.isReasoning) {
+          // Reasoning токен (мысли модели) — отправляем отдельно
           lastActivity = Date.now();
-          res.write(`data: ${JSON.stringify({ token: chunk.token })}\n\n`);
+          res.write(`data: ${JSON.stringify({ reasoningToken: c.token })}\n\n`);
+        } else if (c.token) {
+          fullText += c.token;
+          lastActivity = Date.now();
+          res.write(`data: ${JSON.stringify({ token: c.token })}\n\n`);
         }
       }
 

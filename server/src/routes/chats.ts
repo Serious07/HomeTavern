@@ -125,20 +125,103 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     let messageInEnglish: string;
 
     if (translationEnabled) {
-      messageText = lastUserMessage.translated_content || lastUserMessage.content;
-      console.log('[ChatsRoute] Using message text (with translation):', messageText);
-      const detectedLang = await detectLanguage(messageText);
+      // Используем оригинальный контент для определения языка и стриминга перевода
+      // translated_content может быть уже сохранён из messages.ts, но нам нужен оригинал для UI
+      const originalContent = lastUserMessage.content;
+      // Для LLM используем уже сохранённый перевод (если есть), чтобы не переводить дважды
+      messageInEnglish = lastUserMessage.translated_content || originalContent;
+      
+      console.log('[ChatsRoute] Original content:', originalContent);
+      console.log('[ChatsRoute] Translated content (for LLM):', messageInEnglish);
+      
+      const detectedLang = await detectLanguage(originalContent);
       console.log('[ChatsRoute] Detected language:', detectedLang);
-      messageInEnglish = messageText;
 
       if (detectedLang !== 'en') {
-        sendSSEEvent(res, 'translation', {
-          type: 'user_message_translation',
+        // Отправляем событие начала перевода сообщения пользователя (для UI)
+        sendSSEEvent(res, 'user_translation_start', {
           from: detectedLang,
-          to: 'en'
+          to: 'en',
+          text: originalContent
         });
-        messageInEnglish = await translateForUser(userId, messageText, detectedLang, 'en');
-        console.log(`Translated user message: "${messageText}" -> "${messageInEnglish}"`);
+        
+        // Для LLM провайдера - стримим перевод сообщения пользователя (для UI)
+        if (userSettings.provider === 'llm') {
+          const { LlmTranslator } = require('translation-library');
+          const llmTranslator = new LlmTranslator({
+            systemPrompt: userSettings.llmSystemPrompt,
+            timeout: 300000,
+          });
+          
+          // Инжектируем LLMClient из llmService
+          try {
+            const connection = llmService.getActiveConnection(userId);
+            if (connection) {
+              const { LLMClient } = require('llm-client');
+              const injectedClient = new LLMClient({
+                baseURL: connection.base_url,
+                apiKey: connection.api_key_decrypted,
+                timeout: 900000,
+              });
+              llmTranslator.setLlmClient(injectedClient);
+            }
+          } catch (error) {
+            console.error('[ChatsRoute] Error injecting LLMClient for user message translation:', error);
+          }
+          
+          // Очищаем оригинальный контент от thinking тегов перед отправкой на перевод
+          const cleanContent = stripThoughtTags(originalContent);
+          
+          // Стримим перевод сообщения пользователя (для UI)
+          const userTranslationStream = llmTranslator.translateStream(cleanContent, {
+            sourceLanguage: detectedLang,
+            targetLanguage: 'en',
+          });
+          
+          let userTranslatedText = '';
+          try {
+            for await (const chunk of userTranslationStream) {
+              if (res.writableEnded) break;
+              
+              const c = chunk as any;
+              if (c.done && c.fullText !== undefined) {
+                userTranslatedText = c.fullText;
+                sendSSEEvent(res, 'user_translation_done', { translatedText: userTranslatedText });
+              } else if (c.isReasoning) {
+                // Reasoning токен (мысли модели при переводе) — отправляем отдельно
+                sendSSEEvent(res, 'user_translation_reasoning_token', { token: c.token });
+              } else if (c.token) {
+                userTranslatedText += c.token;
+                sendSSEEvent(res, 'user_translation_token', { token: c.token });
+              }
+            }
+            
+            // Если стрим закончился без done сигнала
+            if (!userTranslatedText) {
+              userTranslatedText = originalContent;
+              sendSSEEvent(res, 'user_translation_done', { translatedText: userTranslatedText });
+            }
+          } catch (streamError) {
+            console.error('[ChatsRoute] User message translation stream error:', streamError);
+            userTranslatedText = originalContent;
+            sendSSEEvent(res, 'user_translation_done', { translatedText: userTranslatedText });
+          }
+          
+          // Сохраняем результат перевода в БД для последующего использования
+          if (userTranslatedText && userTranslatedText !== originalContent) {
+            messageRepository.updateMessage(lastUserMessage.id, {
+              translated_content: userTranslatedText,
+            });
+            // Обновляем messageInEnglish для использования в LLM
+            messageInEnglish = userTranslatedText;
+          }
+          console.log(`Streamed user translation for UI: "${originalContent}" -> "${userTranslatedText}"`);
+        } else {
+          // Для не-LLM провайдеров - переводим целиком (для UI)
+          const translatedForUI = await translateForUser(userId, originalContent, detectedLang, 'en');
+          sendSSEEvent(res, 'user_translation_done', { translatedText: translatedForUI });
+          console.log(`Translated user message for UI: "${originalContent}" -> "${translatedForUI}"`);
+        }
       } else {
         console.log('[ChatsRoute] Message is already in English, no translation needed');
       }
@@ -254,8 +337,12 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
             console.error('[ChatsRoute] Error injecting LLMClient for translation:', error);
           }
           
+          // Очищаем fullContent от thinking тегов перед отправкой на перевод
+          // Иначе модель при переводе тоже генерирует thinking в своём ответе
+          const cleanContent = stripThoughtTags(fullContent);
+          
           // Стримим перевод токенами
-          const translationStream = llmTranslator.translateStream(fullContent, {
+          const translationStream = llmTranslator.translateStream(cleanContent, {
             sourceLanguage: responseLang,
             targetLanguage: userSettings.displayLang,
           });
@@ -264,12 +351,16 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
             for await (const chunk of translationStream) {
               if (res.writableEnded) break;
               
-              if (chunk.done && chunk.fullText !== undefined) {
-                translatedText = chunk.fullText;
+              const c = chunk as any;
+              if (c.done && c.fullText !== undefined) {
+                translatedText = c.fullText;
                 sendSSEEvent(res, 'translation_done', { translatedText });
-              } else if (chunk.token) {
-                translatedText += chunk.token;
-                sendSSEEvent(res, 'translation_token', { token: chunk.token });
+              } else if (c.isReasoning) {
+                // Reasoning токен (мысли модели при переводе) — отправляем отдельно
+                sendSSEEvent(res, 'translation_reasoning_token', { token: c.token });
+              } else if (c.token) {
+                translatedText += c.token;
+                sendSSEEvent(res, 'translation_token', { token: c.token });
               }
             }
             

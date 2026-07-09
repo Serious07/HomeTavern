@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { STORAGE_KEYS } from '../constants/storage';
 
@@ -15,6 +15,7 @@ interface LLMTranslationModalProps {
   // Внешний стриминг (от SSE events)
   externalStream?: {
     displayText: string;
+    reasoningText?: string;
     status: 'translating' | 'done' | 'error';
     errorMessage?: string;
   };
@@ -32,11 +33,15 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   const [status, setStatus] = useState<'translating' | 'error' | 'done'>('translating');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [hasReceivedToken, setHasReceivedToken] = useState(false);
-  // Фаза "размышления" — модель генерирует reasoning токены (клиент их не видит)
+  // Reasoning токены (мысли модели) — отображаются в отдельной секции
+  const [reasoningText, setReasoningText] = useState<string>('');
+  const [isReasoningCollapsed, setIsReasoningCollapsed] = useState(false);
+  // Фаза "размышления" — показывается пока не пришли первые токены
   const [isThinking, setIsThinking] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const onCompleteRef = useRef(onComplete);
   const translationContainerRef = useRef<HTMLDivElement>(null);
+  const reasoningContainerRef = useRef<HTMLDivElement>(null);
   onCompleteRef.current = onComplete;
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
@@ -44,6 +49,116 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   const isRegisteredRef = useRef(false);
   // Для отслеживания внешнего режима
   const isExternalMode = !!externalStream;
+
+  // ─── Thinking tag filtering ───────────────────────────────────────────────
+  // Некоторые модели (Qwen3 и др.) генерируют <thinking>...</thinking> прямо
+  // в content, а не через reasoning_content. Фильтруем на лету при стриминге.
+  const rawBufferRef = useRef<string>('');
+  const insideThinkingRef = useRef<boolean>(false);
+
+  // Partial tag prefixes to watch for (to avoid showing "<thi" in output)
+  const THINKING_OPEN_PARTIALS = ['<t', '<th', '<thi', '<thin', '<think', '<thinki', '<thinkin', '<thinking'];
+  const THINKING_CLOSE_PARTIALS = ['</', '</t', '</th', '</thi', '</thin', '</think', '</thinki', '</thinkin', '</thinking'];
+
+  /**
+   * Check if text ends with a partial opening/closing thinking tag.
+   * Returns the start index of the partial tag, or -1.
+   */
+  const findPartialTagAtEnd = (text: string, isInsideThinking: boolean): number => {
+    const partials = isInsideThinking ? THINKING_CLOSE_PARTIALS : THINKING_OPEN_PARTIALS;
+    for (const partial of partials) {
+      if (text.endsWith(partial)) {
+        return text.length - partial.length;
+      }
+    }
+    return -1;
+  };
+
+  /**
+   * Process incoming text chunk: split into reasoning (thinking tags) and content.
+   * Handles partial tags across chunks via buffering.
+   */
+  const processToken = useCallback((token: string) => {
+    rawBufferRef.current += token;
+    const buf = rawBufferRef.current;
+
+    let reasoningChunk = '';
+    let contentChunk = '';
+    let consumed = 0;
+
+    while (consumed < buf.length) {
+      if (insideThinkingRef.current) {
+        // Inside a <thinking> block — look for </thinking>
+        const closeIdx = buf.indexOf('</thinking>', consumed);
+        if (closeIdx !== -1) {
+          reasoningChunk += buf.slice(consumed, closeIdx);
+          consumed = closeIdx + '</thinking>'.length;
+          insideThinkingRef.current = false;
+        } else {
+          // No closing tag yet — check for partial close tag at end
+          const partialIdx = findPartialTagAtEnd(buf.slice(consumed), true);
+          if (partialIdx !== -1) {
+            // Buffer the partial tag, emit the rest as reasoning
+            reasoningChunk += buf.slice(consumed, consumed + partialIdx);
+            consumed = consumed + partialIdx;
+          } else {
+            // No partial tag — buffer everything as reasoning
+            reasoningChunk += buf.slice(consumed);
+            consumed = buf.length;
+          }
+          break; // Can't process further without the closing tag
+        }
+      } else {
+        // Outside thinking — look for <thinking>
+        const openIdx = buf.indexOf('<thinking>', consumed);
+        if (openIdx !== -1) {
+          contentChunk += buf.slice(consumed, openIdx);
+          consumed = openIdx + '<thinking>'.length;
+          insideThinkingRef.current = true;
+        } else {
+          // No opening tag — check for partial open tag at end
+          const partialIdx = findPartialTagAtEnd(buf.slice(consumed), false);
+          if (partialIdx !== -1) {
+            // Buffer the partial tag, emit the rest as content
+            contentChunk += buf.slice(consumed, consumed + partialIdx);
+            consumed = consumed + partialIdx;
+          } else {
+            // No partial tag — emit everything as content
+            contentChunk += buf.slice(consumed);
+            consumed = buf.length;
+          }
+          break; // Can't process further without the opening tag
+        }
+      }
+    }
+
+    // Keep unprocessed tail in buffer (partial tags waiting for completion)
+    rawBufferRef.current = buf.slice(consumed);
+
+    if (reasoningChunk) {
+      setReasoningText((prev) => prev + reasoningChunk);
+    }
+    if (contentChunk) {
+      setDisplayText((prev) => prev + contentChunk);
+    }
+  }, []);
+
+  /**
+   * Flush remaining buffer content when stream ends.
+   */
+  const flushBuffer = useCallback(() => {
+    const remaining = rawBufferRef.current;
+    if (!remaining) return;
+
+    if (insideThinkingRef.current) {
+      // Unclosed thinking tag — treat as reasoning
+      setReasoningText((prev) => prev + remaining);
+    } else {
+      setDisplayText((prev) => prev + remaining);
+    }
+    rawBufferRef.current = '';
+    insideThinkingRef.current = false;
+  }, []);
 
   const langNames: Record<string, string> = {
     en: 'English',
@@ -68,6 +183,10 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   useEffect(() => {
     if (externalStream) {
       setDisplayText(externalStream.displayText);
+      // Синхронизируем reasoningText из внешнего стрима (если есть)
+      if (externalStream.reasoningText !== undefined) {
+        setReasoningText(externalStream.reasoningText);
+      }
       setStatus(externalStream.status);
       if (externalStream.errorMessage) {
         setErrorMessage(externalStream.errorMessage);
@@ -143,20 +262,29 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
               try {
                 const data = JSON.parse(dataStr);
                 if (data.done) {
-                  const finalText = data.fullText || '';
-                  setDisplayText(finalText);
+                  // Flush any remaining buffered content
+                  flushBuffer();
                   setStatus('done');
                   completedTranslations.add(translationKey);
                   activeTranslations.delete(translationKey);
                   isRegisteredRef.current = false;
                   return;
                 }
+                // Reasoning токен (мысли модели) — накапливаем отдельно
+                if (data.reasoningToken) {
+                  setHasReceivedToken(true);
+                  setIsThinking(false);
+                  clearTimeout(timeoutId);
+                  clearTimeout(thinkingId);
+                  setReasoningText((prev) => prev + data.reasoningToken);
+                }
                 if (data.token) {
                   setHasReceivedToken(true);
                   setIsThinking(false);
                   clearTimeout(timeoutId);
                   clearTimeout(thinkingId);
-                  setDisplayText((prev) => prev + data.token);
+                  // Process token through thinking filter
+                  processToken(data.token);
                 }
               } catch {
                 // skip malformed json
@@ -183,7 +311,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
         isRegisteredRef.current = false;
       }
     };
-  }, [text, sourceLang, targetLang, translationKey, isExternalMode]);
+  }, [text, sourceLang, targetLang, translationKey, isExternalMode, processToken, flushBuffer]);
 
   // Автоматическое закрытие после завершения перевода
   useEffect(() => {
@@ -201,6 +329,13 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
       translationContainerRef.current.scrollTop = translationContainerRef.current.scrollHeight;
     }
   }, [displayText]);
+
+  // Автоматический скролл reasoning контейнера
+  useEffect(() => {
+    if (reasoningContainerRef.current && reasoningText) {
+      reasoningContainerRef.current.scrollTop = reasoningContainerRef.current.scrollHeight;
+    }
+  }, [reasoningText]);
 
   const handleCancel = () => {
     if (abortControllerRef.current) {
@@ -233,6 +368,30 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
           <p className="text-xs text-gray-500 mb-1">Оригинал:</p>
           <p className="text-sm text-gray-400 line-clamp-3">{text}</p>
         </div>
+
+        {/* Reasoning section (мысли модели) — показывается если есть reasoning токены */}
+        {reasoningText && (
+          <div className="mb-4 p-3 bg-amber-900/20 rounded-lg border border-amber-800/50">
+            <button
+              onClick={() => setIsReasoningCollapsed(!isReasoningCollapsed)}
+              className="flex items-center gap-2 w-full text-left"
+            >
+              <span className="text-amber-400 text-sm">💭</span>
+              <p className="text-xs text-amber-400 font-medium flex-1">Размышления модели</p>
+              <span className="text-xs text-amber-500">{isReasoningCollapsed ? '▶' : '▼'}</span>
+            </button>
+            {!isReasoningCollapsed && (
+              <div ref={reasoningContainerRef} className="mt-2 max-h-[150px] overflow-y-auto">
+                <p className="text-xs text-amber-200/70 whitespace-pre-wrap italic font-mono">
+                  {reasoningText}
+                  {status === 'translating' && (
+                    <span className="inline-block ml-1 text-amber-400 animate-pulse">▊</span>
+                  )}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Translation output */}
         <div ref={translationContainerRef} className="mb-4 p-3 bg-gray-900/50 rounded-lg border border-blue-800/50 min-h-[100px] max-h-[300px] overflow-y-auto">

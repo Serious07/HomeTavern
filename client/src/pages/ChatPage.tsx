@@ -135,12 +135,28 @@ const ChatPage: React.FC = () => {
     sourceLang: string;
     targetLang: string;
     displayText: string;
+    reasoningText: string;
+    status: 'translating' | 'done' | 'error';
+    errorMessage?: string;
+  } | null>(null);
+  
+  // Состояние для стриминга перевода сообщения пользователя через SSE
+  const [userStreamingTranslation, setUserStreamingTranslation] = useState<{
+    text: string;
+    sourceLang: string;
+    targetLang: string;
+    displayText: string;
+    reasoningText: string;
     status: 'translating' | 'done' | 'error';
     errorMessage?: string;
   } | null>(null);
   
   // Ref для messageId текущего стримингового перевода
   const streamingTranslationMessageIdRef = useRef<number | null>(null);
+  // Флаг: серверный стриминг перевода уже запущен (чтобы избежать дубля в handleStreamingComplete)
+  const streamingTranslationStartedRef = useRef<boolean>(false);
+  // Ref для messageId сообщения пользователя при стриминговом переводе
+  const userStreamingTranslationMessageIdRef = useRef<number | null>(null);
   
   // Ref для кастомного callback при редактировании сообщения
   // Позволяет переопределить стандартный onComplete чтобы сохранить результат в правильное поле
@@ -309,7 +325,10 @@ const ChatPage: React.FC = () => {
     const serverTranslation = message.translated_content;
     const hasServerTranslation = serverTranslation && serverTranslation.trim() !== '' && serverTranslation !== message.content;
     
-    if (translationEnabled && translationProvider === 'llm' && messageId && !hasServerTranslation) {
+    // Также проверяем флаг серверного стриминга перевода (предотвращает дубль)
+    const hasStreamingTranslation = streamingTranslationStartedRef.current;
+    
+    if (translationEnabled && translationProvider === 'llm' && messageId && !hasServerTranslation && !hasStreamingTranslation) {
       if (!translatedMessagesRef.current.has(messageId)) {
         translatedMessagesRef.current.add(messageId);
         const displayLang = (window as any).__translationDisplayLang || 'ru';
@@ -448,13 +467,10 @@ const ChatPage: React.FC = () => {
     
     try {
       // Отправляем сообщение на сервер
-      const response = await chatsApi.sendMessage(parseInt(chatId), {
+      await chatsApi.sendMessage(parseInt(chatId), {
         content: messageToSend,
         role: 'user',
       });
-      const newMessage = response.data;
-      const newMessageId = newMessage?.id;
-
       // Сбрасываем значение ввода
       currentInputRef.current = '';
 
@@ -472,25 +488,8 @@ const ChatPage: React.FC = () => {
       // Снимаем фокус во время стриминга
       setInputAutoFocus(false);
 
-      // Автоматический запуск LLM-перевода для сообщения пользователя, если провайдер LLM
-      // ВАЖНО: Запускаем ПОСЛЕ всех setState чтобы модалка открылась сразу
-      // Проверяем ЧЕТЫРЕ условия: не переведено, не переводится сейчас, есть messageId,
-      // и длина сообщения >= 3 символов (для очень коротких сообщений LLM-перевод нецелесообразен)
-      if (translationEnabled && translationProvider === 'llm' && newMessageId && messageToSend.length >= 3) {
-        const isAlreadyTranslated = translatedMessagesRef.current.has(newMessageId);
-        const isCurrentlyTranslating = translatingMessagesRef.current.has(newMessageId);
-        
-        if (!isAlreadyTranslated && !isCurrentlyTranslating) {
-          translatingMessagesRef.current.add(newMessageId);
-          const displayLang = (window as any).__translationDisplayLang || 'ru';
-          setUserMessageTranslation({
-            text: messageToSend,
-            sourceLang: displayLang,
-            targetLang: 'en',
-            messageId: newMessageId,
-          });
-        }
-      }
+      // Примечание: перевод сообщения пользователя выполняется автоматически на сервере
+      // в chats.ts (translateForUser). Клиентский перевод здесь не нужен, чтобы избежать дублирования.
     } catch (err: any) {
       console.error('Error sending message:', err);
       setIsSending(false);
@@ -897,17 +896,21 @@ const ChatPage: React.FC = () => {
     setUserMessageTranslation(null);
     setLlmResponseTranslation(null);
     setStreamingTranslation(null);
+    setUserStreamingTranslation(null);
     streamingTranslationMessageIdRef.current = null;
   };
 
   // Callbacks для стриминга перевода через SSE (от сервера)
   const handleTranslationStart = useCallback((data: { from: string; to: string; text: string }) => {
+    // Помечаем что серверный стриминг перевода уже запущен (предотвращает дубль в handleStreamingComplete)
+    streamingTranslationStartedRef.current = true;
     // Открываем модалку стримингового перевода
     setStreamingTranslation({
       text: data.text,
       sourceLang: data.from,
       targetLang: data.to,
       displayText: '',
+      reasoningText: '',
       status: 'translating',
     });
     // messageId будет установлен в handleStreamingComplete через messageIdRef
@@ -923,8 +926,70 @@ const ChatPage: React.FC = () => {
     });
   }, []);
 
+  // Reasoning токены при переводе (мысли модели) — накапливаем отдельно
+  const handleTranslationReasoningToken = useCallback((token: string) => {
+    setStreamingTranslation(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        reasoningText: prev.reasoningText + token,
+      };
+    });
+  }, []);
+
   const handleTranslationDone = useCallback((translatedText: string) => {
     setStreamingTranslation(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        displayText: translatedText,
+        status: 'done',
+      };
+    });
+  }, []);
+
+  // === Обработчики перевода сообщения пользователя ===
+  const handleUserTranslationStart = useCallback((data: { from: string; to: string; text: string }) => {
+    // Находим ID последнего сообщения пользователя для локального обновления
+    // (findLast не поддерживается в текущем target, используем обратный проход)
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        userStreamingTranslationMessageIdRef.current = messages[i].id;
+        break;
+      }
+    }
+    setUserStreamingTranslation({
+      text: data.text,
+      sourceLang: data.from,
+      targetLang: data.to,
+      displayText: '',
+      reasoningText: '',
+      status: 'translating',
+    });
+  }, [messages]);
+
+  const handleUserTranslationToken = useCallback((token: string) => {
+    setUserStreamingTranslation(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        displayText: prev.displayText + token,
+      };
+    });
+  }, []);
+
+  const handleUserTranslationReasoningToken = useCallback((token: string) => {
+    setUserStreamingTranslation(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        reasoningText: prev.reasoningText + token,
+      };
+    });
+  }, []);
+
+  const handleUserTranslationDone = useCallback((translatedText: string) => {
+    setUserStreamingTranslation(prev => {
       if (!prev) return prev;
       return {
         ...prev,
@@ -959,6 +1024,7 @@ const ChatPage: React.FC = () => {
     
     setStreamingTranslation(null);
     streamingTranslationMessageIdRef.current = null;
+    streamingTranslationStartedRef.current = false;
     
     // Синхронизация контекста с задержкой чтобы сервер успел пересчитать токены
     setTimeout(async () => {
@@ -1341,7 +1407,12 @@ const ChatPage: React.FC = () => {
                     onToggleThinking={handleStreamingToggleThinking}
                     onTranslationStart={handleTranslationStart}
                     onTranslationToken={handleTranslationToken}
+                    onTranslationReasoningToken={handleTranslationReasoningToken}
                     onTranslationDone={handleTranslationDone}
+                    onUserTranslationStart={handleUserTranslationStart}
+                    onUserTranslationToken={handleUserTranslationToken}
+                    onUserTranslationReasoningToken={handleUserTranslationReasoningToken}
+                    onUserTranslationDone={handleUserTranslationDone}
                     onMessageId={(id) => { streamingTranslationMessageIdRef.current = id; }}
                   />
                 </div>
@@ -1465,8 +1536,40 @@ const ChatPage: React.FC = () => {
       />
 
       {/* LLM Translation Modal - показываем только одно окно за раз
-          Приоритет: стриминговый перевод (от сервера) > сообщение пользователя > ответ LLM */}
-      {streamingTranslation ? (
+          Приоритет: перевод сообщения пользователя (SSE) > стриминговый перевод ответа > сообщение пользователя > ответ LLM */}
+      {userStreamingTranslation ? (
+        <LLMTranslationModal
+          key={`user-streaming`}
+          text={userStreamingTranslation.text}
+          sourceLang={userStreamingTranslation.sourceLang}
+          targetLang={userStreamingTranslation.targetLang}
+          onComplete={(translatedText) => {
+            // Перевод сообщения пользователя завершён — закрываем модалку
+            // и обновляем конкретное сообщение локально (не вызываем fetchMessages
+            // чтобы не увидеть пустое сообщение ассистента до завершения генерации)
+            const msgId = userStreamingTranslationMessageIdRef.current;
+            if (msgId) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === msgId ? { ...m, translated_content: translatedText } : m
+                )
+              );
+            }
+            setUserStreamingTranslation(null);
+            userStreamingTranslationMessageIdRef.current = null;
+          }}
+          onCancel={() => {
+            setUserStreamingTranslation(null);
+            userStreamingTranslationMessageIdRef.current = null;
+          }}
+          externalStream={{
+            displayText: userStreamingTranslation.displayText,
+            reasoningText: userStreamingTranslation.reasoningText,
+            status: userStreamingTranslation.status,
+            errorMessage: userStreamingTranslation.errorMessage,
+          }}
+        />
+      ) : streamingTranslation ? (
         <LLMTranslationModal
           key={`streaming-${streamingTranslationMessageIdRef.current}`}
           text={streamingTranslation.text}
@@ -1476,6 +1579,7 @@ const ChatPage: React.FC = () => {
           onCancel={handleLlmTranslationCancel}
           externalStream={{
             displayText: streamingTranslation.displayText,
+            reasoningText: streamingTranslation.reasoningText,
             status: streamingTranslation.status,
             errorMessage: streamingTranslation.errorMessage,
           }}

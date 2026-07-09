@@ -58,29 +58,9 @@ router.post('/chats/:chatId/messages', async (req: AuthenticatedRequest, res: Re
       return res.status(400).json({ error: 'role and content are required' });
     }
 
-    // 2.3: Автоматический перевод сообщения пользователя на английский (per-user)
-    let translatedContent = translated_content;
-    if (role === 'user' && !translatedContent) {
-      const { settings } = getTranslationService(userId);
-
-      if (settings.enabled) {
-        try {
-          const detectedLang = await detectLanguage(content);
-          if (detectedLang !== 'en') {
-            translatedContent = await translateForUser(userId, content, detectedLang, 'en');
-            console.log(`[Translation] Translated user message from ${detectedLang} to en:`, translatedContent);
-          } else {
-            translatedContent = content; // Уже на английском
-          }
-        } catch (translateError) {
-          console.error('[Translation] Translation error:', translateError);
-          translatedContent = content;
-        }
-      } else {
-        console.log('[Translation] Translation is disabled for this user, using original content');
-        translatedContent = content;
-      }
-    }
+    // 2.3: Перевод сообщения пользователя выполняется в chats.ts при стриминге (для UI)
+    // Здесь мы просто сохраняем оригинальный контент, перевод будет добавлен позже
+    const translatedContent = translated_content || null;
 
     const message = messageService.createMessage(chatId, userId, role, content, translatedContent);
     res.status(201).json(message);
