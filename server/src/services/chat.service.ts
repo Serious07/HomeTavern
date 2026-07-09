@@ -3,6 +3,8 @@ import { characterRepository } from '../repositories/character.repository';
 import { userRepository } from '../repositories/user.repository';
 import { messageRepository } from '../repositories/message.repository';
 import { translationService } from './translation.service';
+import { heroVariationRepository } from '../repositories/hero.variation.repository';
+import { replaceUserPlaceholders } from './llm.service';
 
 export class ChatService {
   /**
@@ -64,10 +66,17 @@ export class ChatService {
     const effectiveFirstMessage = characterRepository.getActiveFirstMessage(characterId, greetingIndex ?? character.current_greeting_index ?? null);
     
     if (effectiveFirstMessage && effectiveFirstMessage.trim().length > 0) {
-      console.log('[ChatService] Creating chat with first_message:', effectiveFirstMessage.substring(0, 50) + '...');
+      // Получаем имя героя для подстановки вместо {{User}}
+      const activeHero = heroVariationRepository.getActiveHeroVariationByUserId(userId);
+      const heroName = activeHero?.name || null;
       
-      // Проверяем язык first_message
-      const detectedLang = await translationService.detectLanguage(effectiveFirstMessage);
+      // Заменяем плейсхолдеры {{User}}, {user} и т.д. на реальное имя героя
+      const processedFirstMessage = replaceUserPlaceholders(effectiveFirstMessage, heroName);
+      
+      console.log('[ChatService] Creating chat with first_message:', processedFirstMessage.substring(0, 50) + '...');
+      
+      // Проверяем язык first_message (для перевода используем оригинал без имени)
+      const detectedLang = await translationService.detectLanguage(processedFirstMessage);
       console.log('[ChatService] Detected language for first_message:', detectedLang);
       
       let translatedContent: string | undefined = undefined;
@@ -75,7 +84,7 @@ export class ChatService {
       // Если сообщение на английском, переводим на русский
       if (detectedLang === 'en') {
         console.log('[ChatService] Translating first_message from English to Russian...');
-        translatedContent = await translationService.translateToRussian(effectiveFirstMessage);
+        translatedContent = await translationService.translateToRussian(processedFirstMessage);
         console.log('[ChatService] Translated first_message:', translatedContent?.substring(0, 50) + '...');
       }
       
@@ -83,7 +92,7 @@ export class ChatService {
       messageRepository.createMessage(
         chat.id,
         'assistant',
-        effectiveFirstMessage,
+        processedFirstMessage,
         translatedContent
       );
     }

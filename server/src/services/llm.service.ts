@@ -486,9 +486,12 @@ export function formatMessagesForQwen(
     // Для LLM всегда используем английский текст:
     // - user сообщения: translated_content (перевод с русского на английский)
     // - assistant сообщения: content (оригинал на английском)
-    const contentForLLM = msg.role === 'user'
+    let contentForLLM = msg.role === 'user'
       ? (msg.translated_content || msg.content)  // Если есть перевод, используем его
       : msg.content;  // Для assistant используем оригинал (уже на английском)
+    
+    // Заменяем плейсхолдеры {{User}}, {user} и т.д. на реальное имя героя
+    contentForLLM = replaceUserPlaceholders(contentForLLM, heroName);
     
     messages.push({
       role,
@@ -601,9 +604,12 @@ export function formatMessagesForQwen(
       // Для LLM всегда используем английский текст:
       // - user сообщения: translated_content (перевод с русского на английский)
       // - assistant сообщения: content (оригинал на английском)
-      const contentForLLM = msg.role === 'user'
+      let contentForLLM = msg.role === 'user'
         ? (msg.translated_content || msg.content)  // Если есть перевод, используем его
         : msg.content;  // Для assistant используем оригинал (уже на английском)
+      
+      // Заменяем плейсхолдеры {{User}}, {user} и т.д. на реальное имя героя
+      contentForLLM = replaceUserPlaceholders(contentForLLM, heroName);
       
       messages.push({
         role,

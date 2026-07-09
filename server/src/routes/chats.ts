@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { chatService } from '../services/chat.service';
 import { messageService } from '../services/message.service';
-import { llmService, StreamTimingContext } from '../services/llm.service';
+import { llmService, StreamTimingContext, replaceUserPlaceholders } from '../services/llm.service';
 import {
   translateForUser,
   detectLanguage,
@@ -11,6 +11,7 @@ import {
 } from '../services/translation.service';
 import { messageRepository } from '../repositories/message.repository';
 import { chatRepository } from '../repositories/chat.repository';
+import { heroVariationRepository } from '../repositories/hero.variation.repository';
 import { Message } from '../types';
 import { stripThoughtTags } from '../utils/text';
 import db from '../config/database';
@@ -209,6 +210,11 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
 
     // 7.5. Удаляем теги <thought> и их содержимое из ответа
     fullContent = stripThoughtTags(fullContent);
+
+    // 7.6. Заменяем плейсхолдеры {{User}}, {user} и т.д. на реальное имя героя
+    const activeHeroStream = heroVariationRepository.getActiveHeroVariationByUserId(userId);
+    const heroNameStream = activeHeroStream?.name || null;
+    fullContent = replaceUserPlaceholders(fullContent, heroNameStream);
 
     // 2.7: Переводим ответ на displayLang (если оригинал на английском и перевод включен)
     // Для LLM провайдера - стримим перевод токенами через SSE
@@ -590,6 +596,11 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
 
     // 7.5. Удаляем теги <thought> и их содержимое из ответа
     fullContent = stripThoughtTags(fullContent);
+
+    // 7.6. Заменяем плейсхолдеры {{User}}, {user} и т.д. на реальное имя героя
+    const activeHeroGen = heroVariationRepository.getActiveHeroVariationByUserId(userId);
+    const heroNameGen = activeHeroGen?.name || null;
+    fullContent = replaceUserPlaceholders(fullContent, heroNameGen);
 
     // 2.7: Переводим ответ на displayLang (если оригинал на английском и перевод включен)
     if (translationEnabled) {
