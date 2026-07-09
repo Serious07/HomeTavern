@@ -136,19 +136,12 @@ export class LlmTranslator extends BaseTranslator {
           stream: false,
         };
         
-        // llama.cpp: control reasoning mode
-        // Tested methods:
-        // - reasoning_budget: 0 — НЕ работает
-        // - reasoning: { effort: "none" } — НЕ работает
-        // - reasoning_effort: "none" — НЕ работает
-        // - thinking: { type: "disabled" } — НЕ работает
-        // - reasoning_format: "none" — работает, но reasoning вставляется в content как <think>
-        // - chat_template_kwargs: { enable_thinking: false } — ✅ РАБОТАЕТ (быстрее всего, reasoning отсутствует)
-        if (!this.reasoning) {
-          requestParams.chat_template_kwargs = { enable_thinking: false };
-        }
+        // llama.cpp: control reasoning mode via chat_template_kwargs
+        // - enable_thinking: true — reasoning включён (модель генерирует reasoning_content)
+        // - enable_thinking: false — reasoning выключен (быстрее, reasoning отсутствует)
+        requestParams.chat_template_kwargs = { enable_thinking: this.reasoning };
         
-        console.log(`[LlmTranslator.translate] reasoning: ${this.reasoning}, chat_template_kwargs: ${this.reasoning ? 'default' : JSON.stringify({ enable_thinking: false })}`);
+        console.log(`[LlmTranslator.translate] reasoning: ${this.reasoning}, chat_template_kwargs: ${JSON.stringify({ enable_thinking: this.reasoning })}`);
         
         const result = await client.chatCompletionsCreate(requestParams);
 
@@ -221,13 +214,12 @@ export class LlmTranslator extends BaseTranslator {
         stream: true,
       };
       
-      // llama.cpp: control reasoning mode
-      // chat_template_kwargs: { enable_thinking: false } — ✅ РАБОТАЕТ (быстрее всего, reasoning отсутствует)
-      if (!this.reasoning) {
-        requestParams.chat_template_kwargs = { enable_thinking: false };
-      }
+      // llama.cpp: control reasoning mode via chat_template_kwargs
+      // - enable_thinking: true — reasoning включён (модель генерирует reasoning_content)
+      // - enable_thinking: false — reasoning выключен (быстрее, reasoning отсутствует)
+      requestParams.chat_template_kwargs = { enable_thinking: this.reasoning };
       
-      console.log(`[LlmTranslator.translateStream] reasoning: ${this.reasoning}, chat_template_kwargs: ${this.reasoning ? 'default' : JSON.stringify({ enable_thinking: false })}`);
+      console.log(`[LlmTranslator.translateStream] reasoning: ${this.reasoning}, chat_template_kwargs: ${JSON.stringify({ enable_thinking: this.reasoning })}`);
       
       const result = await client.chatCompletionsCreate(requestParams);
 
