@@ -8,6 +8,7 @@ const HeroPage: React.FC = () => {
   const [heroVariations, setHeroVariations] = useState<HeroVariation[]>([]);
   const [currentVariation, setCurrentVariation] = useState<HeroVariation | null>(null);
   const [name, setName] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [description, setDescription] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -30,10 +31,12 @@ const HeroPage: React.FC = () => {
       if (active) {
         setCurrentVariation(active);
         setName(active.name);
+        setDisplayName(active.display_name || active.name);
         setDescription(active.description || '');
       } else {
         setCurrentVariation(null);
         setName('');
+        setDisplayName('');
         setDescription('');
       }
     } catch (err: any) {
@@ -55,6 +58,8 @@ const HeroPage: React.FC = () => {
     const { name: fieldName, value } = e.target;
     if (fieldName === 'name') {
       setName(value);
+    } else if (fieldName === 'displayName') {
+      setDisplayName(value);
     } else if (fieldName === 'description') {
       setDescription(value);
     }
@@ -79,6 +84,7 @@ const HeroPage: React.FC = () => {
     try {
       await api.put(`/hero/${currentVariation.id}`, {
         name,
+        display_name: displayName || undefined,
         description,
       });
       setSuccess('Профиль успешно сохранен!');
@@ -104,6 +110,7 @@ const HeroPage: React.FC = () => {
     try {
       await api.post('/hero', {
         name,
+        display_name: displayName || undefined,
         description,
         is_active: true,
       });
@@ -152,9 +159,11 @@ const HeroPage: React.FC = () => {
   const handleClear = () => {
     if (currentVariation) {
       setName(currentVariation.name);
+      setDisplayName(currentVariation.display_name || currentVariation.name);
       setDescription(currentVariation.description || '');
     } else {
       setName('');
+      setDisplayName('');
       setDescription('');
     }
   };
@@ -162,6 +171,7 @@ const HeroPage: React.FC = () => {
   const handleStartNew = () => {
     setShowCreateForm(true);
     setName('');
+    setDisplayName('');
     setDescription('');
     setError(null);
   };
@@ -171,9 +181,11 @@ const HeroPage: React.FC = () => {
     setIsEditing(false);
     if (currentVariation) {
       setName(currentVariation.name);
+      setDisplayName(currentVariation.display_name || currentVariation.name);
       setDescription(currentVariation.description || '');
     } else {
       setName('');
+      setDisplayName('');
       setDescription('');
     }
   };
@@ -181,6 +193,7 @@ const HeroPage: React.FC = () => {
   const handleStartEdit = (variation: HeroVariation) => {
     setCurrentVariation(variation);
     setName(variation.name);
+    setDisplayName(variation.display_name || variation.name);
     setDescription(variation.description || '');
     setIsEditing(true);
     setError(null);
@@ -191,6 +204,7 @@ const HeroPage: React.FC = () => {
     setIsEditing(false);
     if (currentVariation) {
       setName(currentVariation.name);
+      setDisplayName(currentVariation.display_name || currentVariation.name);
       setDescription(currentVariation.description || '');
     }
   };
@@ -272,12 +286,19 @@ const HeroPage: React.FC = () => {
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-lg font-semibold text-white">{variation.name}</h3>
-                            {variation.is_active === 1 && (
-                              <span className="px-2 py-0.5 bg-blue-600 text-xs rounded-full">Активный</span>
-                            )}
-                          </div>
+                           <div className="flex items-center gap-2">
+                             <h3 className="text-lg font-semibold text-white">
+                               {variation.name}
+                             </h3>
+                             {variation.is_active === 1 && (
+                               <span className="px-2 py-0.5 bg-blue-600 text-xs rounded-full">Активный</span>
+                             )}
+                           </div>
+                           {variation.display_name && variation.display_name !== variation.name && (
+                             <p className="text-xs text-gray-500 mt-1">
+                               Имя в чате: {variation.display_name}
+                             </p>
+                           )}
                           {variation.description && (
                             <p className="mt-2 text-sm text-gray-400 line-clamp-2">{variation.description}</p>
                           )}
@@ -347,6 +368,29 @@ const HeroPage: React.FC = () => {
                   placeholder="Введите ваше имя"
                   disabled={isSaving || isCreating}
                 />
+                <p className="mt-2 text-sm text-gray-500">
+                  Имя персонажа, отображается при выборе и настройке героя
+                </p>
+              </div>
+
+              {/* Display Name field */}
+              <div className="mb-6">
+                <label htmlFor="displayName" className="block text-sm font-medium text-gray-300 mb-2">
+                  Отображаемое имя
+                </label>
+                <input
+                  type="text"
+                  id="displayName"
+                  name="displayName"
+                  value={displayName}
+                  onChange={handleInputChange}
+                  className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 text-white placeholder-gray-500"
+                  placeholder="Отображаемое имя (если не указано, будет использовано имя героя)"
+                  disabled={isSaving || isCreating}
+                />
+                <p className="mt-2 text-sm text-gray-500">
+                  Имя, которое подставляется вместо плейсхолдеров (например {'{{user}}'}) в чатах при переводе сообщений. Если не указано — используется имя героя
+                </p>
               </div>
 
               {/* Description field */}

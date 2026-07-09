@@ -211,10 +211,11 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     // 7.5. Удаляем теги <thought> и их содержимое из ответа
     fullContent = stripThoughtTags(fullContent);
 
-    // 7.6. Заменяем плейсхолдеры {{User}}, {user} и т.д. на реальное имя героя
-    const activeHeroStream = heroVariationRepository.getActiveHeroVariationByUserId(userId);
-    const heroNameStream = activeHeroStream?.name || null;
-    fullContent = replaceUserPlaceholders(fullContent, heroNameStream);
+     // 7.6. Заменяем плейсхолдеры {{User}}, {user} и т.д. на реальное имя героя
+     // Используем display_name (отображаемое имя в чате), фоллбэк на name
+     const activeHeroStream = heroVariationRepository.getActiveHeroVariationByUserId(userId);
+     const heroNameStream = activeHeroStream?.display_name || activeHeroStream?.name || null;
+     fullContent = replaceUserPlaceholders(fullContent, heroNameStream);
 
     // 2.7: Переводим ответ на displayLang (если оригинал на английском и перевод включен)
     // Для LLM провайдера - стримим перевод токенами через SSE
@@ -597,10 +598,11 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
     // 7.5. Удаляем теги <thought> и их содержимое из ответа
     fullContent = stripThoughtTags(fullContent);
 
-    // 7.6. Заменяем плейсхолдеры {{User}}, {user} и т.д. на реальное имя героя
-    const activeHeroGen = heroVariationRepository.getActiveHeroVariationByUserId(userId);
-    const heroNameGen = activeHeroGen?.name || null;
-    fullContent = replaceUserPlaceholders(fullContent, heroNameGen);
+     // 7.6. Заменяем плейсхолдеры {{User}}, {user} и т.д. на реальное имя героя
+     // Используем display_name (отображаемое имя в чате), фоллбэк на name
+     const activeHeroGen = heroVariationRepository.getActiveHeroVariationByUserId(userId);
+     const heroNameGen = activeHeroGen?.display_name || activeHeroGen?.name || null;
+     fullContent = replaceUserPlaceholders(fullContent, heroNameGen);
 
     // 2.7: Переводим ответ на displayLang (если оригинал на английском и перевод включен)
     if (translationEnabled) {

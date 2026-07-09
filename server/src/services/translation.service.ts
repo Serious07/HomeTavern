@@ -6,6 +6,7 @@
 import db from '../config/database';
 import { TranslationLibrary, TranslationLibraryConfig } from 'translation-library';
 import { llmService } from './llm.service';
+import { heroVariationRepository } from '../repositories/hero.variation.repository';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -255,7 +256,17 @@ export async function detectLanguage(text: string): Promise<string> {
 // ─── 1.4 / 1.5: Universal translate method ──────────────────────────────────
 
 /**
+ * Replace {{user}}, {{User}}, {user}, {User} placeholders with the actual hero name.
+ */
+function replaceUserPlaceholders(text: string, heroName: string): string {
+  return text
+    .replace(/\{\{user\}\}/gi, heroName)   // {{user}} / {{User}} (case-insensitive)
+    .replace(/\{user\}/gi, heroName);       // {user} / {User} (case-insensitive)
+}
+
+/**
  * Universal translate: translate text from sourceLang to targetLang using user's configured provider.
+ * Before translation, replaces {{user}}, {{User}}, {user}, {User} with the actual hero name.
  * This replaces the old translateToEnglish() and translateToRussian() methods.
  */
 export async function translateForUser(
@@ -272,8 +283,18 @@ export async function translateForUser(
     return text;
   }
 
+  // Get the active hero display_name for this user (use display_name, fallback to name)
+  const activeHero = heroVariationRepository.getActiveHeroVariationByUserId(userId);
+  const heroName = activeHero ? (activeHero.display_name || activeHero.name) : '';
+
+  // Replace placeholders with the actual hero name BEFORE translation
+  let processedText = text;
+  if (heroName) {
+    processedText = replaceUserPlaceholders(text, heroName);
+  }
+
   // Check text cache
-  const cacheKey = `${sourceLang}->${targetLang}:${text}`;
+  const cacheKey = `${sourceLang}->${targetLang}:${processedText}`;
   const cached = textCache.get(cacheKey);
   if (cached) {
     return cached;
@@ -282,10 +303,10 @@ export async function translateForUser(
   const { library } = getTranslationService(userId);
 
   try {
-    const result = await library.translate(text, targetLang, {
+    const result = await library.translate(processedText, targetLang, {
       sourceLanguage: sourceLang,
     });
-    const translatedText = result.text || text;
+    const translatedText = result.text || processedText;
 
     // Save to cache
     textCache.set(cacheKey, translatedText);
@@ -293,7 +314,7 @@ export async function translateForUser(
     return translatedText;
   } catch (error) {
     console.error(`[TranslationService] translateForUser (${sourceLang}->${targetLang}) ERROR:`, error);
-    return text; // Fallback: return original
+    return processedText; // Fallback: return processed original
   }
 }
 

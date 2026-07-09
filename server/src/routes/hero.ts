@@ -53,6 +53,7 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
     const data: CreateHeroVariationInput = {
       user_id: userId,
       name: body.name,
+      display_name: body.display_name || body.name,
       description: body.description,
       avatar: body.avatar,
       is_active: body.is_active ?? false,
@@ -144,6 +145,7 @@ router.put('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
       // Обновляем существующую активную вариацию
       const heroVariation = heroVariationRepository.updateHeroVariation(activeVariation.id, {
         name: body.name,
+        display_name: body.display_name,
         description: body.description,
       });
       res.json(heroVariation);
@@ -152,6 +154,7 @@ router.put('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
       const data: CreateHeroVariationInput = {
         user_id: userId,
         name: body.name,
+        display_name: body.display_name || body.name,
         description: body.description,
         is_active: true,
       };

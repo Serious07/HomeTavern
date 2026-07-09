@@ -247,6 +247,32 @@ try {
   }
 }
 
+// Миграция: Добавление колонки display_name в таблицу hero_variations
+try {
+  const heroVarTableInfo = db.prepare("PRAGMA table_info(hero_variations)").all() as any[];
+  const heroVarColumnNames = heroVarTableInfo.map((col: any) => col.name);
+  
+  if (!heroVarColumnNames.includes('display_name')) {
+    db.exec(`
+      ALTER TABLE hero_variations ADD COLUMN display_name TEXT;
+    `);
+    // Заполнить display_name значением из name для существующих записей
+    db.exec(`
+      UPDATE hero_variations SET display_name = name WHERE display_name IS NULL;
+    `);
+    console.log('[Database] Added column: display_name to hero_variations and migrated existing data');
+  } else {
+    console.log('[Database] Column display_name already exists in hero_variations');
+  }
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate column')) {
+    console.log('[Database] Column display_name already exists in hero_variations');
+  } else {
+    console.error('[Database] display_name migration error:', error);
+  }
+}
+
 // Миграция: Создание таблицы character_greetings для существующих баз
 try {
   db.exec(`

@@ -66,9 +66,10 @@ export class ChatService {
     const effectiveFirstMessage = characterRepository.getActiveFirstMessage(characterId, greetingIndex ?? character.current_greeting_index ?? null);
     
     if (effectiveFirstMessage && effectiveFirstMessage.trim().length > 0) {
-      // Получаем имя героя для подстановки вместо {{User}}
-      const activeHero = heroVariationRepository.getActiveHeroVariationByUserId(userId);
-      const heroName = activeHero?.name || null;
+       // Получаем имя героя для подстановки вместо {{User}}
+       // Используем display_name (отображаемое имя в чате), фоллбэк на name
+       const activeHero = heroVariationRepository.getActiveHeroVariationByUserId(userId);
+       const heroName = activeHero?.display_name || activeHero?.name || null;
       
       // Заменяем плейсхолдеры {{User}}, {user} и т.д. на реальное имя героя
       const processedFirstMessage = replaceUserPlaceholders(effectiveFirstMessage, heroName);

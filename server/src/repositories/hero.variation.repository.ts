@@ -41,7 +41,7 @@ class HeroVariationRepository {
    * Создать новую вариацию героя
    */
   createHeroVariation(data: CreateHeroVariationInput): HeroVariation {
-    const { user_id, name, description, avatar, is_active } = data;
+    const { user_id, name, display_name, description, avatar, is_active } = data;
     
     // Если is_active установлен, сначала отключить все остальные активные вариации
     if (is_active) {
@@ -54,13 +54,14 @@ class HeroVariationRepository {
     }
 
     const stmt = db.prepare(`
-      INSERT INTO hero_variations (user_id, name, description, avatar, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO hero_variations (user_id, name, display_name, description, avatar, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
     
     const result = stmt.run(
       user_id,
       name,
+      display_name || null,
       description || null,
       avatar || null,
       is_active ? 1 : 0
@@ -73,7 +74,7 @@ class HeroVariationRepository {
    * Обновить вариацию героя
    */
   updateHeroVariation(id: number, data: UpdateHeroVariationInput): HeroVariation | null {
-    const { name, description, avatar, is_active } = data;
+    const { name, display_name, description, avatar, is_active } = data;
     
     // Если is_active установлен, сначала отключить все остальные активные вариации
     if (is_active) {
@@ -91,6 +92,10 @@ class HeroVariationRepository {
     if (name !== undefined) {
       fields.push('name = ?');
       values.push(name);
+    }
+    if (display_name !== undefined) {
+      fields.push('display_name = ?');
+      values.push(display_name);
     }
     if (description !== undefined) {
       fields.push('description = ?');
@@ -157,6 +162,7 @@ class HeroVariationRepository {
 
   /**
    * Получить описание героя для LLM (активная вариация или null)
+   * Использует display_name как имя героя в чате (фоллбэк на name)
    */
   getHeroProfileForLLM(userId: number): string | null {
     const heroVariation = this.getActiveHeroVariationByUserId(userId);
@@ -165,8 +171,10 @@ class HeroVariationRepository {
     }
     
     // Форматируем профиль героя для использования в промптах
+    // display_name — это имя, которое используется в чате
+    const heroName = heroVariation.display_name || heroVariation.name;
     const parts: string[] = [];
-    parts.push(`Name: ${heroVariation.name}`);
+    parts.push(`Name: ${heroName}`);
     if (heroVariation.description) {
       parts.push(`Description: ${heroVariation.description}`);
     }

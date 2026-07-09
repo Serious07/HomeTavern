@@ -68,6 +68,7 @@ export interface HeroVariation {
   id: number;
   user_id: number;
   name: string;
+  display_name: string | null;
   description: string | null;
   avatar: string | null;
   is_active: number;
