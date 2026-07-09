@@ -17,6 +17,8 @@ export interface UserTranslationSettings {
   libreEndpoint: string;
   autoTranslate: boolean;
   llmSystemPrompt?: string;
+  /** Enable reasoning/thinking mode for LLM translation (llama.cpp) */
+  llmReasoning: boolean;
 }
 
 export interface TranslationServiceInstance {
@@ -46,6 +48,7 @@ const DEFAULT_SETTINGS: UserTranslationSettings = {
   displayLang: 'ru',
   libreEndpoint: '',
   autoTranslate: true,
+  llmReasoning: true, // Reasoning enabled by default
 };
 
 // ─── 1.1: getUserTranslationSettings ────────────────────────────────────────
@@ -67,6 +70,7 @@ function getUserTranslationSettings(userId: number): UserTranslationSettings {
     libreEndpoint: map['translation_libre_endpoint'] || '',
     autoTranslate: map['translation_auto_translate'] !== 'false', // default true
     llmSystemPrompt: map['translation_llm_system_prompt'] || undefined,
+    llmReasoning: map['translation_llm_reasoning'] !== 'false', // default true
   };
 }
 
@@ -118,8 +122,12 @@ function buildLibrary(settings: UserTranslationSettings, userId?: number): Trans
     config.endpoint = settings.libreEndpoint;
   }
 
-  if (settings.provider === 'llm' && settings.llmSystemPrompt) {
-    config.systemPrompt = settings.llmSystemPrompt;
+  if (settings.provider === 'llm') {
+    if (settings.llmSystemPrompt) {
+      config.systemPrompt = settings.llmSystemPrompt;
+    }
+    // Pass reasoning setting to LLM translator
+    config.reasoning = settings.llmReasoning;
   }
 
   const library = new TranslationLibrary(config);

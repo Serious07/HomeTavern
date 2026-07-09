@@ -67,6 +67,8 @@ const SettingsPage: React.FC = () => {
   const [translationDisplayLang, setTranslationDisplayLang] = useState<string>('ru');
   const [translationLibreEndpoint, setTranslationLibreEndpoint] = useState<string>('');
   const [translationLlmSystemPrompt, setTranslationLlmSystemPrompt] = useState<string>('');
+  const [translationLlmReasoning, setTranslationLlmReasoning] = useState<boolean>(true);
+  const [translationLlmReasoningLoading, setTranslationLlmReasoningLoading] = useState<boolean>(false);
   const [dialogTaggingEnabled, setDialogTaggingEnabled] = useState<boolean>(true);
   const [dialogTaggingLoading, setDialogTaggingLoading] = useState<boolean>(false);
 
@@ -105,6 +107,7 @@ const SettingsPage: React.FC = () => {
             setTranslationDisplayLang(transData.data.displayLang || 'ru');
             setTranslationLibreEndpoint(transData.data.libreEndpoint || '');
             setTranslationLlmSystemPrompt(transData.data.llmSystemPrompt || '');
+            setTranslationLlmReasoning(transData.data.llmReasoning !== false); // default true
           }
         } catch (transError) {
           console.warn('Failed to load translation settings:', transError);
@@ -540,6 +543,46 @@ const SettingsPage: React.FC = () => {
                   <option value="llm">LLM (через локальную модель)</option>
                 </select>
               </div>
+
+              {/* LLM Reasoning Toggle */}
+              {translationProvider === 'llm' && (
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <p className="text-gray-300 font-medium">Reasoning (размышления модели)</p>
+                    <p className="text-sm text-gray-400 mt-1">
+                      Включить режим размышлений для LLM. Модель будет показывать свои мысли перед переводом. Отключение ускоряет перевод.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const newValue = !translationLlmReasoning;
+                      setTranslationLlmReasoning(newValue);
+                      setTranslationLlmReasoningLoading(true);
+                      try {
+                        await api.put('/translate/settings', { llmReasoning: newValue });
+                      } catch (err) {
+                        console.error('Failed to save reasoning setting:', err);
+                        setTranslationLlmReasoning(!newValue);
+                      } finally {
+                        setTranslationLlmReasoningLoading(false);
+                      }
+                    }}
+                    disabled={translationLlmReasoningLoading}
+                    className={`${
+                      translationLlmReasoning ? 'bg-blue-600' : 'bg-gray-400'
+                    } relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900`}
+                    role="switch"
+                    aria-checked={translationLlmReasoning}
+                  >
+                    <span
+                      className={`${
+                        translationLlmReasoning ? 'translate-x-5' : 'translate-x-0'
+                      } inline-block h-6 w-6 transform rounded-full bg-white shadow transition duration-200 ease-in-out`}
+                    />
+                  </button>
+                </div>
+              )}
 
               {/* LLM System Prompt */}
               {translationProvider === 'llm' && (

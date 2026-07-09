@@ -20,6 +20,8 @@ export interface LlmTranslatorConfig {
   model?: string;
   timeout?: number;
   retries?: number;
+  /** Enable reasoning/thinking mode for models that support it (e.g., Qwen3 with llama.cpp) */
+  reasoning?: boolean;
 }
 
 const DEFAULT_SYSTEM_PROMPT =
@@ -31,6 +33,7 @@ export class LlmTranslator extends BaseTranslator {
   private systemPromptTemplate: string;
   private model: string;
   private llmClient: any; // LLMClient instance (lazy-loaded)
+  private reasoning: boolean; // Enable reasoning/thinking mode
 
   constructor(config: LlmTranslatorConfig = {}) {
     super({
@@ -43,6 +46,14 @@ export class LlmTranslator extends BaseTranslator {
 
     this.systemPromptTemplate = config.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     this.model = config.model || process.env.LLM_MODEL || 'qwen-3.5';
+    this.reasoning = config.reasoning ?? true; // Default: reasoning enabled
+  }
+
+  /**
+   * Set reasoning mode on/off
+   */
+  setReasoning(enabled: boolean): void {
+    this.reasoning = enabled;
   }
 
   /**
@@ -113,7 +124,8 @@ export class LlmTranslator extends BaseTranslator {
         
         console.log(`[LlmTranslator.translate] max_tokens: ${maxTokens}, text length: ${text.length}`);
 
-        const result = await client.chatCompletionsCreate({
+        // Build request params - add reasoning_budget for llama.cpp (new API)
+        const requestParams: any = {
           model: this.model,
           messages: [
             { role: 'system', content: systemPrompt },
@@ -122,7 +134,23 @@ export class LlmTranslator extends BaseTranslator {
           temperature: 0.3,
           max_tokens: maxTokens,
           stream: false,
-        });
+        };
+        
+        // llama.cpp: control reasoning mode
+        // Tested methods:
+        // - reasoning_budget: 0 — НЕ работает
+        // - reasoning: { effort: "none" } — НЕ работает
+        // - reasoning_effort: "none" — НЕ работает
+        // - thinking: { type: "disabled" } — НЕ работает
+        // - reasoning_format: "none" — работает, но reasoning вставляется в content как <think>
+        // - chat_template_kwargs: { enable_thinking: false } — ✅ РАБОТАЕТ (быстрее всего, reasoning отсутствует)
+        if (!this.reasoning) {
+          requestParams.chat_template_kwargs = { enable_thinking: false };
+        }
+        
+        console.log(`[LlmTranslator.translate] reasoning: ${this.reasoning}, chat_template_kwargs: ${this.reasoning ? 'default' : JSON.stringify({ enable_thinking: false })}`);
+        
+        const result = await client.chatCompletionsCreate(requestParams);
 
         const completion = result as any;
         const message = completion.choices?.[0]?.message as any;
@@ -181,7 +209,8 @@ export class LlmTranslator extends BaseTranslator {
       
       console.log(`[LlmTranslator.translateStream] max_tokens: ${maxTokens}, text length: ${text.length}`);
       
-      const result = await client.chatCompletionsCreate({
+      // Build request params - add reasoning_budget for llama.cpp (new API)
+      const requestParams: any = {
         model: this.model,
         messages: [
           { role: 'system', content: systemPrompt },
@@ -190,7 +219,17 @@ export class LlmTranslator extends BaseTranslator {
         temperature: 0.3,
         max_tokens: maxTokens,
         stream: true,
-      });
+      };
+      
+      // llama.cpp: control reasoning mode
+      // chat_template_kwargs: { enable_thinking: false } — ✅ РАБОТАЕТ (быстрее всего, reasoning отсутствует)
+      if (!this.reasoning) {
+        requestParams.chat_template_kwargs = { enable_thinking: false };
+      }
+      
+      console.log(`[LlmTranslator.translateStream] reasoning: ${this.reasoning}, chat_template_kwargs: ${this.reasoning ? 'default' : JSON.stringify({ enable_thinking: false })}`);
+      
+      const result = await client.chatCompletionsCreate(requestParams);
 
       const stream = result as AsyncIterable<any>;
       let reasoningTokenCount = 0;

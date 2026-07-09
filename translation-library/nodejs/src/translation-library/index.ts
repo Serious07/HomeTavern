@@ -42,6 +42,8 @@ import { LlmTranslator } from './translators/llm';
  */
 export interface TranslationLibraryConfigExtended extends TranslationLibraryConfig {
   systemPrompt?: string;
+  /** Enable reasoning/thinking mode for LLM translator */
+  reasoning?: boolean;
 }
 
 function createTranslator(provider: TranslatorProvider, config: TranslationLibraryConfigExtended): BaseTranslator {
@@ -74,6 +76,7 @@ function createTranslator(provider: TranslatorProvider, config: TranslationLibra
         timeout: config.timeout,
         retries: config.retries,
         systemPrompt: (config as any).systemPrompt,
+        reasoning: (config as any).reasoning,
       });
     default:
       throw new TranslationError(

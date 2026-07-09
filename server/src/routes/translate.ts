@@ -89,6 +89,7 @@ router.get('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       libreEndpoint: settings.libreEndpoint,
       autoTranslate: settings.autoTranslate,
       llmSystemPrompt: settings.llmSystemPrompt,
+      llmReasoning: settings.llmReasoning,
     });
   } catch (error) {
     console.error('[TranslateRoute] Error getting settings:', error);
@@ -104,7 +105,7 @@ router.get('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
 router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { provider, displayLang, enabled, libreEndpoint, autoTranslate, llmSystemPrompt } = req.body;
+    const { provider, displayLang, enabled, libreEndpoint, autoTranslate, llmSystemPrompt, llmReasoning } = req.body;
 
     const validProviders = ['google', 'yandex', 'libre', 'llm'];
 
@@ -148,6 +149,10 @@ router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       saveSetting('translation_llm_system_prompt', String(llmSystemPrompt));
     }
 
+    if (llmReasoning !== undefined) {
+      saveSetting('translation_llm_reasoning', String(llmReasoning));
+    }
+
     // Invalidate cache so next translation uses new settings
     invalidateServiceCache(userId);
 
@@ -160,6 +165,7 @@ router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       libreEndpoint: settings.libreEndpoint,
       autoTranslate: settings.autoTranslate,
       llmSystemPrompt: settings.llmSystemPrompt,
+      llmReasoning: settings.llmReasoning,
     });
   } catch (error) {
     console.error('[TranslateRoute] Error updating settings:', error);
@@ -227,6 +233,7 @@ router.post('/stream', authenticate, async (req: AuthenticatedRequest, res: Resp
     const llmTranslator = new LlmTranslator({
       systemPrompt: settings.llmSystemPrompt,
       timeout: 300000, // 5 минут — модели с reasoning могут долго думать
+      reasoning: settings.llmReasoning, // Pass reasoning setting from user preferences
     });
     
      // Inject the LLMClient from the server's llmService

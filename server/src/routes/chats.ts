@@ -151,6 +151,7 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
           const llmTranslator = new LlmTranslator({
             systemPrompt: userSettings.llmSystemPrompt,
             timeout: 300000,
+            reasoning: userSettings.llmReasoning, // Передаем настройку reasoning
           });
           
           // Инжектируем LLMClient из llmService
@@ -319,6 +320,7 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
           const llmTranslator = new LlmTranslator({
             systemPrompt: userSettings.llmSystemPrompt,
             timeout: 30000,
+            reasoning: userSettings.llmReasoning, // Передаем настройку reasoning
           });
           
           // Инжектируем LLMClient из llmService
