@@ -1373,6 +1373,7 @@ const ChatPage: React.FC = () => {
           ) : (
             <>
                <MessageList
+                  key={currentChat?.id}
                   messages={memoizedMessages}
                   onRegenerate={handleRegenerate}
                   onEdit={handleEditMessage}
