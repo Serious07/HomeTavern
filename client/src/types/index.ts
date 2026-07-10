@@ -96,6 +96,8 @@ export interface LlmConnection {
   api_key_encrypted: string | null;
   model: string;
   max_tokens: number;
+  /** Enable reasoning/thinking mode (1=enabled, 0=disabled) */
+  reasoning: number;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -110,6 +112,7 @@ export interface LlmConnectionCreate {
   api_key: string;
   model: string;
   max_tokens: number;
+  reasoning?: number;
 }
 
 export interface LlmConnectionUpdate {
@@ -118,6 +121,7 @@ export interface LlmConnectionUpdate {
   api_key?: string;
   model?: string;
   max_tokens?: number;
+  reasoning?: number;
 }
 
 export interface LlmTestResult {

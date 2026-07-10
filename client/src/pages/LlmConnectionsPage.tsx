@@ -24,6 +24,7 @@ const LlmConnectionsPage: React.FC = () => {
   const [formApiKey, setFormApiKey] = useState('');
   const [formModel, setFormModel] = useState('');
   const [formMaxTokens, setFormMaxTokens] = useState(64000);
+  const [formReasoning, setFormReasoning] = useState(true);
   const [formError, setFormError] = useState('');
 
   // Load connections on mount
@@ -49,6 +50,7 @@ const LlmConnectionsPage: React.FC = () => {
     setFormApiKey('');
     setFormModel('');
     setFormMaxTokens(64000);
+    setFormReasoning(true);
     setFormError('');
     setShowApiKeyModal(false);
     setShowModal(true);
@@ -61,6 +63,7 @@ const LlmConnectionsPage: React.FC = () => {
     setFormApiKey(''); // Don't prefill API key for security
     setFormModel(connection.model);
     setFormMaxTokens(connection.max_tokens);
+    setFormReasoning(connection.reasoning !== 0); // 1 = enabled, 0 = disabled
     setFormError('');
     setShowApiKeyModal(false);
     setShowModal(true);
@@ -87,6 +90,7 @@ const LlmConnectionsPage: React.FC = () => {
           base_url: formBaseUrl,
           model: formModel,
           max_tokens: formMaxTokens,
+          reasoning: formReasoning ? 1 : 0,
         };
         if (formApiKey) {
           updateData.api_key = formApiKey;
@@ -99,6 +103,7 @@ const LlmConnectionsPage: React.FC = () => {
           api_key: formApiKey,
           model: formModel,
           max_tokens: formMaxTokens,
+          reasoning: formReasoning ? 1 : 0,
         });
       }
       setShowModal(false);
@@ -126,6 +131,16 @@ const LlmConnectionsPage: React.FC = () => {
       loadConnections();
     } catch (error) {
       console.error('Failed to delete connection:', error);
+    }
+  };
+
+  const handleToggleReasoning = async (conn: LlmConnection) => {
+    const newReasoning = conn.reasoning !== 0 ? 0 : 1;
+    try {
+      await llmConnectionsApi.update(conn.id, { reasoning: newReasoning });
+      loadConnections();
+    } catch (error) {
+      console.error('Failed to toggle reasoning:', error);
     }
   };
 
@@ -346,6 +361,32 @@ const LlmConnectionsPage: React.FC = () => {
                           </svg>
                           <span className="text-gray-400 text-sm">Max Tokens: {conn.max_tokens.toLocaleString()}</span>
                         </div>
+                        {/* Reasoning toggle */}
+                        <div className="flex items-center gap-2">
+                          <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                          </svg>
+                          <span className="text-gray-400 text-sm">Reasoning:</span>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleReasoning(conn)}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              conn.reasoning !== 0 ? 'bg-blue-600' : 'bg-gray-600'
+                            }`}
+                            role="switch"
+                            aria-checked={conn.reasoning !== 0}
+                            title={conn.reasoning !== 0 ? 'Reasoning включён (нажмите чтобы выключить)' : 'Reasoning выключен (нажмите чтобы включить)'}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                conn.reasoning !== 0 ? 'translate-x-4' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                          <span className={`text-xs font-medium ${conn.reasoning !== 0 ? 'text-blue-400' : 'text-gray-500'}`}>
+                            {conn.reasoning !== 0 ? 'Вкл' : 'Выкл'}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
@@ -551,6 +592,33 @@ const LlmConnectionsPage: React.FC = () => {
                   max="1000000"
                   className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
                 />
+              </div>
+
+              {/* Reasoning Toggle */}
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300">
+                    Reasoning (размышления модели)
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Модель будет показывать свои мысли перед ответом. Отключение ускоряет генерацию.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormReasoning(!formReasoning)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    formReasoning ? 'bg-blue-600' : 'bg-gray-600'
+                  }`}
+                  role="switch"
+                  aria-checked={formReasoning}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formReasoning ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
               </div>
 
               {formError && (

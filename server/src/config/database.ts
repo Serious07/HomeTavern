@@ -306,6 +306,28 @@ try {
   }
 }
 
+// Миграция: Добавление колонки reasoning в таблицу llm_connections
+try {
+  const llmConnTableInfo = db.prepare("PRAGMA table_info(llm_connections)").all() as any[];
+  const llmConnColumnNames = llmConnTableInfo.map((col: any) => col.name);
+  
+  if (!llmConnColumnNames.includes('reasoning')) {
+    db.exec(`
+      ALTER TABLE llm_connections ADD COLUMN reasoning INTEGER DEFAULT 1;
+    `);
+    console.log('[Database] Added column: reasoning to llm_connections');
+  } else {
+    console.log('[Database] Column reasoning already exists in llm_connections');
+  }
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate column')) {
+    console.log('[Database] Column reasoning already exists in llm_connections');
+  } else {
+    console.error('[Database] reasoning migration error:', error);
+  }
+}
+
 // Миграция: Перенос existing first_message как первого приветствия для существующих персонажей
 try {
   // Проверяем, нужно ли выполнять миграцию (таблица greetings пуста и есть персонажи с first_message)

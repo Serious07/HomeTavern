@@ -95,7 +95,7 @@ router.get('/active', authenticate, (req: AuthenticatedRequest, res: Response) =
 router.post('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { name, base_url, api_key, model, max_tokens }: CreateLlmConnectionInput = req.body;
+    const { name, base_url, api_key, model, max_tokens, reasoning }: CreateLlmConnectionInput = req.body;
 
     if (!name || !base_url || !api_key || !model) {
       return res.status(400).json({
@@ -110,6 +110,7 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
       api_key,
       model,
       max_tokens: max_tokens || 64000,
+      reasoning: reasoning ?? 1,
     });
 
     const conn = llmConnectionRepository.getById(id);
@@ -148,6 +149,7 @@ router.put('/:id', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.body.api_key !== undefined && req.body.api_key.length > 0) updates.api_key = req.body.api_key;
     if (req.body.model !== undefined) updates.model = req.body.model;
     if (req.body.max_tokens !== undefined) updates.max_tokens = req.body.max_tokens;
+    if (req.body.reasoning !== undefined) updates.reasoning = req.body.reasoning;
 
     llmConnectionRepository.update(id, updates, userId);
 

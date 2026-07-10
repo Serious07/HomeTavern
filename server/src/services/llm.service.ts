@@ -656,6 +656,8 @@ export class LLMService {
   private apiKey: string;
   private model: string;
   private maxTokens: number;
+  /** Enable reasoning/thinking mode for llama.cpp (chat_template_kwargs.enable_thinking) */
+  private reasoning: boolean = true;
   private client: any; // LLMClient instance
   private activeAbortControllers: Map<number, AbortController> = new Map();
   private currentConnectionId: number | null = null;
@@ -937,6 +939,8 @@ export class LLMService {
       this.maxOutputTokens = this.maxTokens;
       this.maxContextLength = 0;
       this.useContextLimits = false;
+      // reasoning: 1 = enabled (default), 0 = disabled
+      this.reasoning = decryptedConn.reasoning !== 0;
 
       console.log('[LLMService] Loaded active connection from database:', decryptedConn.name);
       console.log('[LLMService] Connection ID:', activeConn.id);
@@ -994,6 +998,8 @@ export class LLMService {
       this.maxOutputTokens = this.maxTokens;
       this.maxContextLength = 0;
       this.useContextLimits = false;
+      // reasoning: 1 = enabled (default), 0 = disabled
+      this.reasoning = conn.reasoning !== 0;
 
       // Reinitialize client with new settings
       this._initLLMClient();
@@ -1358,10 +1364,13 @@ export class LLMService {
           messages: messages,
           stream: true,
           max_tokens: finalMaxOutput,
+          chat_template_kwargs: { enable_thinking: this.reasoning },
         };
         if (stopTokens !== null) {
           streamRequest.stop = stopTokens;
         }
+        
+        console.log(`[LLMService.generateStream] reasoning: ${this.reasoning}, chat_template_kwargs: ${JSON.stringify({ enable_thinking: this.reasoning })}`);
 
         // Вызываем API с retry логикой при временных ошибках
         const stream = await this.withRetry(

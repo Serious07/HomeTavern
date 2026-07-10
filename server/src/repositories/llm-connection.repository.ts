@@ -8,6 +8,8 @@ export interface LlmConnection {
   api_key_encrypted: string | null;
   model: string;
   max_tokens: number;
+  /** Enable reasoning/thinking mode (1=enabled, 0=disabled). Default: 1 */
+  reasoning: number;
   is_active: number; // 0 or 1
   created_at: string;
   updated_at: string;
@@ -20,6 +22,7 @@ export interface CreateLlmConnectionInput {
   api_key: string;
   model: string;
   max_tokens: number;
+  reasoning?: number;
 }
 
 export interface UpdateLlmConnectionInput {
@@ -28,6 +31,7 @@ export interface UpdateLlmConnectionInput {
   api_key?: string; // only provided when changing the key
   model?: string;
   max_tokens?: number;
+  reasoning?: number;
 }
 
 class LlmConnectionRepository {
@@ -48,7 +52,7 @@ class LlmConnectionRepository {
 
   getAllByUserId(userId: number): LlmConnection[] {
     const rows = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, is_active, created_at, updated_at
+      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, is_active, created_at, updated_at
       FROM llm_connections
       WHERE user_id = ?
       ORDER BY created_at DESC
@@ -58,7 +62,7 @@ class LlmConnectionRepository {
 
   getById(id: number): LlmConnection | null {
     const row = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, is_active, created_at, updated_at
+      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, is_active, created_at, updated_at
       FROM llm_connections
       WHERE id = ?
     `).get(id) as LlmConnection | undefined;
@@ -76,7 +80,7 @@ class LlmConnectionRepository {
 
   getActiveByUserId(userId: number): LlmConnection | null {
     const row = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, is_active, created_at, updated_at
+      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, is_active, created_at, updated_at
       FROM llm_connections
       WHERE user_id = ? AND is_active = 1
       LIMIT 1
@@ -86,9 +90,10 @@ class LlmConnectionRepository {
 
   create(input: CreateLlmConnectionInput): number {
     const encryptedKey = this.encrypt(input.api_key);
+    const reasoning = input.reasoning ?? 1; // Default: reasoning enabled
     const stmt = db.prepare(`
-      INSERT INTO llm_connections (user_id, name, base_url, api_key_encrypted, model, max_tokens, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO llm_connections (user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
     const result = stmt.run(
       input.user_id,
@@ -96,7 +101,8 @@ class LlmConnectionRepository {
       input.base_url,
       encryptedKey,
       input.model,
-      input.max_tokens
+      input.max_tokens,
+      reasoning
     );
     return result.lastInsertRowid as number;
   }
@@ -124,6 +130,10 @@ class LlmConnectionRepository {
     if (input.max_tokens !== undefined) {
       updates.push('max_tokens = ?');
       params.push(input.max_tokens);
+    }
+    if (input.reasoning !== undefined) {
+      updates.push('reasoning = ?');
+      params.push(input.reasoning);
     }
 
     updates.push('updated_at = CURRENT_TIMESTAMP');
