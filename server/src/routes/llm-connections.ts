@@ -153,6 +153,15 @@ router.put('/:id', authenticate, (req: AuthenticatedRequest, res: Response) => {
 
     llmConnectionRepository.update(id, updates, userId);
 
+    // If reasoning was updated and this is the active connection, notify LLMService
+    if (updates.reasoning !== undefined) {
+      const userIdForCheck = (req as AuthenticatedRequest).user!.userId;
+      const activeConn = llmConnectionRepository.getActiveByUserId(userIdForCheck);
+      if (activeConn && activeConn.id === id) {
+        llmService.setReasoning(updates.reasoning !== 0);
+      }
+    }
+
     const conn = llmConnectionRepository.getById(id);
     if (!conn) {
       return res.status(404).json({ error: 'Connection not found after update' });

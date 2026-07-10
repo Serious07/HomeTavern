@@ -1037,6 +1037,15 @@ export class LLMService {
   }
 
   /**
+   * Update reasoning mode without reinitializing the client.
+   * Called when the active connection's reasoning setting is toggled.
+   */
+  setReasoning(enabled: boolean): void {
+    this.reasoning = enabled;
+    console.log(`[LLMService] Reasoning ${enabled ? 'enabled' : 'disabled'} (updated via API)`);
+  }
+
+  /**
    * Get current connection info (without API key)
    */
   getConnectionInfo() {
