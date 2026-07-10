@@ -565,12 +565,15 @@ const MessageList: React.FC<MessageListProps> = ({
   }, [displayedItems]);
 
   // Track previous messages length to detect actual new messages
-  const prevMessagesLengthRef = useRef<number>(messages.length);
+  const prevMessagesLengthRef = useRef<number>(0);
+  // Track if initial scroll has been done for current chat
+  const initialScrollDoneRef = useRef<boolean>(false);
   
-  // Auto-scroll to bottom on initial mount (when component is created with key prop)
+  // Auto-scroll to bottom when messages are first loaded for a chat
   // This handles the case when switching to a new chat with fewer messages
   useEffect(() => {
-    if (messages.length > 0) {
+    if (messages.length > 0 && !initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true;
       setTimeout(() => {
         const container = scrollContainerRef.current;
         if (container) {
@@ -578,7 +581,7 @@ const MessageList: React.FC<MessageListProps> = ({
         }
       }, 50);
     }
-  }, []); // Empty deps - only runs on mount
+  }, [messages.length]);
   
   // Reset display count to show all when new messages arrive (length increases)
   // This only triggers when genuinely new messages are added, not on every parent re-render
