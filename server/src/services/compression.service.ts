@@ -15,7 +15,7 @@ import { chatBlockRepository, ChatBlock, CreateChatBlockParams } from '../reposi
 import { characterRepository } from '../repositories/character.repository';
 import { heroVariationRepository } from '../repositories/hero.variation.repository';
 import { llmService, LLMMessage } from './llm.service';
-import { translationService, getTranslationService, translateForUser } from './translation.service';
+import { translationService, getTranslationService, translateForUser, translateForUserStream } from './translation.service';
 import { llmConnectionRepository } from '../repositories/llm-connection.repository';
 
 export type CompressionMethod = 'fixed' | 'semantic';
@@ -446,13 +446,15 @@ export class CompressionService {
       // Переводим summary на английский для LLM
       const { summaryTranslation, summaryTranslationHash } = await this.translateSummaryToEnglish(
         compressionBlock.summary,
-        userId
+        userId,
+        onLLMToken
       );
 
       // Переводим title на английский для LLM
       const titleTranslation = await this.translateTitleToEnglish(
         compressionBlock.title,
-        userId
+        userId,
+        onLLMToken
       );
 
       // Сохраняем блок в БД
@@ -629,13 +631,15 @@ export class CompressionService {
       // Переводим summary на английский для LLM
       const { summaryTranslation, summaryTranslationHash } = await this.translateSummaryToEnglish(
         compressionBlock.summary,
-        userId
+        userId,
+        onLLMToken
       );
 
       // Переводим title на английский для LLM
       const titleTranslation = await this.translateTitleToEnglish(
         compressionBlock.title,
-        userId
+        userId,
+        onLLMToken
       );
 
       // Сохраняем блок в БД
@@ -1600,7 +1604,8 @@ ${userInstructions}`;
    */
   private async translateSummaryToEnglish(
     summary: string,
-    userId: number
+    userId: number,
+    onLLMToken?: LLMTokenCallback
   ): Promise<{ summaryTranslation: string | null; summaryTranslationHash: string | null }> {
     try {
       const { settings } = getTranslationService(userId);
@@ -1610,7 +1615,31 @@ ${userInstructions}`;
         return { summaryTranslation: null, summaryTranslationHash: null };
       }
 
-      const translated = await translateForUser(userId, summary, settings.displayLang, 'en');
+      // Используем стриминговый перевод для отправки токенов в реальном времени
+      let translated = '';
+      try {
+        for await (const chunk of translateForUserStream(userId, summary, settings.displayLang, 'en')) {
+          if (chunk.isReasoning && onLLMToken) {
+            onLLMToken({
+              phase: 'translation',
+              token: '🧠 ' + chunk.token,
+              isReasoning: true
+            });
+          } else if (chunk.token && onLLMToken) {
+            onLLMToken({
+              phase: 'translation',
+              token: chunk.token
+            });
+          }
+          if (chunk.fullText) {
+            translated = chunk.fullText;
+          }
+        }
+      } catch (streamError) {
+        console.error('[CompressionService] Stream translation failed, falling back to regular:', streamError);
+        translated = await translateForUser(userId, summary, settings.displayLang, 'en');
+      }
+
       const hash = crypto.createHash('sha256').update(summary).digest('hex');
 
       console.log(`[CompressionService] Summary translated to English (${settings.displayLang}->en), hash: ${hash.substring(0, 12)}...`);
@@ -1629,7 +1658,8 @@ ${userInstructions}`;
    */
   private async translateTitleToEnglish(
     title: string,
-    userId: number
+    userId: number,
+    onLLMToken?: LLMTokenCallback
   ): Promise<string | null> {
     try {
       const { settings } = getTranslationService(userId);
@@ -1639,7 +1669,30 @@ ${userInstructions}`;
         return null;
       }
 
-      const translated = await translateForUser(userId, title, settings.displayLang, 'en');
+      // Используем стриминговый перевод для отправки токенов в реальном времени
+      let translated = '';
+      try {
+        for await (const chunk of translateForUserStream(userId, title, settings.displayLang, 'en')) {
+          if (chunk.isReasoning && onLLMToken) {
+            onLLMToken({
+              phase: 'translation',
+              token: '🧠 ' + chunk.token,
+              isReasoning: true
+            });
+          } else if (chunk.token && onLLMToken) {
+            onLLMToken({
+              phase: 'translation',
+              token: chunk.token
+            });
+          }
+          if (chunk.fullText) {
+            translated = chunk.fullText;
+          }
+        }
+      } catch (streamError) {
+        console.error('[CompressionService] Stream title translation failed, falling back to regular:', streamError);
+        translated = await translateForUser(userId, title, settings.displayLang, 'en');
+      }
 
       console.log(`[CompressionService] Title translated to English (${settings.displayLang}->en)`);
 
@@ -1718,9 +1771,15 @@ ${userInstructions}`;
 
   /**
    * Получение переведённого summary (кэшируется)
+   * Использует translateForUser для использования настроек пользователя
    */
-  private async getTranslatedSummary(summary: string, hash: string): Promise<string> {
+  private async getTranslatedSummary(summary: string, hash: string, userId?: number): Promise<string> {
     try {
+      if (userId) {
+        // Используем настройки перевода пользователя
+        return await translateForUser(userId, summary, 'ru', 'en');
+      }
+      // Fallback на legacy сервис
       const translationResult = await translationService.translate(summary, { targetLang: 'en' });
       return translationResult.translatedText || summary;
     } catch (error) {

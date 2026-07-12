@@ -333,6 +333,59 @@ export function clearTextCache(): void {
   textCache.clear();
 }
 
+/**
+ * Stream translation: translate text using user's configured provider with token streaming.
+ * Yields tokens one by one as they are generated (only works with LLM provider).
+ * For non-LLM providers, yields the full text at once.
+ */
+export async function* translateForUserStream(
+  userId: number,
+  text: string,
+  sourceLang: string,
+  targetLang: string,
+): AsyncGenerator<{ token: string; done?: boolean; fullText?: string; isReasoning?: boolean }, void, undefined> {
+  if (!text || !text.trim()) {
+    return;
+  }
+
+  if (sourceLang === targetLang) {
+    yield { token: text, done: true, fullText: text };
+    return;
+  }
+
+  // Get the active hero display_name for this user
+  const activeHero = heroVariationRepository.getActiveHeroVariationByUserId(userId);
+  const heroName = activeHero ? (activeHero.display_name || activeHero.name) : '';
+
+  // Replace placeholders with the actual hero name BEFORE translation
+  let processedText = text;
+  if (heroName) {
+    processedText = replaceUserPlaceholders(text, heroName);
+  }
+
+  const { library, settings } = getTranslationService(userId);
+
+  try {
+    if (settings.provider === 'llm' && (library as any).translateStream) {
+      // Use LLM streaming translation
+      yield* (library as any).translateStream(processedText, {
+        targetLanguage: targetLang,
+        sourceLanguage: sourceLang,
+      });
+    } else {
+      // Non-LLM providers: translate normally and yield full result
+      const result = await library.translate(processedText, targetLang, {
+        sourceLanguage: sourceLang,
+      });
+      const translatedText = result.text || processedText;
+      yield { token: translatedText, done: true, fullText: translatedText };
+    }
+  } catch (error) {
+    console.error(`[TranslationService] translateForUserStream (${sourceLang}->${targetLang}) ERROR:`, error);
+    yield { token: processedText, done: true, fullText: processedText };
+  }
+}
+
 // ─── 1.6: Legacy exports for backward compatibility ─────────────────────────
 
 // Keep the old singleton-style exports for gradual migration
