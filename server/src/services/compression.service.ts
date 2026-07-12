@@ -15,7 +15,7 @@ import { chatBlockRepository, ChatBlock, CreateChatBlockParams } from '../reposi
 import { characterRepository } from '../repositories/character.repository';
 import { heroVariationRepository } from '../repositories/hero.variation.repository';
 import { llmService, LLMMessage } from './llm.service';
-import { translationService } from './translation.service';
+import { translationService, getTranslationService, translateForUser } from './translation.service';
 import { llmConnectionRepository } from '../repositories/llm-connection.repository';
 
 export type CompressionMethod = 'fixed' | 'semantic';
@@ -432,11 +432,19 @@ export class CompressionService {
       );
       compressionBlocks.push(compressionBlock);
 
+      // Переводим summary на английский для LLM
+      const { summaryTranslation, summaryTranslationHash } = await this.translateSummaryToEnglish(
+        compressionBlock.summary,
+        userId
+      );
+
       // Сохраняем блок в БД
       const params: CreateChatBlockParams = {
         chat_id: chatId,
         title: compressionBlock.title,
         summary: compressionBlock.summary,
+        summary_translation: summaryTranslation,
+        summary_translation_hash: summaryTranslationHash,
         original_message_ids: compressionBlock.messageIds,
         start_message_id: compressionBlock.startMessageId,
         end_message_id: compressionBlock.endMessageId,
@@ -598,11 +606,19 @@ export class CompressionService {
       
       compressionBlocks.push(compressionBlock);
 
+      // Переводим summary на английский для LLM
+      const { summaryTranslation, summaryTranslationHash } = await this.translateSummaryToEnglish(
+        compressionBlock.summary,
+        userId
+      );
+
       // Сохраняем блок в БД
       const params: CreateChatBlockParams = {
         chat_id: chatId,
         title: compressionBlock.title,
         summary: compressionBlock.summary,
+        summary_translation: summaryTranslation,
+        summary_translation_hash: summaryTranslationHash,
         original_message_ids: compressionBlock.messageIds,
         start_message_id: compressionBlock.startMessageId,
         end_message_id: compressionBlock.endMessageId,
@@ -1030,12 +1046,20 @@ ${historyText}
       userId
     );
 
+    // Переводим summary на английский для LLM
+    const { summaryTranslation, summaryTranslationHash } = await this.translateSummaryToEnglish(
+      compressionBlock.summary,
+      userId
+    );
+
     // 6. Сохраняем блок
     const sortOrder = chatBlockRepository.getMaxSortOrder(chatId);
     const params: CreateChatBlockParams = {
       chat_id: chatId,
       title: compressionBlock.title,
       summary: compressionBlock.summary,
+      summary_translation: summaryTranslation,
+      summary_translation_hash: summaryTranslationHash,
       original_message_ids: compressionBlock.messageIds,
       start_message_id: compressionBlock.startMessageId,
       end_message_id: compressionBlock.endMessageId,
@@ -1392,6 +1416,35 @@ ${userInstructions}`;
       startMessageId: block.startMessageId,
       endMessageId: block.endMessageId
     };
+  }
+
+  /**
+   * Перевод summary на английский язык для LLM.
+   * Использует настройки перевода пользователя (провайдер, язык отображения и т.д.)
+   * Возвращает объект с переведённым текстом и хэшем для кэширования.
+   */
+  private async translateSummaryToEnglish(
+    summary: string,
+    userId: number
+  ): Promise<{ summaryTranslation: string | null; summaryTranslationHash: string | null }> {
+    try {
+      const { settings } = getTranslationService(userId);
+      
+      // Если перевод отключен или язык отображения уже английский — не переводим
+      if (!settings.enabled || settings.displayLang === 'en') {
+        return { summaryTranslation: null, summaryTranslationHash: null };
+      }
+
+      const translated = await translateForUser(userId, summary, settings.displayLang, 'en');
+      const hash = crypto.createHash('sha256').update(summary).digest('hex');
+
+      console.log(`[CompressionService] Summary translated to English (${settings.displayLang}->en), hash: ${hash.substring(0, 12)}...`);
+
+      return { summaryTranslation: translated, summaryTranslationHash: hash };
+    } catch (error) {
+      console.error('[CompressionService] Error translating summary to English:', error);
+      return { summaryTranslation: null, summaryTranslationHash: null };
+    }
   }
 
   /**
