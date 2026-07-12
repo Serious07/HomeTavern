@@ -438,6 +438,12 @@ export class CompressionService {
         userId
       );
 
+      // Переводим title на английский для LLM
+      const titleTranslation = await this.translateTitleToEnglish(
+        compressionBlock.title,
+        userId
+      );
+
       // Сохраняем блок в БД
       const params: CreateChatBlockParams = {
         chat_id: chatId,
@@ -445,6 +451,7 @@ export class CompressionService {
         summary: compressionBlock.summary,
         summary_translation: summaryTranslation,
         summary_translation_hash: summaryTranslationHash,
+        title_translation: titleTranslation,
         original_message_ids: compressionBlock.messageIds,
         start_message_id: compressionBlock.startMessageId,
         end_message_id: compressionBlock.endMessageId,
@@ -612,6 +619,12 @@ export class CompressionService {
         userId
       );
 
+      // Переводим title на английский для LLM
+      const titleTranslation = await this.translateTitleToEnglish(
+        compressionBlock.title,
+        userId
+      );
+
       // Сохраняем блок в БД
       const params: CreateChatBlockParams = {
         chat_id: chatId,
@@ -619,6 +632,7 @@ export class CompressionService {
         summary: compressionBlock.summary,
         summary_translation: summaryTranslation,
         summary_translation_hash: summaryTranslationHash,
+        title_translation: titleTranslation,
         original_message_ids: compressionBlock.messageIds,
         start_message_id: compressionBlock.startMessageId,
         end_message_id: compressionBlock.endMessageId,
@@ -1052,6 +1066,12 @@ ${historyText}
       userId
     );
 
+    // Переводим title на английский для LLM
+    const titleTranslation = await this.translateTitleToEnglish(
+      compressionBlock.title,
+      userId
+    );
+
     // 6. Сохраняем блок
     const sortOrder = chatBlockRepository.getMaxSortOrder(chatId);
     const params: CreateChatBlockParams = {
@@ -1060,6 +1080,7 @@ ${historyText}
       summary: compressionBlock.summary,
       summary_translation: summaryTranslation,
       summary_translation_hash: summaryTranslationHash,
+      title_translation: titleTranslation,
       original_message_ids: compressionBlock.messageIds,
       start_message_id: compressionBlock.startMessageId,
       end_message_id: compressionBlock.endMessageId,
@@ -1444,6 +1465,34 @@ ${userInstructions}`;
     } catch (error) {
       console.error('[CompressionService] Error translating summary to English:', error);
       return { summaryTranslation: null, summaryTranslationHash: null };
+    }
+  }
+
+  /**
+   * Перевод заголовка блока на английский язык для LLM.
+   * Использует настройки перевода пользователя (провайдер, язык отображения и т.д.)
+   * Возвращает переведённый заголовок или null, если перевод не нужен.
+   */
+  private async translateTitleToEnglish(
+    title: string,
+    userId: number
+  ): Promise<string | null> {
+    try {
+      const { settings } = getTranslationService(userId);
+      
+      // Если перевод отключен или язык отображения уже английский — не переводим
+      if (!settings.enabled || settings.displayLang === 'en') {
+        return null;
+      }
+
+      const translated = await translateForUser(userId, title, settings.displayLang, 'en');
+
+      console.log(`[CompressionService] Title translated to English (${settings.displayLang}->en)`);
+
+      return translated;
+    } catch (error) {
+      console.error('[CompressionService] Error translating title to English:', error);
+      return null;
     }
   }
 

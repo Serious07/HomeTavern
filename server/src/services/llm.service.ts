@@ -589,9 +589,10 @@ export function formatMessagesForQwen(
         // сжатый блок от реального сообщения в истории
         if (msg.id === block.start_message_id) {
           const summaryText = block.summary_translation || block.summary;
+          const titleText = block.title_translation || block.title;
           messages.push({
             role: 'user',
-            content: `<compressed_history_block>\n<block_title>${escapeXml(block.title)}</block_title>\n<block_summary>${escapeXml(summaryText)}</block_summary>\n<original_message_count>${JSON.parse(block.original_message_ids || '[]').length} messages compressed</original_message_count>\n</compressed_history_block>`
+            content: `<compressed_history_block>\n<block_title>${escapeXml(titleText)}</block_title>\n<block_summary>${escapeXml(summaryText)}</block_summary>\n<original_message_count>${JSON.parse(block.original_message_ids || '[]').length} messages compressed</original_message_count>\n</compressed_history_block>`
           });
         }
         // Пропускаем остальные сообщения блока (они уже в summary)

@@ -97,7 +97,7 @@ export const ChatBlock: React.FC<ChatBlockProps> = ({
             className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition text-xs"
             title={showOriginal ? 'Показать перевод' : 'Показать оригинал'}
           >
-            {isTranslating ? '...' : (showOriginal ? 'EN' : 'RU')}
+            {isTranslating ? '...' : (showOriginal ? 'EN' : ((window as any).__translationDisplayLang || 'ru').toUpperCase())}
           </button>
 
           <button
