@@ -222,6 +222,14 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
           const translatedForUI = await translateForUser(userId, originalContent, detectedLang, 'en');
           sendSSEEvent(res, 'user_translation_done', { translatedText: translatedForUI });
           console.log(`Translated user message for UI: "${originalContent}" -> "${translatedForUI}"`);
+          
+          // Сохраняем результат перевода в БД и обновляем messageInEnglish для LLM
+          if (translatedForUI && translatedForUI !== originalContent) {
+            messageRepository.updateMessage(lastUserMessage.id, {
+              translated_content: translatedForUI,
+            });
+            messageInEnglish = translatedForUI;
+          }
         }
       } else {
         console.log('[ChatsRoute] Message is already in English, no translation needed');
