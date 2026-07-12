@@ -170,7 +170,7 @@ const ChatPage: React.FC = () => {
   const [compressionMethod, setCompressionMethod] = useState<CompressionMethod>('fixed');
   
   // Compression LLM reasoning setting
-  const [compressionLlmReasoning, setCompressionLlmReasoning] = useState<boolean>(true);
+  const [compressionLlmReasoning, setCompressionLlmReasoning] = useState<boolean>(false);
   
   // Ref для хранения состояния showThinking для стримингового сообщения
   const streamingMessageThinkingRef = useRef<boolean>(false);
@@ -440,7 +440,7 @@ const ChatPage: React.FC = () => {
           setCompressionMethod(data.compression_method as CompressionMethod);
         }
         if (data.compression_llm_reasoning !== undefined) {
-          setCompressionLlmReasoning(data.compression_llm_reasoning === 'true');
+          setCompressionLlmReasoning(data.compression_llm_reasoning === 'true' || data.compression_llm_reasoning === '1');
         }
       } catch (err) {
         console.error('Error loading settings:', err);

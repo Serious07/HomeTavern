@@ -82,7 +82,7 @@ const SettingsPage: React.FC = () => {
   const [compressionMethodLoading, setCompressionMethodLoading] = useState<boolean>(false);
   
   // Compression reasoning setting
-  const [compressionLlmReasoning, setCompressionLlmReasoning] = useState<boolean>(true);
+  const [compressionLlmReasoning, setCompressionLlmReasoning] = useState<boolean>(false);
   const [compressionLlmReasoningLoading, setCompressionLlmReasoningLoading] = useState<boolean>(false);
 
   useEffect(() => {
@@ -126,7 +126,7 @@ const SettingsPage: React.FC = () => {
           setCompressionMethod(data.compression_method as CompressionMethod);
         }
         if (data?.compression_llm_reasoning !== undefined) {
-          setCompressionLlmReasoning(data.compression_llm_reasoning !== '0' && data.compression_llm_reasoning !== 'false');
+          setCompressionLlmReasoning(data.compression_llm_reasoning === 'true' || data.compression_llm_reasoning === '1');
         }
       } catch (error) {
         console.error('Failed to load settings:', error);

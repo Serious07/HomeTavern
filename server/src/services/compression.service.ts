@@ -876,14 +876,16 @@ ${historyText}
             timeout: 900000, // 15 минут на обработку — история может быть большой
           });
 
-          return await client.chatCompletionsCreate({
+          const requestParams: any = {
             model: llmConfig.model,
             messages: llmMessages,
             temperature: 0.5, // Ниже температура для более структурированного вывода
             max_tokens: 4000, // Больше токенов для вывода многих глав
             stream: true, // Стриминг для отправки токенов в реальном времени
-            reasoning: compressionReasoning,
-          });
+            // Используем chat_template_kwargs для llama.cpp (аналогично llm.service.ts)
+            chat_template_kwargs: { enable_thinking: compressionReasoning ?? false },
+          };
+          return await client.chatCompletionsCreate(requestParams);
         },
         `splitHistoryIntoSemanticChapters chat${chatId}`
       );
@@ -1353,14 +1355,16 @@ ${userInstructions}`;
             timeout: 900000,
           });
 
-          return await client.chatCompletionsCreate({
+          const blockRequestParams: any = {
             model: llmConfig.model,
             messages,
             temperature: this.SUMMARY_TEMPERATURE,
             max_tokens: 50000,
             stream: true,
-            reasoning: compressionReasoning,
-          });
+            // Используем chat_template_kwargs для llama.cpp (аналогично llm.service.ts)
+            chat_template_kwargs: { enable_thinking: compressionReasoning ?? false },
+          };
+          return await client.chatCompletionsCreate(blockRequestParams);
         },
         `generateBlockSummary block[${block.startMessageId}-${block.endMessageId}]`
       );
