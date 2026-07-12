@@ -169,6 +169,9 @@ const ChatPage: React.FC = () => {
   // Compression method setting
   const [compressionMethod, setCompressionMethod] = useState<CompressionMethod>('fixed');
   
+  // Compression LLM reasoning setting
+  const [compressionLlmReasoning, setCompressionLlmReasoning] = useState<boolean>(true);
+  
   // Ref для хранения состояния showThinking для стримингового сообщения
   const streamingMessageThinkingRef = useRef<boolean>(false);
   
@@ -435,6 +438,9 @@ const ChatPage: React.FC = () => {
         }
         if (data.compression_method !== undefined) {
           setCompressionMethod(data.compression_method as CompressionMethod);
+        }
+        if (data.compression_llm_reasoning !== undefined) {
+          setCompressionLlmReasoning(data.compression_llm_reasoning === 'true');
         }
       } catch (err) {
         console.error('Error loading settings:', err);
@@ -1077,12 +1083,12 @@ const ChatPage: React.FC = () => {
   const handleManualCompressConfirm = useCallback(async () => {
     setShowCompressionConfirm(false);
     if (!currentChatId) return;
-    const result = await compress(compressionMethod);
+    const result = await compress(compressionMethod, compressionLlmReasoning);
     // После сжатия обновляем сообщения без показа загрузки
     if (result) {
       await fetchMessages(false);
     }
-  }, [currentChatId, compress, fetchMessages, compressionMethod]);
+  }, [currentChatId, compress, fetchMessages, compressionMethod, compressionLlmReasoning]);
 
   const handleManualCompressCancel = useCallback(() => {
     setShowCompressionConfirm(false);

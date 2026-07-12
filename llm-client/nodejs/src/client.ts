@@ -282,6 +282,7 @@ export class LLMClient {
                 stop: config.stop,
                 frequency_penalty: config.frequency_penalty,
                 presence_penalty: config.presence_penalty,
+                reasoning: config.reasoning,
             },
             options
         );

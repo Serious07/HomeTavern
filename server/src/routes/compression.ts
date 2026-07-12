@@ -145,7 +145,8 @@ router.get('/compress-stream/:chatId', async (req: AuthenticatedRequest, res: Re
     console.log('[CompressStream] >>> Starting compression service...');
     // Запускаем сжатие с callback для прогресса и токенов LLM
     const method = req.query.method as 'fixed' | 'semantic' | undefined;
-    const result = await compressionService.compressChat(chatId, userId, { compressionMethod: method || 'fixed', onProgress, onLLMToken });
+    const reasoning = req.query.reasoning !== '0' && req.query.reasoning !== 'false';
+    const result = await compressionService.compressChat(chatId, userId, { compressionMethod: method || 'fixed', compressionReasoning: reasoning, onProgress, onLLMToken });
 
     // Отправляем финальное событие
     finishStream({

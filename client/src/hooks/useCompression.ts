@@ -73,7 +73,7 @@ export function useCompression(chatId: number | null) {
    * Запустить автоматическое сжатие через SSE (с прогрессом)
    * @param method - метод сжатия: 'fixed' (по умолчанию) или 'semantic'
    */
-  const compress = useCallback(async (method?: CompressionMethod): Promise<CompressionResult | null> => {
+  const compress = useCallback(async (method?: CompressionMethod, reasoning?: boolean): Promise<CompressionResult | null> => {
     if (!chatId) return null;
     
     setIsCompressing(true);
@@ -84,10 +84,11 @@ export function useCompression(chatId: number | null) {
       const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
       
       // Создаём SSE соединение для отслеживания прогресса с токеном в query
+      const reasoningParam = reasoning ? '&reasoning=true' : '';
       const methodParam = method ? `&method=${method}` : '';
       const sseUrl = token 
-        ? `/api/compression/compress-stream/${chatId}?token=${token}${methodParam}`
-        : `/api/compression/compress-stream/${chatId}${methodParam}`;
+        ? `/api/compression/compress-stream/${chatId}?token=${token}${methodParam}${reasoningParam}`
+        : `/api/compression/compress-stream/${chatId}${methodParam}${reasoningParam}`;
       
       // Закрываем предыдущее соединение если есть
       if (eventSourceRef.current) {

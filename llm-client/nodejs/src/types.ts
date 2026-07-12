@@ -54,6 +54,8 @@ export interface ChatConfig {
     frequency_penalty?: number;
     /** Штраф за присутствие */
     presence_penalty?: number;
+    /** Включить reasoning режим для LLM (например, o1, o3-mini модели) */
+    reasoning?: boolean;
 }
 
 /**
@@ -71,6 +73,8 @@ export interface ChatCompletionCreateParams {
     presence_penalty?: number;
     logit_bias?: Record<string, number>;
     user?: string;
+    /** Enable reasoning mode for the LLM (e.g., o1, o3-mini models) */
+    reasoning?: boolean;
 }
 
 /**

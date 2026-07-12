@@ -24,6 +24,7 @@ export interface CompressionOptions {
   maxBlockMessages?: number;    // Максимальное количество сообщений в блоке (эвристика)
   summaryTemperature?: number;  // Temperature для генерации пересказа
   compressionMethod?: CompressionMethod; // Метод сжатия: 'fixed' (по N сообщений) или 'semantic' (смысловые главы)
+  compressionReasoning?: boolean; // Включить reasoning для LLM при сжатии
   onProgress?: CompressionProgressCallback; // Callback для отправки прогресса
   onLLMToken?: LLMTokenCallback; // Callback для отправки токенов LLM в реальном времени
 }
@@ -348,6 +349,7 @@ export class CompressionService {
     const maxBlockMessages = options?.maxBlockMessages ?? this.DEFAULT_MAX_BLOCK_MESSAGES;
     const onProgress = options?.onProgress;
     const onLLMToken = options?.onLLMToken;
+    const compressionReasoning = options?.compressionReasoning ?? false;
     
     // 1. Получаем историю сообщений
     const chatWithMessages = chatRepository.getChatWithMessages(chatId);
@@ -439,7 +441,8 @@ export class CompressionService {
         heroName,
         useTranslations,
         userId,
-        onLLMToken
+        onLLMToken,
+        compressionReasoning
       );
       compressionBlocks.push(compressionBlock);
 
@@ -524,6 +527,7 @@ export class CompressionService {
   ): Promise<CompressionResult> {
     const onProgress = options?.onProgress;
     const onLLMToken = options?.onLLMToken;
+    const compressionReasoning = options?.compressionReasoning ?? false;
     
     // 1. Получаем историю сообщений
     const chatWithMessages = chatRepository.getChatWithMessages(chatId);
@@ -558,7 +562,7 @@ export class CompressionService {
       });
     }
 
-    const chapters = await this.splitHistoryIntoSemanticChapters(messages, userId, chatId, onLLMToken);
+    const chapters = await this.splitHistoryIntoSemanticChapters(messages, userId, chatId, onLLMToken, compressionReasoning);
     const totalBlocks = chapters.length;
 
     if (totalBlocks === 0) {
@@ -620,7 +624,8 @@ export class CompressionService {
         heroName,
         false, // useTranslations
         userId,
-        onLLMToken
+        onLLMToken,
+        compressionReasoning
       );
       
       // Используем заголовок главы как title блока
@@ -703,7 +708,7 @@ export class CompressionService {
    * Формат: [BLOCK:15-28] Название главы\nsummary блока
    * Это позволяет LLM видеть какие диапазоны уже заняты и не включать их в новые главы.
    */
-  private async splitHistoryIntoSemanticChapters(messages: Message[], userId: number, chatId?: number, onLLMToken?: LLMTokenCallback): Promise<SemanticChapter[]> {
+  private async splitHistoryIntoSemanticChapters(messages: Message[], userId: number, chatId?: number, onLLMToken?: LLMTokenCallback, compressionReasoning?: boolean): Promise<SemanticChapter[]> {
     // Получаем уже сжатые блоки для этого чата
     let compressedMessageIds: Set<number> = new Set();
     // Map: startId -> { endId, title, summary } для каждого блока
@@ -856,6 +861,7 @@ ${historyText}
       console.log('[CompressionService] >>> Already compressed blocks:', compressedBlockInfoMap.size);
       console.log('[CompressionService] >>> History text length:', historyText.length);
       console.log('[CompressionService] >>> Message ID range:', firstMsgId, '-', lastMsgId);
+      console.log('[CompressionService] >>> compressionReasoning:', compressionReasoning);
 
       // Получаем конфигурацию LLM из активного соединения пользователя
       const llmConfig = this.getLlmConnectionConfig(userId);
@@ -876,6 +882,7 @@ ${historyText}
             temperature: 0.5, // Ниже температура для более структурированного вывода
             max_tokens: 4000, // Больше токенов для вывода многих глав
             stream: true, // Стриминг для отправки токенов в реальном времени
+            reasoning: compressionReasoning,
           });
         },
         `splitHistoryIntoSemanticChapters chat${chatId}`
@@ -1257,7 +1264,8 @@ ${historyText}
     heroName: string | null,
     useTranslations: boolean = false,
     userId?: number,
-    onLLMToken?: LLMTokenCallback
+    onLLMToken?: LLMTokenCallback,
+    compressionReasoning?: boolean
   ): Promise<CompressionBlock & { summaryTranslationHash?: string }> {
     // Формируем текст блока для суммаризации
     const blockText = block.messages.map(msg => {
@@ -1351,6 +1359,7 @@ ${userInstructions}`;
             temperature: this.SUMMARY_TEMPERATURE,
             max_tokens: 50000,
             stream: true,
+            reasoning: compressionReasoning,
           });
         },
         `generateBlockSummary block[${block.startMessageId}-${block.endMessageId}]`

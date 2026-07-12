@@ -80,6 +80,10 @@ const SettingsPage: React.FC = () => {
   // Compression method setting
   const [compressionMethod, setCompressionMethod] = useState<CompressionMethod>('fixed');
   const [compressionMethodLoading, setCompressionMethodLoading] = useState<boolean>(false);
+  
+  // Compression reasoning setting
+  const [compressionLlmReasoning, setCompressionLlmReasoning] = useState<boolean>(true);
+  const [compressionLlmReasoningLoading, setCompressionLlmReasoningLoading] = useState<boolean>(false);
 
   useEffect(() => {
     setLimitInput(String(visibleMessageLimit));
@@ -120,6 +124,9 @@ const SettingsPage: React.FC = () => {
         }
         if (data?.compression_method !== undefined) {
           setCompressionMethod(data.compression_method as CompressionMethod);
+        }
+        if (data?.compression_llm_reasoning !== undefined) {
+          setCompressionLlmReasoning(data.compression_llm_reasoning !== '0' && data.compression_llm_reasoning !== 'false');
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
@@ -209,6 +216,21 @@ const SettingsPage: React.FC = () => {
       setCompressionMethod(method === 'fixed' ? 'semantic' : 'fixed');
     } finally {
       setCompressionMethodLoading(false);
+    }
+  };
+
+  // Compression reasoning handler
+  const handleCompressionReasoningToggle = async () => {
+    const newValue = !compressionLlmReasoning;
+    setCompressionLlmReasoning(newValue);
+    setCompressionLlmReasoningLoading(true);
+    try {
+      await api.put('/settings', { key: 'compression_llm_reasoning', value: String(newValue) });
+    } catch (error) {
+      console.error('Failed to save compression reasoning setting:', error);
+      setCompressionLlmReasoning(!newValue);
+    } finally {
+      setCompressionLlmReasoningLoading(false);
     }
   };
   
@@ -776,6 +798,32 @@ const SettingsPage: React.FC = () => {
                     </div>
                   </button>
                 </div>
+              </div>
+
+              {/* Compression Reasoning Toggle */}
+              <div className="flex items-center justify-between mb-4 p-4 bg-gray-700/30 rounded-xl border border-gray-600">
+                <div>
+                  <p className="text-gray-300 font-medium">Reasoning (размышления модели)</p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    Включить режим размышлений для LLM при сжатии. Модель будет "думать" перед формированием пересказа. Отключение ускоряет сжатие.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCompressionReasoningToggle}
+                  disabled={compressionLlmReasoningLoading}
+                  className={`${
+                    compressionLlmReasoning ? 'bg-blue-600' : 'bg-gray-400'
+                  } relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900`}
+                  role="switch"
+                  aria-checked={compressionLlmReasoning}
+                >
+                  <span
+                    className={`${
+                      compressionLlmReasoning ? 'translate-x-5' : 'translate-x-0'
+                    } inline-block h-6 w-6 transform rounded-full bg-white shadow transition duration-200 ease-in-out`}
+                  />
+                </button>
               </div>
 
               <div className="space-y-4">
