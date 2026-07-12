@@ -6,6 +6,12 @@
 
 import React from 'react';
 
+interface LLMTokenState {
+  phase: 'chapter_split' | 'block_summary' | 'translation' | '';
+  lines: string[];
+  hasReasoning?: boolean;
+}
+
 interface CompressionProgressOverlayProps {
   isOpen: boolean;
   progress: {
@@ -16,11 +22,13 @@ interface CompressionProgressOverlayProps {
     startPosition?: number;
     endPosition?: number;
   };
+  llmTokenState?: LLMTokenState;
 }
 
 const CompressionProgressOverlay: React.FC<CompressionProgressOverlayProps> = ({
   isOpen,
   progress,
+  llmTokenState,
 }) => {
   if (!isOpen) return null;
 
@@ -161,6 +169,60 @@ const CompressionProgressOverlay: React.FC<CompressionProgressOverlayProps> = ({
                 Сообщения: {progress.startPosition} — {progress.endPosition}
               </p>
             )}
+          </div>
+        )}
+
+        {/* LLM токены в реальном времени */}
+        {llmTokenState && llmTokenState.lines.length > 0 && !showCompleteUI && (
+          <div className="mt-4">
+            <div className="flex items-center gap-2 mb-2">
+              {/* Иконка фазы */}
+              {llmTokenState.phase === 'chapter_split' && (
+                <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              )}
+              {llmTokenState.phase === 'block_summary' && (
+                <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+              )}
+              {llmTokenState.phase === 'translation' && (
+                <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+                </svg>
+              )}
+              <span className="text-xs text-gray-400">
+                {llmTokenState.phase === 'chapter_split' && 'Разбиение на главы'}
+                {llmTokenState.phase === 'block_summary' && 'Формирование блока'}
+                {llmTokenState.phase === 'translation' && 'Перевод'}
+                {!llmTokenState.phase && 'Генерация...'}
+              </span>
+              {/* Индикатор reasoning */}
+              {llmTokenState.hasReasoning && (
+                <span className="ml-auto text-xs text-purple-400 flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  Reasoning
+                </span>
+              )}
+            </div>
+            {/* Последние 3 строки токенов */}
+            <div className="p-3 bg-gray-900/70 rounded-lg border border-gray-600 font-mono text-xs max-h-24 overflow-y-auto">
+              {llmTokenState.lines.map((line, index) => {
+                // Проверяем является ли строка reasoning (начинается с 🧠)
+                const isReasoningLine = line.startsWith('🧠');
+                return (
+                  <div
+                    key={index}
+                    className={isReasoningLine ? 'text-purple-300 truncate' : 'text-gray-300 truncate'}
+                  >
+                    {line}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 

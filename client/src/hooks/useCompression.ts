@@ -25,6 +25,12 @@ export interface CompressionProgressState {
   endPosition?: number;    // Порядковый номер последнего сообщения в блоке (1-based)
 }
 
+export interface LLMTokenState {
+  phase: 'chapter_split' | 'block_summary' | 'translation' | '';
+  lines: string[];  // Последние 3 строки токенов
+  hasReasoning: boolean;  // Есть ли reasoning-токены
+}
+
 export function useCompression(chatId: number | null) {
   const [blocks, setBlocks] = useState<ChatBlockWithParsedIds[]>([]);
   const [isCompressing, setIsCompressing] = useState(false);
@@ -36,6 +42,13 @@ export function useCompression(chatId: number | null) {
     currentBlock: 0,
     totalBlocks: 0,
     status: '',
+  });
+  
+  // State для токенов LLM в реальном времени
+  const [llmTokenState, setLlmTokenState] = useState<LLMTokenState>({
+    phase: '',
+    lines: [],
+    hasReasoning: false,
   });
   
   // Ref для EventSource (SSE)
@@ -106,6 +119,13 @@ export function useCompression(chatId: number | null) {
                 startPosition: data.startPosition,
                 endPosition: data.endPosition,
               });
+            } else if (data.type === 'llm_token') {
+              // Обновляем состояние токенов LLM
+              setLlmTokenState(prev => {
+                const newPhase = data.phase || prev.phase;
+                const newLines = [...prev.lines, data.token].slice(-3);
+                return { phase: newPhase, lines: newLines, hasReasoning: prev.hasReasoning || !!data.isReasoning };
+              });
             } else if (data.type === 'complete') {
               // Сжатие завершено
               const completeData = data as CompressionCompleteEvent;
@@ -167,6 +187,8 @@ export function useCompression(chatId: number | null) {
         totalBlocks: 0,
         status: '',
       });
+      // Сбрасываем токены LLM
+      setLlmTokenState({ phase: '', lines: [], hasReasoning: false });
     }
   }, [chatId]);
 
@@ -253,6 +275,8 @@ export function useCompression(chatId: number | null) {
         totalBlocks: 0,
         status: '',
       });
+      // Сбрасываем токены LLM
+      setLlmTokenState({ phase: '', lines: [], hasReasoning: false });
     }
   }, [chatId]);
 
@@ -518,6 +542,7 @@ export function useCompression(chatId: number | null) {
     needsCompression,
     compressionPercentage,
     compressionProgress,
+    llmTokenState,
     compress,
     compressSelected,
     undoLastCompression,

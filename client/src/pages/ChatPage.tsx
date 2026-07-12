@@ -204,6 +204,7 @@ const ChatPage: React.FC = () => {
     blocks,
     isCompressing,
     compressionProgress,
+    llmTokenState,
     compress,
     editBlock,
     toggleCompression,
@@ -1534,6 +1535,7 @@ const ChatPage: React.FC = () => {
       <CompressionProgressOverlay
         isOpen={isCompressing}
         progress={compressionProgress}
+        llmTokenState={llmTokenState}
       />
 
       {/* LLM Translation Modal - показываем только одно окно за раз

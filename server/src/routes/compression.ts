@@ -121,7 +121,19 @@ router.get('/compress-stream/:chatId', async (req: AuthenticatedRequest, res: Re
       currentBlock: progress.currentBlock,
       totalBlocks: progress.totalBlocks,
       status: progress.status,
-      title: progress.title
+      title: progress.title,
+      startPosition: progress.startPosition,
+      endPosition: progress.endPosition,
+    });
+  };
+
+  // Создаём callback для токенов LLM в реальном времени
+  const onLLMToken = (data: { phase: string; token: string; isReasoning?: boolean }) => {
+    sendEvent({
+      type: 'llm_token',
+      phase: data.phase,
+      token: data.token,
+      isReasoning: data.isReasoning || false
     });
   };
 
@@ -131,9 +143,9 @@ router.get('/compress-stream/:chatId', async (req: AuthenticatedRequest, res: Re
 
   try {
     console.log('[CompressStream] >>> Starting compression service...');
-    // Запускаем сжатие с callback для прогресса
+    // Запускаем сжатие с callback для прогресса и токенов LLM
     const method = req.query.method as 'fixed' | 'semantic' | undefined;
-    const result = await compressionService.compressChat(chatId, userId, { compressionMethod: method || 'fixed', onProgress });
+    const result = await compressionService.compressChat(chatId, userId, { compressionMethod: method || 'fixed', onProgress, onLLMToken });
 
     // Отправляем финальное событие
     finishStream({

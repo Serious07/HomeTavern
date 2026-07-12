@@ -25,7 +25,16 @@ export interface CompressionOptions {
   summaryTemperature?: number;  // Temperature для генерации пересказа
   compressionMethod?: CompressionMethod; // Метод сжатия: 'fixed' (по N сообщений) или 'semantic' (смысловые главы)
   onProgress?: CompressionProgressCallback; // Callback для отправки прогресса
+  onLLMToken?: LLMTokenCallback; // Callback для отправки токенов LLM в реальном времени
 }
+
+export interface LLMTokenData {
+  phase: 'chapter_split' | 'block_summary' | 'translation'; // Фаза процесса
+  token: string; // Строка текста, полученная от LLM (полная строка, не отдельный токен)
+  isReasoning?: boolean; // true если это reasoning-токен
+}
+
+export type LLMTokenCallback = (data: LLMTokenData) => void;
 
 export interface CompressionProgressData {
   currentBlock: number;
@@ -338,6 +347,7 @@ export class CompressionService {
   ): Promise<CompressionResult> {
     const maxBlockMessages = options?.maxBlockMessages ?? this.DEFAULT_MAX_BLOCK_MESSAGES;
     const onProgress = options?.onProgress;
+    const onLLMToken = options?.onLLMToken;
     
     // 1. Получаем историю сообщений
     const chatWithMessages = chatRepository.getChatWithMessages(chatId);
@@ -428,7 +438,8 @@ export class CompressionService {
         heroProfile,
         heroName,
         useTranslations,
-        userId
+        userId,
+        onLLMToken
       );
       compressionBlocks.push(compressionBlock);
 
@@ -510,6 +521,7 @@ export class CompressionService {
     options?: CompressionOptions
   ): Promise<CompressionResult> {
     const onProgress = options?.onProgress;
+    const onLLMToken = options?.onLLMToken;
     
     // 1. Получаем историю сообщений
     const chatWithMessages = chatRepository.getChatWithMessages(chatId);
@@ -544,7 +556,7 @@ export class CompressionService {
       });
     }
 
-    const chapters = await this.splitHistoryIntoSemanticChapters(messages, userId, chatId);
+    const chapters = await this.splitHistoryIntoSemanticChapters(messages, userId, chatId, onLLMToken);
     const totalBlocks = chapters.length;
 
     if (totalBlocks === 0) {
@@ -605,7 +617,8 @@ export class CompressionService {
         heroProfile,
         heroName,
         false, // useTranslations
-        userId
+        userId,
+        onLLMToken
       );
       
       // Используем заголовок главы как title блока
@@ -686,7 +699,7 @@ export class CompressionService {
    * Формат: [BLOCK:15-28] Название главы\nsummary блока
    * Это позволяет LLM видеть какие диапазоны уже заняты и не включать их в новые главы.
    */
-  private async splitHistoryIntoSemanticChapters(messages: Message[], userId: number, chatId?: number): Promise<SemanticChapter[]> {
+  private async splitHistoryIntoSemanticChapters(messages: Message[], userId: number, chatId?: number, onLLMToken?: LLMTokenCallback): Promise<SemanticChapter[]> {
     // Получаем уже сжатые блоки для этого чата
     let compressedMessageIds: Set<number> = new Set();
     // Map: startId -> { endId, title, summary } для каждого блока
@@ -858,14 +871,85 @@ ${historyText}
             messages: llmMessages,
             temperature: 0.5, // Ниже температура для более структурированного вывода
             max_tokens: 4000, // Больше токенов для вывода многих глав
+            stream: true, // Стриминг для отправки токенов в реальном времени
           });
         },
         `splitHistoryIntoSemanticChapters chat${chatId}`
       );
 
-      const message = response.choices?.[0]?.message;
-      const content = message?.content || '';
-      const reasoningContent = message?.reasoning || message?.reasoning_content || '';
+      // Собираем контент из потока с накоплением строк
+      let content = '';
+      let reasoningContent = '';
+      // Буферы для накопления строк
+      let contentLineBuffer = '';
+      let reasoningLineBuffer = '';
+      
+      if (Symbol.asyncIterator in response) {
+        // Стриминговый ответ
+        for await (const chunk of response as AsyncIterable<any>) {
+          const delta = chunk.choices?.[0]?.delta;
+          if (delta?.content) {
+            content += delta.content;
+            contentLineBuffer += delta.content;
+            // Отправляем полные строки (разделитель — перевод строки)
+            if (onLLMToken) {
+              while (contentLineBuffer.includes('\n')) {
+                const idx = contentLineBuffer.indexOf('\n');
+                const line = contentLineBuffer.substring(0, idx).trim();
+                if (line) {
+                  onLLMToken({
+                    phase: 'chapter_split',
+                    token: line
+                  });
+                }
+                contentLineBuffer = contentLineBuffer.substring(idx + 1);
+              }
+            }
+          }
+          if (delta?.reasoning || delta?.reasoning_content) {
+            reasoningContent += delta.reasoning || delta.reasoning_content || '';
+            reasoningLineBuffer += delta.reasoning || delta.reasoning_content || '';
+            // Отправляем reasoning строки
+            if (onLLMToken) {
+              while (reasoningLineBuffer.includes('\n')) {
+                const idx = reasoningLineBuffer.indexOf('\n');
+                const line = reasoningLineBuffer.substring(0, idx).trim();
+                if (line) {
+                  onLLMToken({
+                    phase: 'chapter_split',
+                    token: '🧠 ' + line,
+                    isReasoning: true
+                  });
+                }
+                reasoningLineBuffer = reasoningLineBuffer.substring(idx + 1);
+              }
+            }
+          }
+        }
+        // Отправляем оставшиеся символы как последнюю строку
+        if (onLLMToken) {
+          const remaining = contentLineBuffer.trim();
+          if (remaining) {
+            onLLMToken({
+              phase: 'chapter_split',
+              token: remaining
+            });
+          }
+          const reasoningRemaining = reasoningLineBuffer.trim();
+          if (reasoningRemaining) {
+            onLLMToken({
+              phase: 'chapter_split',
+              token: '🧠 ' + reasoningRemaining,
+              isReasoning: true
+            });
+          }
+        }
+      } else {
+        // Обычный ответ (fallback)
+        const message = response.choices?.[0]?.message;
+        content = message?.content || '';
+        reasoningContent = message?.reasoning || message?.reasoning_content || '';
+      }
       
       // Извлекаем ответ из reasoning если нужно
       let finalContent = content;
@@ -1168,7 +1252,8 @@ ${historyText}
     heroProfile: string | null,
     heroName: string | null,
     useTranslations: boolean = false,
-    userId?: number
+    userId?: number,
+    onLLMToken?: LLMTokenCallback
   ): Promise<CompressionBlock & { summaryTranslationHash?: string }> {
     // Формируем текст блока для суммаризации
     const blockText = block.messages.map(msg => {
@@ -1246,7 +1331,7 @@ ${userInstructions}`;
       // Получаем конфигурацию LLM из активного соединения пользователя
       const llmConfig = this.getLlmConnectionConfig(userId);
 
-      // Вызываем API с retry логикой при временных ошибках
+      // Вызываем API со стримингом для отправки токенов в реальном времени
       const response = await this.withCompressionRetry(
         async () => {
           const { LLMClient } = require('llm-client');
@@ -1261,18 +1346,87 @@ ${userInstructions}`;
             messages,
             temperature: this.SUMMARY_TEMPERATURE,
             max_tokens: 50000,
+            stream: true,
           });
         },
         `generateBlockSummary block[${block.startMessageId}-${block.endMessageId}]`
       );
 
-      const message = response.choices?.[0]?.message;
-      const content = message?.content || '';
-      const reasoningContent = message?.reasoning || message?.reasoning_content || '';
+      // Собираем контент из потока с накоплением строк
+      let content = '';
+      let reasoningContent = '';
+      let contentLineBuffer = '';
+      let reasoningLineBuffer = '';
+      
+      if (Symbol.asyncIterator in response) {
+        // Стриминговый ответ
+        for await (const chunk of response as AsyncIterable<any>) {
+          const delta = chunk.choices?.[0]?.delta;
+          if (delta?.content) {
+            content += delta.content;
+            contentLineBuffer += delta.content;
+            // Отправляем полные строки
+            if (onLLMToken) {
+              while (contentLineBuffer.includes('\n')) {
+                const idx = contentLineBuffer.indexOf('\n');
+                const line = contentLineBuffer.substring(0, idx).trim();
+                if (line) {
+                  onLLMToken({
+                    phase: 'block_summary',
+                    token: line
+                  });
+                }
+                contentLineBuffer = contentLineBuffer.substring(idx + 1);
+              }
+            }
+          }
+          if (delta?.reasoning || delta?.reasoning_content) {
+            reasoningContent += delta.reasoning || delta.reasoning_content || '';
+            reasoningLineBuffer += delta.reasoning || delta.reasoning_content || '';
+            // Отправляем reasoning строки
+            if (onLLMToken) {
+              while (reasoningLineBuffer.includes('\n')) {
+                const idx = reasoningLineBuffer.indexOf('\n');
+                const line = reasoningLineBuffer.substring(0, idx).trim();
+                if (line) {
+                  onLLMToken({
+                    phase: 'block_summary',
+                    token: '🧠 ' + line,
+                    isReasoning: true
+                  });
+                }
+                reasoningLineBuffer = reasoningLineBuffer.substring(idx + 1);
+              }
+            }
+          }
+        }
+        // Отправляем оставшиеся символы
+        if (onLLMToken) {
+          const remaining = contentLineBuffer.trim();
+          if (remaining) {
+            onLLMToken({
+              phase: 'block_summary',
+              token: remaining
+            });
+          }
+          const reasoningRemaining = reasoningLineBuffer.trim();
+          if (reasoningRemaining) {
+            onLLMToken({
+              phase: 'block_summary',
+              token: '🧠 ' + reasoningRemaining,
+              isReasoning: true
+            });
+          }
+        }
+      } else {
+        // Обычный ответ (fallback)
+        const message = response.choices?.[0]?.message;
+        content = message?.content || '';
+        reasoningContent = message?.reasoning || message?.reasoning_content || '';
+      }
       
       console.log('[CompressionService] >>> content length:', content.length);
       console.log('[CompressionService] >>> reasoningContent length:', reasoningContent.length);
-      console.log('[CompressionService] >>> message keys:', message ? Object.keys(message) : 'undefined');
       
       // Если content пустой, но есть reasoning — значит LLM с reasoning mode
       let finalContent = content;
