@@ -1391,6 +1391,12 @@ export class LLMService {
         );
 
         // Обрабатываем поток
+        // Отслеживаем состояние генерации для определения "заблудших" токенов
+        // Некоторые модели (Gemma 4) могут переключаться между content и reasoning
+        // в середине генерации, что вызывает "обрыв" ответа
+        let inContentPhase = false; // true если уже получали content токены
+        let lastContentToken = ''; // последний content токен для контекста
+        
         for await (const chunk of stream) {
           // Устанавливаем время первого токена (если ещё не установлено)
           // Это включает как reasoning tokens, так и content tokens - первый полученный токен считается
@@ -1406,8 +1412,46 @@ export class LLMService {
         }
 
         const delta = chunk.choices[0]?.delta || {};
-        const content = delta.content || '';
-        const reasoningContent = delta.reasoning_content || '';
+        let content = delta.content || '';
+        let reasoningContent = delta.reasoning_content || '';
+
+        // === ЭВРИСТИКА ДЛЯ "ЗАБЛУДШИХ" ТОКЕНОВ ===
+        // Если мы уже в content phase (получали content токены), и вдруг приходит reasoning_content,
+        // проверяем: не является ли это "заблудшим" content токеном.
+        //
+        // Признаки "заблудшего" content токена:
+        // 1. Мы уже получали content токены (inContentPhase = true)
+        // 2. reasoning_content не содержит маркеров мышления (</think>, [/INST], etc.)
+        // 3. reasoning_content выглядит как продолжение текста (не пустой, не спецсимволы)
+        //
+        // В этом случае отправляем reasoning_content как content_token.
+        if (inContentPhase && reasoningContent && !content) {
+          // Проверяем, содержит ли reasoning_content маркеры конца мышления
+          const thinkingMarkers = ['</think>', '[/INST]', '<|end_of_thought|>', '</thinking>'];
+          const hasThinkingMarker = thinkingMarkers.some(marker => 
+            reasoningContent.includes(marker) || reasoningContent.trim() === marker
+          );
+          
+          // Проверяем, выглядит ли reasoning_content как обычный текст
+          // (не только спецсимволы, не пустой)
+          const trimmedReasoning = reasoningContent.trim();
+          const looksLikeText = trimmedReasoning.length > 0 && 
+            !/^[\s\p{P}]*$/u.test(trimmedReasoning); // не только пробелы/пунктуация
+          
+          if (!hasThinkingMarker && looksLikeText) {
+            // Это "заблудший" content токен - отправляем как content
+            console.log('[LLMService] Detected stray content token in reasoning_content:', 
+              reasoningContent.substring(0, 50) + (reasoningContent.length > 50 ? '...' : ''));
+            content = reasoningContent;
+            reasoningContent = '';
+          }
+        }
+
+        // Обновляем состояние фазы генерации
+        if (content) {
+          inContentPhase = true;
+          lastContentToken = content;
+        }
 
         // Отправляем reasoning_token если есть reasoning_content
         if (reasoningContent) {
