@@ -276,16 +276,35 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     // Отправляем ID сообщения сразу
     sendSSEEvent(res, 'message_id', { messageId: newMessageId });
 
-    // 6. Обрабатываем поток
-    for await (const chunk of stream) {
-      if (chunk.type === 'reasoning_token') {
-        reasoningTokenCount++;
-        sendSSEEvent(res, 'reasoning_token', { token: chunk.token });
-      } else if (chunk.type === 'content_token') {
-        sendSSEEvent(res, 'content_token', { token: chunk.token });
-        fullContent += chunk.token;
-        contentTokenCount++;
+    // Keep-alive таймер: отправляет SSE комментарии для поддержания соединения
+    // когда модель делает паузы между токенами. Это предотвращает разрыв соединения
+    // из-за таймаутов прокси, firewall или Node.js при длительной генерации.
+    let lastActivity = Date.now();
+    const keepAliveInterval = setInterval(() => {
+      if (!res.writableEnded && Date.now() - lastActivity > 2000) {
+        try {
+          res.write(': keepalive\n\n');
+        } catch {
+          /* ignore - соединение закрыто */
+        }
       }
+    }, 2000);
+
+    try {
+      // 6. Обрабатываем поток
+      for await (const chunk of stream) {
+        lastActivity = Date.now();
+        if (chunk.type === 'reasoning_token') {
+          reasoningTokenCount++;
+          sendSSEEvent(res, 'reasoning_token', { token: chunk.token });
+        } else if (chunk.type === 'content_token') {
+          sendSSEEvent(res, 'content_token', { token: chunk.token });
+          fullContent += chunk.token;
+          contentTokenCount++;
+        }
+      }
+    } finally {
+      clearInterval(keepAliveInterval);
     }
 
     // 7. Вычисляем метрики генерации
@@ -672,16 +691,33 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
      // 5. Генерируем поток ответа от LLM с отфильтрованной историей (timingContext передаётся для точного измерения скорости)
      const stream = llmService.generateStream(userId, chatIdNum, messageInEnglish, undefined, genTimingContext, filteredHistory);
 
-    // 6. Обрабатываем поток
-    for await (const chunk of stream) {
-      if (chunk.type === 'reasoning_token') {
-        genReasoningTokenCount++;
-        sendSSEEvent(res, 'reasoning_token', { token: chunk.token });
-      } else if (chunk.type === 'content_token') {
-        sendSSEEvent(res, 'content_token', { token: chunk.token });
-        fullContent += chunk.token;
-        genContentTokenCount++;
+    // Keep-alive таймер для /generate endpoint
+    let genLastActivity = Date.now();
+    const genKeepAliveInterval = setInterval(() => {
+      if (!res.writableEnded && Date.now() - genLastActivity > 2000) {
+        try {
+          res.write(': keepalive\n\n');
+        } catch {
+          /* ignore - соединение закрыто */
+        }
       }
+    }, 2000);
+
+    try {
+      // 6. Обрабатываем поток
+      for await (const chunk of stream) {
+        genLastActivity = Date.now();
+        if (chunk.type === 'reasoning_token') {
+          genReasoningTokenCount++;
+          sendSSEEvent(res, 'reasoning_token', { token: chunk.token });
+        } else if (chunk.type === 'content_token') {
+          sendSSEEvent(res, 'content_token', { token: chunk.token });
+          fullContent += chunk.token;
+          genContentTokenCount++;
+        }
+      }
+    } finally {
+      clearInterval(genKeepAliveInterval);
     }
 
     // 7. Вычисляем метрики генерации

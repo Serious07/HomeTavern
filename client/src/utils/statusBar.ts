@@ -119,6 +119,11 @@ export function findAllStatusBarBlocks(text: string): Array<{
  * - Если 2+ блоков и первый уже на позиции 0 → возвращает как есть
  * - Если 2+ блоков и ни один не на позиции 0 → переносит первый найденный в начало
  *
+ * ВАЖНО: При стриминге модель может генерировать незавершённые статус-бары.
+ * Мы проверяем только наличие незавершённого статус-бара (с ":" и "|" после "["),
+ * а не просто наличие "[" после "]". Это позволяет тексту с обычными скобками
+ * обрабатываться нормально.
+ *
  * Возвращает { content: текст с блоком в начале (или без него), allParsed: все распаршенные блоки }
  */
 export function normalizeStatusBarPosition(text: string): {
@@ -135,6 +140,23 @@ export function normalizeStatusBarPosition(text: string): {
   // Есть хотя бы один блок
   const firstBlock = allBlocks[0];
   const firstBlockIsAtStart = firstBlock.index === 0;
+  
+  // === ЗАЩИТА ОТ СТРИМИНГ-АРТЕФАКТОВ ===
+  // Проверяем только наличие незавершённого статус-бара в конце текста.
+  // Незавершённый статус-бар: есть "[" после последней "]", и после "[" есть ":" и "|"
+  // (что отличает его от обычной скобки в тексте)
+  const lastOpenBracket = text.lastIndexOf('[');
+  const lastCloseBracket = text.lastIndexOf(']');
+  
+  if (lastOpenBracket > lastCloseBracket) {
+    // Есть открывающая скобка после последней закрывающей
+    // Проверяем, действительно ли это похоже на статус-бар (содержит ":" и "|")
+    const afterBracket = text.slice(lastOpenBracket);
+    if (afterBracket.includes(':') && afterBracket.includes('|')) {
+      // Это незавершённый статус-бар - возвращаем текст как есть
+      return { content: text, allParsed: [] };
+    }
+  }
   
   if (allBlocks.length === 1) {
     // Один блок
@@ -158,10 +180,13 @@ export function normalizeStatusBarPosition(text: string): {
     let content = text;
     const parsedList = [firstBlock.parsed];
     
-    // Удаляем все блоки кроме первого
+    // Удаляем все блоки кроме первого, пересчитывая индексы после каждого удаления
+    let totalShift = 0; // Накопительный сдвиг из-за предыдущих удалений
     for (let i = 1; i < allBlocks.length; i++) {
       const b = allBlocks[i];
-      content = content.slice(0, b.index) + content.slice(b.index + b.block.length);
+      const adjustedIndex = b.index - totalShift;
+      content = content.slice(0, adjustedIndex) + content.slice(adjustedIndex + b.block.length);
+      totalShift += b.block.length;
       parsedList.push(b.parsed);
     }
     
@@ -177,13 +202,15 @@ export function normalizeStatusBarPosition(text: string): {
     // Удаляем первый найденный блок из его текущего места
     let remainingText = text.slice(0, firstFound.index) + text.slice(firstFound.index + firstFound.block.length);
     
-    // Удаляем остальные блоки
+    // Удаляем остальные блоки, пересчитывая индексы после каждого удаления
     const parsedList = [firstFound.parsed];
+    let totalShift = firstFound.block.length; // Сдвиг из-за удаления первого блока
     for (let i = 1; i < allBlocks.length; i++) {
       const b = allBlocks[i];
-      // Индексы сместились из-за удаления первого блока, поэтому пересчитываем
-      remainingText = remainingText.slice(0, b.index - firstFound.block.length) + 
-                       remainingText.slice(b.index - firstFound.block.length + b.block.length);
+      const adjustedIndex = b.index - totalShift;
+      remainingText = remainingText.slice(0, adjustedIndex) + 
+                       remainingText.slice(adjustedIndex + b.block.length);
+      totalShift += b.block.length;
       parsedList.push(b.parsed);
     }
     
