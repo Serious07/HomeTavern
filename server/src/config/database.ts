@@ -328,6 +328,28 @@ try {
   }
 }
 
+// Миграция: Добавление колонки strict_role_alternation в таблицу llm_connections
+try {
+  const llmConnTableInfo2 = db.prepare("PRAGMA table_info(llm_connections)").all() as any[];
+  const llmConnColumnNames2 = llmConnTableInfo2.map((col: any) => col.name);
+  
+  if (!llmConnColumnNames2.includes('strict_role_alternation')) {
+    db.exec(`
+      ALTER TABLE llm_connections ADD COLUMN strict_role_alternation INTEGER DEFAULT 0;
+    `);
+    console.log('[Database] Added column: strict_role_alternation to llm_connections');
+  } else {
+    console.log('[Database] Column strict_role_alternation already exists in llm_connections');
+  }
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate column')) {
+    console.log('[Database] Column strict_role_alternation already exists in llm_connections');
+  } else {
+    console.error('[Database] strict_role_alternation migration error:', error);
+  }
+}
+
 // Миграция: Перенос existing first_message как первого приветствия для существующих персонажей
 try {
   // Проверяем, нужно ли выполнять миграцию (таблица greetings пуста и есть персонажи с first_message)

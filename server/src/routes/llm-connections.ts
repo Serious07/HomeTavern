@@ -95,7 +95,7 @@ router.get('/active', authenticate, (req: AuthenticatedRequest, res: Response) =
 router.post('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { name, base_url, api_key, model, max_tokens, reasoning }: CreateLlmConnectionInput = req.body;
+    const { name, base_url, api_key, model, max_tokens, reasoning, strict_role_alternation }: CreateLlmConnectionInput = req.body;
 
     if (!name || !base_url || !api_key || !model) {
       return res.status(400).json({
@@ -111,6 +111,7 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
       model,
       max_tokens: max_tokens || 64000,
       reasoning: reasoning ?? 1,
+      strict_role_alternation: strict_role_alternation ?? 0,
     });
 
     const conn = llmConnectionRepository.getById(id);
@@ -150,6 +151,7 @@ router.put('/:id', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.body.model !== undefined) updates.model = req.body.model;
     if (req.body.max_tokens !== undefined) updates.max_tokens = req.body.max_tokens;
     if (req.body.reasoning !== undefined) updates.reasoning = req.body.reasoning;
+    if (req.body.strict_role_alternation !== undefined) updates.strict_role_alternation = req.body.strict_role_alternation;
 
     llmConnectionRepository.update(id, updates, userId);
 
@@ -159,6 +161,15 @@ router.put('/:id', authenticate, (req: AuthenticatedRequest, res: Response) => {
       const activeConn = llmConnectionRepository.getActiveByUserId(userIdForCheck);
       if (activeConn && activeConn.id === id) {
         llmService.setReasoning(updates.reasoning !== 0);
+      }
+    }
+
+    // If strict_role_alternation was updated and this is the active connection, notify LLMService
+    if (updates.strict_role_alternation !== undefined) {
+      const userIdForCheck = (req as AuthenticatedRequest).user!.userId;
+      const activeConn = llmConnectionRepository.getActiveByUserId(userIdForCheck);
+      if (activeConn && activeConn.id === id) {
+        llmService.setStrictRoleAlternation(updates.strict_role_alternation !== 0);
       }
     }
 

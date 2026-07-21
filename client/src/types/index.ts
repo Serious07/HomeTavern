@@ -98,6 +98,8 @@ export interface LlmConnection {
   max_tokens: number;
   /** Enable reasoning/thinking mode (1=enabled, 0=disabled) */
   reasoning: number;
+  /** Enable strict role alternation (1=enabled, 0=disabled) - merges consecutive same-role messages */
+  strict_role_alternation: number;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -113,6 +115,7 @@ export interface LlmConnectionCreate {
   model: string;
   max_tokens: number;
   reasoning?: number;
+  strict_role_alternation?: number;
 }
 
 export interface LlmConnectionUpdate {
@@ -122,6 +125,7 @@ export interface LlmConnectionUpdate {
   model?: string;
   max_tokens?: number;
   reasoning?: number;
+  strict_role_alternation?: number;
 }
 
 export interface LlmTestResult {

@@ -659,6 +659,8 @@ export class LLMService {
   private maxTokens: number;
   /** Enable reasoning/thinking mode for llama.cpp (chat_template_kwargs.enable_thinking) */
   private reasoning: boolean = true;
+  /** Enable strict role alternation (merge consecutive same-role messages before sending) */
+  private strictRoleAlternation: boolean = false;
   private client: any; // LLMClient instance
   private activeAbortControllers: Map<number, AbortController> = new Map();
   private currentConnectionId: number | null = null;
@@ -942,6 +944,8 @@ export class LLMService {
       this.useContextLimits = false;
       // reasoning: 1 = enabled (default), 0 = disabled
       this.reasoning = decryptedConn.reasoning !== 0;
+      // strict_role_alternation: 1 = enabled, 0 = disabled (default)
+      this.strictRoleAlternation = (decryptedConn.strict_role_alternation || 0) === 1;
 
       console.log('[LLMService] Loaded active connection from database:', decryptedConn.name);
       console.log('[LLMService] Connection ID:', activeConn.id);
@@ -1001,6 +1005,8 @@ export class LLMService {
       this.useContextLimits = false;
       // reasoning: 1 = enabled (default), 0 = disabled
       this.reasoning = conn.reasoning !== 0;
+      // strict_role_alternation: 1 = enabled, 0 = disabled (default)
+      this.strictRoleAlternation = (conn.strict_role_alternation || 0) === 1;
 
       // Reinitialize client with new settings
       this._initLLMClient();
@@ -1047,6 +1053,51 @@ export class LLMService {
   }
 
   /**
+   * Update strict role alternation mode without reinitializing the client.
+   */
+  setStrictRoleAlternation(enabled: boolean): void {
+    this.strictRoleAlternation = enabled;
+    console.log(`[LLMService] Strict role alternation ${enabled ? 'enabled' : 'disabled'} (updated via API)`);
+  }
+
+  /**
+   * Merge consecutive same-role messages into one to ensure strict alternation.
+   * Some model templates (e.g., Magnum-v4) require: system, then user/assistant alternating.
+   * Consecutive user-user or assistant-assistant messages cause Jinja template errors.
+   */
+  normalizeRoleAlternation(messages: LLMMessage[]): LLMMessage[] {
+    if (!this.strictRoleAlternation || messages.length === 0) {
+      return messages;
+    }
+
+    const normalized: LLMMessage[] = [];
+    
+    for (const msg of messages) {
+      // System messages: always pass through (there should be at most one at the start)
+      if (msg.role === 'system') {
+        normalized.push(msg);
+        continue;
+      }
+
+      // If the last non-system message has the same role, merge content
+      const last = normalized[normalized.length - 1];
+      if (last && last.role === msg.role) {
+        // Append content with double newline separator
+        last.content = last.content + '\n\n' + msg.content;
+      } else {
+        normalized.push({ ...msg });
+      }
+    }
+
+    // Log if any merging happened
+    if (normalized.length < messages.length) {
+      console.log(`[LLMService] Strict role alternation: merged ${messages.length - normalized.length} consecutive messages (${messages.length} -> ${normalized.length})`);
+    }
+
+    return normalized;
+  }
+
+  /**
    * Get current connection info (without API key)
    */
   getConnectionInfo() {
@@ -1056,6 +1107,8 @@ export class LLMService {
       maxTokens: this.maxTokens,
       maxContextLength: this.maxContextLength,
       connectionId: this.currentConnectionId,
+      reasoning: this.reasoning,
+      strictRoleAlternation: this.strictRoleAlternation,
     };
   }
 
@@ -1215,7 +1268,7 @@ export class LLMService {
       // Формируем историю сообщений для Qwen 3.5 с учётом сжатых блоков
       // ВАЖНО: используем finalHistoryForFormatting (который уже без последнего user сообщения и без сжатых),
       // а formatMessagesForQwen сам добавит currentMessage в конец через параметр userMessage
-      const messages = compressedBlocks && compressedBlocks.length > 0
+      let messages = compressedBlocks && compressedBlocks.length > 0
         ? formatMessagesForQwenWithCompression(
             userId,
             character,
@@ -1233,6 +1286,10 @@ export class LLMService {
             finalHistoryForFormatting,
             userMessage
           );
+
+      // Apply strict role alternation normalization for models that require it
+      // (e.g., Magnum-v4) — merges consecutive same-role messages
+      messages = this.normalizeRoleAlternation(messages);
 
       // Проверяем наличие клиента
       if (!this.client) {

@@ -10,6 +10,8 @@ export interface LlmConnection {
   max_tokens: number;
   /** Enable reasoning/thinking mode (1=enabled, 0=disabled). Default: 1 */
   reasoning: number;
+  /** Enable strict role alternation (merge consecutive same-role messages). Default: 0 */
+  strict_role_alternation: number;
   is_active: number; // 0 or 1
   created_at: string;
   updated_at: string;
@@ -23,6 +25,7 @@ export interface CreateLlmConnectionInput {
   model: string;
   max_tokens: number;
   reasoning?: number;
+  strict_role_alternation?: number;
 }
 
 export interface UpdateLlmConnectionInput {
@@ -32,6 +35,7 @@ export interface UpdateLlmConnectionInput {
   model?: string;
   max_tokens?: number;
   reasoning?: number;
+  strict_role_alternation?: number;
 }
 
 class LlmConnectionRepository {
@@ -52,7 +56,7 @@ class LlmConnectionRepository {
 
   getAllByUserId(userId: number): LlmConnection[] {
     const rows = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, is_active, created_at, updated_at
+      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, strict_role_alternation, is_active, created_at, updated_at
       FROM llm_connections
       WHERE user_id = ?
       ORDER BY created_at DESC
@@ -62,7 +66,7 @@ class LlmConnectionRepository {
 
   getById(id: number): LlmConnection | null {
     const row = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, is_active, created_at, updated_at
+      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, strict_role_alternation, is_active, created_at, updated_at
       FROM llm_connections
       WHERE id = ?
     `).get(id) as LlmConnection | undefined;
@@ -80,7 +84,7 @@ class LlmConnectionRepository {
 
   getActiveByUserId(userId: number): LlmConnection | null {
     const row = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, is_active, created_at, updated_at
+      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, strict_role_alternation, is_active, created_at, updated_at
       FROM llm_connections
       WHERE user_id = ? AND is_active = 1
       LIMIT 1
@@ -91,9 +95,10 @@ class LlmConnectionRepository {
   create(input: CreateLlmConnectionInput): number {
     const encryptedKey = this.encrypt(input.api_key);
     const reasoning = input.reasoning ?? 1; // Default: reasoning enabled
+    const strictRoleAlternation = input.strict_role_alternation ?? 0; // Default: disabled
     const stmt = db.prepare(`
-      INSERT INTO llm_connections (user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO llm_connections (user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, strict_role_alternation, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
     const result = stmt.run(
       input.user_id,
@@ -102,7 +107,8 @@ class LlmConnectionRepository {
       encryptedKey,
       input.model,
       input.max_tokens,
-      reasoning
+      reasoning,
+      strictRoleAlternation
     );
     return result.lastInsertRowid as number;
   }
@@ -134,6 +140,10 @@ class LlmConnectionRepository {
     if (input.reasoning !== undefined) {
       updates.push('reasoning = ?');
       params.push(input.reasoning);
+    }
+    if (input.strict_role_alternation !== undefined) {
+      updates.push('strict_role_alternation = ?');
+      params.push(input.strict_role_alternation);
     }
 
     updates.push('updated_at = CURRENT_TIMESTAMP');

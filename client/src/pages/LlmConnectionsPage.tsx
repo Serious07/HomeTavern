@@ -25,6 +25,7 @@ const LlmConnectionsPage: React.FC = () => {
   const [formModel, setFormModel] = useState('');
   const [formMaxTokens, setFormMaxTokens] = useState(64000);
   const [formReasoning, setFormReasoning] = useState(true);
+  const [formStrictRoleAlternation, setFormStrictRoleAlternation] = useState(false);
   const [formError, setFormError] = useState('');
 
   // Load connections on mount
@@ -51,6 +52,7 @@ const LlmConnectionsPage: React.FC = () => {
     setFormModel('');
     setFormMaxTokens(64000);
     setFormReasoning(true);
+    setFormStrictRoleAlternation(false);
     setFormError('');
     setShowApiKeyModal(false);
     setShowModal(true);
@@ -64,6 +66,7 @@ const LlmConnectionsPage: React.FC = () => {
     setFormModel(connection.model);
     setFormMaxTokens(connection.max_tokens);
     setFormReasoning(connection.reasoning !== 0); // 1 = enabled, 0 = disabled
+    setFormStrictRoleAlternation((connection.strict_role_alternation || 0) !== 0);
     setFormError('');
     setShowApiKeyModal(false);
     setShowModal(true);
@@ -91,6 +94,7 @@ const LlmConnectionsPage: React.FC = () => {
           model: formModel,
           max_tokens: formMaxTokens,
           reasoning: formReasoning ? 1 : 0,
+          strict_role_alternation: formStrictRoleAlternation ? 1 : 0,
         };
         if (formApiKey) {
           updateData.api_key = formApiKey;
@@ -104,6 +108,7 @@ const LlmConnectionsPage: React.FC = () => {
           model: formModel,
           max_tokens: formMaxTokens,
           reasoning: formReasoning ? 1 : 0,
+          strict_role_alternation: formStrictRoleAlternation ? 1 : 0,
         });
       }
       setShowModal(false);
@@ -141,6 +146,16 @@ const LlmConnectionsPage: React.FC = () => {
       loadConnections();
     } catch (error) {
       console.error('Failed to toggle reasoning:', error);
+    }
+  };
+
+  const handleToggleStrictRoleAlternation = async (conn: LlmConnection) => {
+    const newValue = (conn.strict_role_alternation || 0) !== 0 ? 0 : 1;
+    try {
+      await llmConnectionsApi.update(conn.id, { strict_role_alternation: newValue });
+      loadConnections();
+    } catch (error) {
+      console.error('Failed to toggle strict role alternation:', error);
     }
   };
 
@@ -387,6 +402,34 @@ const LlmConnectionsPage: React.FC = () => {
                             {conn.reasoning !== 0 ? 'Вкл' : 'Выкл'}
                           </span>
                         </div>
+                        {/* Strict Role Alternation toggle */}
+                        <div className="flex items-center gap-2">
+                          <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                          </svg>
+                          <span className="text-gray-400 text-sm">Strict Role Alternation:</span>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleStrictRoleAlternation(conn)}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              (conn.strict_role_alternation || 0) !== 0 ? 'bg-amber-600' : 'bg-gray-600'
+                            }`}
+                            role="switch"
+                            aria-checked={(conn.strict_role_alternation || 0) !== 0}
+                            title={(conn.strict_role_alternation || 0) !== 0
+                              ? 'Strict Role Alternation включён (нажмите чтобы выключить)'
+                              : 'Strict Role Alternation выключен (нажмите чтобы включить)'}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                (conn.strict_role_alternation || 0) !== 0 ? 'translate-x-4' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                          <span className={`text-xs font-medium ${(conn.strict_role_alternation || 0) !== 0 ? 'text-amber-400' : 'text-gray-500'}`}>
+                            {(conn.strict_role_alternation || 0) !== 0 ? 'Вкл' : 'Выкл'}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
@@ -616,6 +659,33 @@ const LlmConnectionsPage: React.FC = () => {
                   <span
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
                       formReasoning ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Strict Role Alternation Toggle */}
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300">
+                    Strict Role Alternation
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Объединяет последовательные сообщения одной роли. Нужно для моделей типа Magnum-v4, где шаблон требует строгого чередования user/assistant.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormStrictRoleAlternation(!formStrictRoleAlternation)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    formStrictRoleAlternation ? 'bg-amber-600' : 'bg-gray-600'
+                  }`}
+                  role="switch"
+                  aria-checked={formStrictRoleAlternation}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formStrictRoleAlternation ? 'translate-x-5' : 'translate-x-0'
                     }`}
                   />
                 </button>
