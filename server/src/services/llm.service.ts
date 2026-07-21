@@ -1061,18 +1061,57 @@ export class LLMService {
   }
 
   /**
-   * Merge consecutive same-role messages into one to ensure strict alternation.
-   * Some model templates (e.g., Magnum-v4) require: system, then user/assistant alternating.
-   * Consecutive user-user or assistant-assistant messages cause Jinja template errors.
+   * Normalize messages to ensure strict role alternation for models that require it
+   * (e.g., Magnum-v4). Two-step process:
+   * 
+   * 1) If the first non-system message is `assistant` (character greeting), attach it
+   *    to the system prompt so roles start with: system → user → assistant → ...
+   * 2) Merge any remaining consecutive same-role messages into one.
    */
   normalizeRoleAlternation(messages: LLMMessage[]): LLMMessage[] {
     if (!this.strictRoleAlternation || messages.length === 0) {
       return messages;
     }
 
+    const origLen = messages.length;
+    let result: LLMMessage[] = [];
+
+    // ------------------------------------------------------------------
+    // Step 1: Find the system message index and check what follows
+    // ------------------------------------------------------------------
+    const systemIndex = messages.findIndex(m => m.role === 'system');
+    
+    if (systemIndex !== -1 && systemIndex + 1 < messages.length) {
+      const afterSystem = messages[systemIndex + 1];
+      
+      if (afterSystem.role === 'assistant') {
+        // Attach the assistant greeting to the system prompt content
+        const systemMsg = messages[systemIndex];
+        const greetingContent = afterSystem.content || '';
+        
+        // Append greeting to system prompt with separator
+        const newSystemContent = (systemMsg.content || '') + '\n\n---\n' + greetingContent;
+        
+        // Build result: system (with greeting appended) + all messages after the assistant greeting
+        result = [
+          { ...systemMsg, content: newSystemContent },
+          ...messages.slice(systemIndex + 2)
+        ];
+        
+        console.log(`[LLMService] Strict role alternation: attached assistant greeting (${greetingContent.length} chars) to system prompt`);
+      } else {
+        result = [...messages];
+      }
+    } else {
+      result = [...messages];
+    }
+
+    // ------------------------------------------------------------------
+    // Step 2: Merge consecutive same-role messages
+    // ------------------------------------------------------------------
     const normalized: LLMMessage[] = [];
     
-    for (const msg of messages) {
+    for (const msg of result) {
       // System messages: always pass through (there should be at most one at the start)
       if (msg.role === 'system') {
         normalized.push(msg);
@@ -1089,9 +1128,9 @@ export class LLMService {
       }
     }
 
-    // Log if any merging happened
-    if (normalized.length < messages.length) {
-      console.log(`[LLMService] Strict role alternation: merged ${messages.length - normalized.length} consecutive messages (${messages.length} -> ${normalized.length})`);
+    // Log summary
+    if (normalized.length < origLen) {
+      console.log(`[LLMService] Strict role alternation: ${origLen} -> ${normalized.length} messages`);
     }
 
     return normalized;
