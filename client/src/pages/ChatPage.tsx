@@ -558,10 +558,36 @@ const ChatPage: React.FC = () => {
       const message = messages.find((m) => m.id === messageId);
       if (!message) return;
 
+      // Синхронизируем настройки перевода с сервера (как в handleTranslateMessage)
+      // чтобы использовать актуальный провайдер и язык из Settings
+      let currentProvider = translationProvider;
+      let currentDisplayLang = (window as any).__translationDisplayLang || 'ru';
+      try {
+        const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+        const transResponse = await fetch('/api/translate/settings', {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (transResponse.ok) {
+          const transData = await transResponse.json();
+          if (transData?.provider) {
+            currentProvider = transData.provider;
+            if (currentProvider !== translationProvider) {
+              setTranslationProvider(currentProvider);
+            }
+          }
+          if (transData?.displayLang) {
+            currentDisplayLang = transData.displayLang;
+            (window as any).__translationDisplayLang = currentDisplayLang;
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to sync translation settings for edit, using local state:', err);
+      }
+
       // Для LLM провайдера открываем модальное окно перевода (клиентский стриминг)
       // чтобы пользователь видел процесс перевода в реальном времени
-      if (translationProvider === 'llm' && newContent.length >= 3) {
-        const displayLang = (window as any).__translationDisplayLang || 'ru';
+      if (currentProvider === 'llm' && newContent.length >= 3) {
+        const displayLang = currentDisplayLang;
 
         // Модель данных:
         // User:      content = DisplayLang (RU),  translated_content = EN
