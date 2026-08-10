@@ -226,14 +226,22 @@ router.post('/stream', authenticate, async (req: AuthenticatedRequest, res: Resp
       });
     }
 
+    // Read llmReasoning directly from DB to avoid stale cache issues
+    // This ensures the edit message modal respects the latest reasoning setting
+    const reasoningRow = db.prepare(
+      "SELECT value FROM settings WHERE user_id = ? AND key = 'translation_llm_reasoning'"
+    ).get(userId) as { value?: string | null } | undefined;
+    const llmReasoning = reasoningRow?.value !== 'false'; // default true if not set
+
     console.log(`[TranslateRoute] Starting streaming translation: "${text.substring(0, 50)}..." ${sourceLang} -> ${targetLang}`);
+    console.log(`[TranslateRoute] llmReasoning from DB: ${llmReasoning} (cached settings: ${settings.llmReasoning})`);
 
     // Create LLM translator for streaming
     // Inject the server's LLMClient so it uses the active connection
     const llmTranslator = new LlmTranslator({
       systemPrompt: settings.llmSystemPrompt,
       timeout: 300000, // 5 минут — модели с reasoning могут долго думать
-      reasoning: settings.llmReasoning, // Pass reasoning setting from user preferences
+      reasoning: llmReasoning, // Use fresh value from DB, not cached
     });
     
      // Inject the LLMClient from the server's llmService
