@@ -19,6 +19,8 @@ interface LLMTranslationModalProps {
     status: 'translating' | 'done' | 'error';
     errorMessage?: string;
   };
+  // Разрешить отображение reasoning (мыслей модели). По умолчанию true для обратной совместимости.
+  reasoningEnabled?: boolean;
 }
 
 const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
@@ -28,6 +30,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   onComplete,
   onCancel,
   externalStream,
+  reasoningEnabled = true,
 }) => {
   const [displayText, setDisplayText] = useState<string>('');
   const [status, setStatus] = useState<'translating' | 'error' | 'done'>('translating');
@@ -226,11 +229,12 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
     }, 120000);
 
     // Через 3с покажем индикатор "размышления" если токены ещё не пришли
-    const thinkingId = setTimeout(() => {
+    // (только если reasoning включен в настройках)
+    const thinkingId = reasoningEnabled ? setTimeout(() => {
       if (!hasReceivedToken) {
         setIsThinking(true);
       }
-    }, 3000);
+    }, 3000) : 0;
 
     fetch(`${apiBase}/api/translate/stream`, {
       method: 'POST',
@@ -271,7 +275,8 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
                   return;
                 }
                 // Reasoning токен (мысли модели) — накапливаем отдельно
-                if (data.reasoningToken) {
+                // (только если reasoning включен в настройках)
+                if (data.reasoningToken && reasoningEnabled) {
                   setHasReceivedToken(true);
                   setIsThinking(false);
                   clearTimeout(timeoutId);
@@ -369,8 +374,8 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
           <p className="text-sm text-gray-400 line-clamp-3">{text}</p>
         </div>
 
-        {/* Reasoning section (мысли модели) — показывается если есть reasoning токены */}
-        {reasoningText && (
+        {/* Reasoning section (мысли модели) — показывается если есть reasoning токены И включено в настройках */}
+        {reasoningEnabled && reasoningText && (
           <div className="mb-4 p-3 bg-amber-900/20 rounded-lg border border-amber-800/50">
             <button
               onClick={() => setIsReasoningCollapsed(!isReasoningCollapsed)}
@@ -418,7 +423,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
               <span className="text-xs">Перевод...</span>
             </div>
           )}
-          {status === 'translating' && !displayText && isThinking && (
+          {status === 'translating' && !displayText && isThinking && reasoningEnabled && (
             <div className="flex items-center gap-2 text-amber-400">
               <div className="flex gap-1">
                 <span className="animate-pulse" style={{ animationDelay: '0ms' }}>💭</span>

@@ -104,6 +104,9 @@ const ChatPage: React.FC = () => {
   // Translation provider setting
   const [translationProvider, setTranslationProvider] = useState<string>('google');
   
+  // Translation LLM reasoning setting
+  const [translationLlmReasoning, setTranslationLlmReasoning] = useState<boolean>(true);
+  
   // LLM translation modal state - используем одно состояние для очереди переводов
   // Приоритет: сообщение пользователя > ответ LLM
   const [userMessageTranslation, setUserMessageTranslation] = useState<{
@@ -428,11 +431,14 @@ const ChatPage: React.FC = () => {
              if (transData?.provider) {
                setTranslationProvider(transData.provider);
              }
-             if (transData?.displayLang) {
-               // Store for LLM translation
-               (window as any).__translationDisplayLang = transData.displayLang;
-             }
-           }
+              if (transData?.displayLang) {
+                // Store for LLM translation
+                (window as any).__translationDisplayLang = transData.displayLang;
+              }
+              if (transData?.llmReasoning !== undefined) {
+                setTranslationLlmReasoning(transData.llmReasoning !== false);
+              }
+            }
         } catch (transErr) {
           console.warn('Failed to load translation provider:', transErr);
         }
@@ -1578,6 +1584,7 @@ const ChatPage: React.FC = () => {
           text={userStreamingTranslation.text}
           sourceLang={userStreamingTranslation.sourceLang}
           targetLang={userStreamingTranslation.targetLang}
+          reasoningEnabled={translationLlmReasoning}
           onComplete={(translatedText) => {
             // Перевод сообщения пользователя завершён — закрываем модалку
             // и обновляем конкретное сообщение локально (не вызываем fetchMessages
@@ -1610,6 +1617,7 @@ const ChatPage: React.FC = () => {
           text={streamingTranslation.text}
           sourceLang={streamingTranslation.sourceLang}
           targetLang={streamingTranslation.targetLang}
+          reasoningEnabled={translationLlmReasoning}
           onComplete={handleStreamingTranslationComplete}
           onCancel={handleLlmTranslationCancel}
           externalStream={{
@@ -1625,6 +1633,7 @@ const ChatPage: React.FC = () => {
           text={userMessageTranslation.text}
           sourceLang={userMessageTranslation.sourceLang}
           targetLang={userMessageTranslation.targetLang}
+          reasoningEnabled={translationLlmReasoning}
           onComplete={handleUserMessageTranslationComplete}
           onCancel={handleLlmTranslationCancel}
         />
@@ -1634,6 +1643,7 @@ const ChatPage: React.FC = () => {
           text={llmResponseTranslation.text}
           sourceLang={llmResponseTranslation.sourceLang}
           targetLang={llmResponseTranslation.targetLang}
+          reasoningEnabled={translationLlmReasoning}
           onComplete={handleLlmResponseTranslationComplete}
           onCancel={handleLlmTranslationCancel}
         />
