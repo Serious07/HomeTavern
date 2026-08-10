@@ -137,8 +137,9 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
       const detectedLang = await detectLanguage(originalContent);
       console.log('[ChatsRoute] Detected language:', detectedLang);
 
-      if (detectedLang !== 'en') {
+      if (detectedLang !== 'en' && !lastUserMessage.translated_content) {
         // Отправляем событие начала перевода сообщения пользователя (для UI)
+        // Пропускаем повторный перевод если translated_content уже есть в БД
         sendSSEEvent(res, 'user_translation_start', {
           from: detectedLang,
           to: 'en',
