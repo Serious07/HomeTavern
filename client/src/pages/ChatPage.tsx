@@ -763,8 +763,9 @@ const ChatPage: React.FC = () => {
     const message = messages.find((m) => m.id === messageId);
     if (!message) return;
 
-    // To ensure UI is in sync with server settings, we fetch latest provider
+    // To ensure UI is in sync with server settings, we fetch latest provider and reasoning
     let currentProvider = translationProvider;
+    let currentReasoning = translationLlmReasoning;
     try {
       const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
       const transResponse = await fetch('/api/translate/settings', {
@@ -778,9 +779,15 @@ const ChatPage: React.FC = () => {
             setTranslationProvider(currentProvider);
           }
         }
+        if (transData?.llmReasoning !== undefined) {
+          currentReasoning = transData.llmReasoning !== false;
+          if (currentReasoning !== translationLlmReasoning) {
+            setTranslationLlmReasoning(currentReasoning);
+          }
+        }
       }
     } catch (err) {
-      console.warn('Failed to sync translation provider, using local state:', err);
+      console.warn('Failed to sync translation settings, using local state:', err);
     }
 
     // Check if LLM provider is active

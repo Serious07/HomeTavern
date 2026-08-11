@@ -59,6 +59,18 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
     onCancelRef.current = onCancel;
   }, [onCancel]);
 
+  // Сброс состояния при изменении перевода
+  useEffect(() => {
+    setDisplayText('');
+    setReasoningText('');
+    setStatus('translating');
+    setErrorMessage('');
+    setHasReceivedToken(false);
+    setIsThinking(false);
+    rawBufferRef.current = '';
+    insideThinkingRef.current = false;
+  }, [translationKey]);
+
   // ─── Thinking tag filtering ───────────────────────────────────────────────
   // Некоторые модели (Qwen3 и др.) генерируют <thinking>...</thinking> прямо
   // в content, а не через reasoning_content. Фильтруем на лету при стриминге.
@@ -231,12 +243,11 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
     }, 120000);
 
     // Через 3с покажем индикатор "размышления" если токены ещё не пришли
-    // (только если reasoning включен в настройках)
-    const thinkingId = reasoningEnabled ? setTimeout(() => {
+    const thinkingId = setTimeout(() => {
       if (!hasReceivedToken) {
         setIsThinking(true);
       }
-    }, 3000) : 0;
+    }, 3000);
 
     fetch(`${apiBase}/api/translate/stream`, {
       method: 'POST',
@@ -277,8 +288,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
                   return;
                 }
                 // Reasoning токен (мысли модели) — накапливаем отдельно
-                // (только если reasoning включен в настройках)
-                if (data.reasoningToken && reasoningEnabled) {
+                if (data.reasoningToken) {
                   setHasReceivedToken(true);
                   setIsThinking(false);
                   clearTimeout(timeoutId);
@@ -376,8 +386,8 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
           <p className="text-sm text-gray-400 line-clamp-3">{text}</p>
         </div>
 
-        {/* Reasoning section (мысли модели) — показывается если есть reasoning токены И включено в настройках */}
-        {reasoningEnabled && reasoningText && (
+        {/* Reasoning section (мысли модели) — показывается если включено в настройках или есть токены */}
+        {(reasoningEnabled || reasoningText) && (
           <div className="mb-4 p-3 bg-amber-900/20 rounded-lg border border-amber-800/50">
             <button
               onClick={() => setIsReasoningCollapsed(!isReasoningCollapsed)}
@@ -390,8 +400,8 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
             {!isReasoningCollapsed && (
               <div ref={reasoningContainerRef} className="mt-2 max-h-[150px] overflow-y-auto">
                 <p className="text-xs text-amber-200/70 whitespace-pre-wrap italic font-mono">
-                  {reasoningText}
-                  {status === 'translating' && (
+                  {reasoningText || (status === 'translating' ? 'Модель размышляет...' : '—')}
+                  {status === 'translating' && reasoningText && (
                     <span className="inline-block ml-1 text-amber-400 animate-pulse">▊</span>
                   )}
                 </p>
@@ -404,10 +414,10 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
         <div ref={translationContainerRef} className="mb-4 p-3 bg-gray-900/50 rounded-lg border border-blue-800/50 min-h-[100px] max-h-[300px] overflow-y-auto">
           <p className="text-xs text-blue-400 mb-1">Перевод:</p>
           {status === 'translating' && (
-            <div>
-              <p className="text-sm text-white whitespace-pre-wrap">{displayText}</p>
+            <p className="text-sm text-white whitespace-pre-wrap">
+              {displayText}
               <span className="inline-block ml-1 text-blue-400 animate-pulse">▊</span>
-            </div>
+            </p>
           )}
           {status === 'done' && (
             <p className="text-sm text-white whitespace-pre-wrap">{displayText}</p>
@@ -425,7 +435,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
               <span className="text-xs">Перевод...</span>
             </div>
           )}
-          {status === 'translating' && !displayText && isThinking && reasoningEnabled && (
+          {status === 'translating' && !displayText && isThinking && (
             <div className="flex items-center gap-2 text-amber-400">
               <div className="flex gap-1">
                 <span className="animate-pulse" style={{ animationDelay: '0ms' }}>💭</span>

@@ -149,10 +149,15 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
         // Для LLM провайдера - стримим перевод сообщения пользователя (для UI)
         if (userSettings.provider === 'llm') {
           const { LlmTranslator } = require('translation-library');
+          // Читаем llmReasoning напрямую из БД, чтобы избежать stale cache
+          const reasoningRow = db.prepare(
+            "SELECT value FROM settings WHERE user_id = ? AND key = 'translation_llm_reasoning'"
+          ).get(userId) as { value?: string | null } | undefined;
+          const llmReasoning = reasoningRow?.value !== 'false';
           const llmTranslator = new LlmTranslator({
             systemPrompt: userSettings.llmSystemPrompt,
             timeout: 300000,
-            reasoning: userSettings.llmReasoning, // Передаем настройку reasoning
+            reasoning: llmReasoning, // Передаем настройку reasoning
           });
           
           // Инжектируем LLMClient из llmService
@@ -345,10 +350,15 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
         // Для LLM провайдера - стримим перевод
         if (userSettings.provider === 'llm') {
           const { LlmTranslator } = require('translation-library');
+          // Читаем llmReasoning напрямую из БД, чтобы избежать stale cache
+          const reasoningRow = db.prepare(
+            "SELECT value FROM settings WHERE user_id = ? AND key = 'translation_llm_reasoning'"
+          ).get(userId) as { value?: string | null } | undefined;
+          const llmReasoning = reasoningRow?.value !== 'false';
           const llmTranslator = new LlmTranslator({
             systemPrompt: userSettings.llmSystemPrompt,
             timeout: 30000,
-            reasoning: userSettings.llmReasoning, // Передаем настройку reasoning
+            reasoning: llmReasoning, // Передаем настройку reasoning
           });
           
           // Инжектируем LLMClient из llmService
