@@ -1181,6 +1181,36 @@ const ChatPage: React.FC = () => {
     return character?.name || currentChat.title || 'Чат';
   };
 
+  const memoizedUserExternalStream = useMemo(() => {
+    if (!userStreamingTranslation) return undefined;
+    return {
+      displayText: userStreamingTranslation.displayText,
+      reasoningText: userStreamingTranslation.reasoningText,
+      status: userStreamingTranslation.status,
+      errorMessage: userStreamingTranslation.errorMessage,
+    };
+  }, [
+    userStreamingTranslation?.displayText,
+    userStreamingTranslation?.reasoningText,
+    userStreamingTranslation?.status,
+    userStreamingTranslation?.errorMessage,
+  ]);
+
+  const memoizedStreamingExternalStream = useMemo(() => {
+    if (!streamingTranslation) return undefined;
+    return {
+      displayText: streamingTranslation.displayText,
+      reasoningText: streamingTranslation.reasoningText,
+      status: streamingTranslation.status,
+      errorMessage: streamingTranslation.errorMessage,
+    };
+  }, [
+    streamingTranslation?.displayText,
+    streamingTranslation?.reasoningText,
+    streamingTranslation?.status,
+    streamingTranslation?.errorMessage,
+  ]);
+
   // Loading state
   if (isLoading) {
     return (
@@ -1604,12 +1634,7 @@ const ChatPage: React.FC = () => {
             setUserStreamingTranslation(null);
             userStreamingTranslationMessageIdRef.current = null;
           }}
-          externalStream={{
-            displayText: userStreamingTranslation.displayText,
-            reasoningText: userStreamingTranslation.reasoningText,
-            status: userStreamingTranslation.status,
-            errorMessage: userStreamingTranslation.errorMessage,
-          }}
+          externalStream={memoizedUserExternalStream}
         />
       ) : streamingTranslation ? (
         <LLMTranslationModal
@@ -1620,12 +1645,7 @@ const ChatPage: React.FC = () => {
           reasoningEnabled={translationLlmReasoning}
           onComplete={handleStreamingTranslationComplete}
           onCancel={handleLlmTranslationCancel}
-          externalStream={{
-            displayText: streamingTranslation.displayText,
-            reasoningText: streamingTranslation.reasoningText,
-            status: streamingTranslation.status,
-            errorMessage: streamingTranslation.errorMessage,
-          }}
+          externalStream={memoizedStreamingExternalStream}
         />
       ) : userMessageTranslation ? (
         <LLMTranslationModal

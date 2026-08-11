@@ -43,15 +43,21 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   const [isThinking, setIsThinking] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const onCompleteRef = useRef(onComplete);
+  const onCancelRef = useRef(onCancel);
   const translationContainerRef = useRef<HTMLDivElement>(null);
   const reasoningContainerRef = useRef<HTMLDivElement>(null);
-  onCompleteRef.current = onComplete;
-  const onCancelRef = useRef(onCancel);
-  onCancelRef.current = onCancel;
   const translationKey = `${text}|${sourceLang}|${targetLang}`;
   const isRegisteredRef = useRef(false);
   // Для отслеживания внешнего режима
   const isExternalMode = !!externalStream;
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
 
   // ─── Thinking tag filtering ───────────────────────────────────────────────
   // Некоторые модели (Qwen3 и др.) генерируют <thinking>...</thinking> прямо
@@ -184,18 +190,14 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
 
   // Синхронизация с внешним стримингом
   useEffect(() => {
-    if (externalStream) {
-      setDisplayText(externalStream.displayText);
-      // Синхронизируем reasoningText из внешнего стрима (если есть)
-      if (externalStream.reasoningText !== undefined) {
-        setReasoningText(externalStream.reasoningText);
-      }
-      setStatus(externalStream.status);
-      if (externalStream.errorMessage) {
-        setErrorMessage(externalStream.errorMessage);
-      }
+    if (!externalStream) return;
+    setDisplayText(externalStream.displayText);
+    if (externalStream.reasoningText !== undefined) {
+      setReasoningText(externalStream.reasoningText);
     }
-  }, [externalStream]);
+    setStatus(externalStream.status);
+    setErrorMessage(externalStream.errorMessage || '');
+  }, [externalStream?.displayText, externalStream?.reasoningText, externalStream?.status, externalStream?.errorMessage]);
 
   // Внутренний режим - запускаем свой fetch
   useEffect(() => {
