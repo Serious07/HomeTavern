@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import db from '../config/database';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
+import { invalidateServiceCache } from '../services/translation.service';
 
 const router = Router();
 
@@ -51,6 +52,11 @@ router.put('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
 
     const setting = stmt.run(userId, key, valueStr);
 
+    // Invalidate translation service cache if translation setting changed
+    if (key.startsWith('translation_')) {
+      invalidateServiceCache(userId);
+    }
+
     res.status(200).json(setting[0]);
   } catch (error) {
     console.error('[Settings Route] Error upserting setting:', error);
@@ -75,6 +81,11 @@ router.delete('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
 
     if (result.changes === 0) {
       return res.status(404).json({ error: 'Setting not found' });
+    }
+
+    // Invalidate translation service cache if translation setting deleted
+    if (key.startsWith('translation_')) {
+      invalidateServiceCache(userId);
     }
 
     res.status(200).json({ message: 'Setting deleted successfully' });

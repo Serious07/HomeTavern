@@ -426,18 +426,21 @@ const ChatPage: React.FC = () => {
               'Authorization': `Bearer ${token}`,
             },
           });
-           if (transResponse.ok) {
-             const transData = await transResponse.json();
-             if (transData?.provider) {
-               setTranslationProvider(transData.provider);
-             }
-              if (transData?.displayLang) {
-                // Store for LLM translation
-                (window as any).__translationDisplayLang = transData.displayLang;
+            if (transResponse.ok) {
+              const transData = await transResponse.json();
+              if (transData?.enabled !== undefined) {
+                setTranslationEnabled(transData.enabled);
               }
-              if (transData?.llmReasoning !== undefined) {
-                setTranslationLlmReasoning(transData.llmReasoning !== false);
+              if (transData?.provider) {
+                setTranslationProvider(transData.provider);
               }
+               if (transData?.displayLang) {
+                 // Store for LLM translation
+                 (window as any).__translationDisplayLang = transData.displayLang;
+               }
+               if (transData?.llmReasoning !== undefined) {
+                 setTranslationLlmReasoning(transData.llmReasoning !== false);
+               }
             }
         } catch (transErr) {
           console.warn('Failed to load translation provider:', transErr);

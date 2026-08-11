@@ -100,13 +100,11 @@ const SettingsPage: React.FC = () => {
         if (data?.notification_volume !== undefined) {
           setNotificationVolume(Number(data.notification_volume));
         }
-        if (data?.translation_enabled !== undefined) {
-          setTranslationEnabled(data.translation_enabled === 'true');
-        }
         // 3.2-3.4: Load translation settings from dedicated endpoint
         try {
           const transData = await api.get('/translate/settings');
           if (transData?.data) {
+            setTranslationEnabled(transData.data.enabled !== false);
             setTranslationProvider(transData.data.provider || 'google');
             setTranslationDisplayLang(transData.data.displayLang || 'ru');
             setTranslationLibreEndpoint(transData.data.libreEndpoint || '');
@@ -115,6 +113,9 @@ const SettingsPage: React.FC = () => {
           }
         } catch (transError) {
           console.warn('Failed to load translation settings:', transError);
+          if (data?.translation_enabled !== undefined) {
+            setTranslationEnabled(data.translation_enabled === 'true');
+          }
         }
         if (data?.dialog_tagging_enabled !== undefined) {
           setDialogTaggingEnabled(data.dialog_tagging_enabled === 'true');
@@ -140,7 +141,7 @@ const SettingsPage: React.FC = () => {
     setTranslationEnabled(newValue);
     setTranslationLoading(true);
     try {
-      await api.put('/settings', { key: 'translation_enabled', value: String(newValue) });
+      await api.put('/translate/settings', { enabled: newValue });
     } catch (error) {
       console.error('Failed to save translation setting:', error);
       setTranslationEnabled(!newValue); // Revert on error
