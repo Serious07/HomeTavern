@@ -130,7 +130,7 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
  * PUT /api/llm-connections/:id
  * Updates an existing LLM connection
  */
-router.put('/:id', authenticate, (req: AuthenticatedRequest, res: Response) => {
+router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
     const id = parseInt(req.params.id, 10);
@@ -154,6 +154,16 @@ router.put('/:id', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.body.strict_role_alternation !== undefined) updates.strict_role_alternation = req.body.strict_role_alternation;
 
     llmConnectionRepository.update(id, updates, userId);
+
+    // If key fields (base_url, api_key, model, max_tokens) were updated on the active
+    // connection, re-switch so LLMService picks up the new values immediately.
+    const activeConnAfterUpdate = llmConnectionRepository.getActiveByUserId(userId);
+    if (activeConnAfterUpdate && activeConnAfterUpdate.id === id) {
+      if (updates.base_url !== undefined || updates.api_key !== undefined ||
+          updates.model !== undefined || updates.max_tokens !== undefined) {
+        await llmService.switchToConnection(userId, id);
+      }
+    }
 
     // If reasoning was updated and this is the active connection, notify LLMService
     if (updates.reasoning !== undefined) {
