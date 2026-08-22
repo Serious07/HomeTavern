@@ -123,7 +123,9 @@ export class TimeoutError extends Error {
 export interface Delta {
     role?: MessageRole;
     content?: string;
+    reasoning?: string;
     reasoning_content?: string;
+    thinking?: string;
 }
 
 /**

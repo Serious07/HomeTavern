@@ -1509,7 +1509,7 @@ export class LLMService {
 
         const delta = chunk.choices[0]?.delta || {};
         let content = delta.content || '';
-        let reasoningContent = delta.reasoning_content || '';
+        let reasoningContent = delta.reasoning || delta.reasoning_content || (delta as any).thinking || '';
 
         // === ЭВРИСТИКА ДЛЯ "ЗАБЛУДШИХ" ТОКЕНОВ ===
         // Если мы уже в content phase (получали content токены), и вдруг приходит reasoning_content,
