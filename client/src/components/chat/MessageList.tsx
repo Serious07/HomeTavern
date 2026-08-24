@@ -157,7 +157,7 @@ const ThinkingEditModal: React.FC<{
 
 interface DragInfo {
   startY: number;
-  baseContentLines: number;
+  baseReasoningLines: number; // строк выше линии (мысли) в момент начала drag
   totalLines: number;
   lineH: number;
   contentLines: string[];
@@ -218,7 +218,7 @@ const MessageItem = memo(({
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 
-    const contentLines = message.content.split('\n');
+    const contentLines = message.content ? message.content.split('\n') : [];
     const reasoningText = message.reasoning_content || '';
     const reasoningLines = reasoningText ? reasoningText.split('\n') : [];
     const totalLines = contentLines.length + reasoningLines.length;
@@ -234,7 +234,7 @@ const MessageItem = memo(({
 
     dragInfoRef.current = {
       startY: e.clientY,
-      baseContentLines: contentLines.length,
+      baseReasoningLines: reasoningLines.length,
       totalLines,
       lineH,
       contentLines,
@@ -250,12 +250,13 @@ const MessageItem = memo(({
 
     const dy = e.clientY - info.startY;
     const deltaLines = Math.round(dy / info.lineH);
-    let splitAt = info.baseContentLines + deltaLines;
+    // splitAt = количество строк ВЫШЕ линии (мысли); ниже линии — ответ
+    let splitAt = info.baseReasoningLines + deltaLines;
     splitAt = Math.max(0, Math.min(info.totalLines, splitAt));
 
-    const combined = info.contentLines.concat(info.reasoningLines);
-    const newContent = combined.slice(0, splitAt).join('\n');
-    const newReasoning = splitAt < info.totalLines ? combined.slice(splitAt).join('\n') : '';
+    const combined = info.reasoningLines.concat(info.contentLines);
+    const newReasoning = splitAt > 0 ? combined.slice(0, splitAt).join('\n') : '';
+    const newContent = splitAt < info.totalLines ? combined.slice(splitAt).join('\n') : '';
 
     setDragState((prev) => (prev ? { content: newContent, reasoning: newReasoning } : prev));
   }, []);
@@ -439,37 +440,15 @@ const MessageItem = memo(({
             </button>
           )}
 
-          {/* Секция ответа */}
-          <div className="whitespace-pre-wrap">
-            {isDragging ? (
-              <span className="block text-sm leading-5">{dragState!.content}</span>
-            ) : (
-              <MarkdownRenderer>{getTextToRender()}</MarkdownRenderer>
-            )}
-          </div>
-
-          {/* Секция мыслей: сворачиваемый wrapper (grid-template-rows 1fr <-> 0fr) */}
+          {/* Секция мыслей: сворачиваемый wrapper (grid-template-rows 1fr <-> 0fr).
+              Мысли идут СВЕРХУ — в том же порядке, в котором генерировались токены:
+              сначала мысли, затем пунктирная линия, затем ответ. */}
           {hasReasoning && (
             <div
               className="grid transition-[grid-template-rows] duration-300 ease-in-out"
               style={{ gridTemplateRows: thinkingExpanded ? '1fr' : '0fr' }}
             >
               <div className="overflow-hidden min-h-0">
-                {/* Оранжевая пунктирная линия + зона захвата drag (>=44px) — только в развёрнутом состоянии */}
-                {thinkingExpanded && (
-                  <div
-                    className="relative h-11 -my-4 flex items-center cursor-row-resize select-none"
-                    style={{ touchAction: 'none' }}
-                    onPointerDown={handleDragStart}
-                    onPointerMove={handleDragMove}
-                    onPointerUp={handleDragEnd}
-                    onPointerCancel={handleDragEnd}
-                    title="Перетащите линию, чтобы разделить ответ и мысли"
-                  >
-                    <div className="w-full border-t-2 border-dashed border-orange-400/90" />
-                    <div className="absolute left-1/2 -translate-x-1/2 w-10 h-3 rounded-full bg-orange-400/50 shadow" />
-                  </div>
-                )}
                 {/* Заголовок секции мыслей */}
                 <div className="flex items-center justify-between px-1 pt-1 pb-1">
                   <span className="text-xs text-gray-500 flex items-center gap-1">🧠 Мысли</span>
@@ -491,13 +470,38 @@ const MessageItem = memo(({
                 {/* Текст мыслей (приглушённый) */}
                 <div
                   ref={thinkingBoxRef}
-                  className="px-1 pb-2 text-sm text-gray-400/80 whitespace-pre-wrap leading-5"
+                  className="px-1 pb-1 text-sm text-gray-400/80 whitespace-pre-wrap leading-5"
                 >
                   {isDragging ? dragState!.reasoning : message.reasoning_content}
                 </div>
+                {/* Оранжевая пунктирная линия МЕЖДУ мыслями и ответом + зона захвата drag (>=44px)
+                    — только в развёрнутом состоянии; при сворачивании уходит вверх вместе с мыслями */}
+                {thinkingExpanded && (
+                  <div
+                    className="relative h-11 -my-4 flex items-center cursor-row-resize select-none"
+                    style={{ touchAction: 'none' }}
+                    onPointerDown={handleDragStart}
+                    onPointerMove={handleDragMove}
+                    onPointerUp={handleDragEnd}
+                    onPointerCancel={handleDragEnd}
+                    title="Перетащите линию, чтобы перенести текст между мыслями и ответом"
+                  >
+                    <div className="w-full border-t-2 border-dashed border-orange-400/90" />
+                    <div className="absolute left-1/2 -translate-x-1/2 w-10 h-3 rounded-full bg-orange-400/50 shadow" />
+                  </div>
+                )}
               </div>
             </div>
           )}
+
+          {/* Секция ответа (ниже мыслей) */}
+          <div className="whitespace-pre-wrap">
+            {isDragging ? (
+              <span className="block text-sm leading-5">{dragState!.content}</span>
+            ) : (
+              <MarkdownRenderer>{getTextToRender()}</MarkdownRenderer>
+            )}
+          </div>
 
           {/* Модалка редактирования мыслей */}
           {editingThinking && onReasoningChange && (
