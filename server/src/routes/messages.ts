@@ -265,6 +265,7 @@ router.put('/chats/:chatId/messages/:id/translate-bidirectional', async (req: Au
     const { settings: userSettings } = getTranslationService(userId);
     const displayLang = userSettings.displayLang;
 
+    if (userSettings.enabled) {
     // Определяем роль сообщения для логики перевода
     const isUserMessage = message.role === 'user';
 
@@ -322,6 +323,15 @@ router.put('/chats/:chatId/messages/:id/translate-bidirectional', async (req: Au
           console.error('[Bidirectional Translation] Translation to English failed:', translateErr);
           updatedMessage.content = message.content;
         }
+      }
+    }
+    } else {
+      // Перевод отключен — сохраняем переданные значения как есть, без перевода
+      if (content !== undefined && content !== message.content) {
+        updatedMessage.content = content;
+      }
+      if (translated_content !== undefined && translated_content !== message.translated_content) {
+        updatedMessage.translated_content = translated_content;
       }
     }
 

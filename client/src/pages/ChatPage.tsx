@@ -595,6 +595,7 @@ const ChatPage: React.FC = () => {
       // чтобы использовать актуальный провайдер и язык из Settings
       let currentProvider = translationProvider;
       let currentDisplayLang = (window as any).__translationDisplayLang || 'ru';
+      let currentEnabled = translationEnabled;
       try {
         const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
         const transResponse = await fetch('/api/translate/settings', {
@@ -612,9 +613,24 @@ const ChatPage: React.FC = () => {
             currentDisplayLang = transData.displayLang;
             (window as any).__translationDisplayLang = currentDisplayLang;
           }
+          if (transData?.enabled !== undefined) {
+            currentEnabled = transData.enabled;
+            setTranslationEnabled(transData.enabled);
+          }
         }
       } catch (err) {
         console.warn('Failed to sync translation settings for edit, using local state:', err);
+      }
+
+      // Если перевод отключен в настройках — сохраняем отредактированный текст как есть,
+      // не запуская ни LLM-модалку, ни bidirectional-перевод
+      if (!currentEnabled) {
+        await chatsApi.updateMessage(parseInt(chatId), messageId, {
+          ...(editingTranslated ? { translated_content: newContent } : { content: newContent }),
+          ...(!editingTranslated && otherContent !== undefined ? { translated_content: otherContent } : {}),
+        });
+        await fetchMessages(false);
+        return;
       }
 
       // Для LLM провайдера открываем модальное окно перевода (клиентский стриминг)

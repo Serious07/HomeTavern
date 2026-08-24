@@ -218,6 +218,12 @@ router.post('/stream', authenticate, async (req: AuthenticatedRequest, res: Resp
 
     const { settings } = getTranslationService(userId);
 
+    if (!settings.enabled) {
+      return res.status(403).json({
+        error: 'Translation is disabled',
+      });
+    }
+
     // Only LLM provider supports streaming
     if (settings.provider !== 'llm') {
       return res.status(400).json({
