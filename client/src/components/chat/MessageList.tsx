@@ -29,6 +29,8 @@ interface ExpandedBlockMessages {
 
 interface MessageListProps {
   messages: Message[];
+  /** По умолчанию разворачивать блок мыслей у новых сообщений (настройка expand_thinking_after_generation) */
+  expandThinkingDefault?: boolean;
   onRegenerate?: (messageId: number) => void;
   onEdit?: (messageId: number, content: string, otherContent?: string, editingTranslated?: boolean) => void;
   onDelete?: (messageId: number) => void;
@@ -61,6 +63,7 @@ const formatMessageTime = (dateString: string): string => {
 
 interface MessageItemProps {
   message: Message;
+  expandThinkingDefault?: boolean;
   onRegenerate?: (messageId: number) => void;
   onEditStart?: (message: Message, isTranslated?: boolean) => void;
   onDelete?: (messageId: number) => void;
@@ -166,6 +169,7 @@ interface DragInfo {
 
 const MessageItem = memo(({
   message,
+  expandThinkingDefault = false,
   onRegenerate,
   onEditStart,
   onDelete,
@@ -187,7 +191,10 @@ const MessageItem = memo(({
   const thinkingStorageKey = `hometavern_thinking_collapsed_${message.id}`;
   const [thinkingExpanded, setThinkingExpanded] = useState<boolean>(() => {
     if (!message.reasoning_content) return true;
-    return localStorage.getItem(thinkingStorageKey) !== '1';
+    const saved = localStorage.getItem(thinkingStorageKey);
+    // Ручное действие пользователя (localStorage) имеет приоритет над настройкой
+    const initial = saved !== null ? saved !== '1' : expandThinkingDefault;
+    return initial;
   });
   const [editingThinking, setEditingThinking] = useState(false);
   // Во время drag рендерим обычный текст (без MarkdownRenderer) для точного позиционирования по Y
@@ -679,6 +686,7 @@ type RenderItem =
 
 const MessageList: React.FC<MessageListProps> = ({
   messages,
+  expandThinkingDefault = false,
   onRegenerate,
   onEdit,
   onDelete,
@@ -943,6 +951,7 @@ const MessageList: React.FC<MessageListProps> = ({
                   <MessageItem
                     key={msg.id}
                     message={msg}
+                    expandThinkingDefault={expandThinkingDefault}
                     onRegenerate={onRegenerate}
                     onEditStart={handleEditStart}
                     onDelete={onDelete}
@@ -975,6 +984,7 @@ const MessageList: React.FC<MessageListProps> = ({
       return (
         <MessageItem
           message={item.message}
+          expandThinkingDefault={expandThinkingDefault}
           onRegenerate={onRegenerate}
           onEditStart={handleEditStart}
           onDelete={onDelete}

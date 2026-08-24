@@ -173,6 +173,9 @@ const ChatPage: React.FC = () => {
   
   // Compression LLM reasoning setting
   const [compressionLlmReasoning, setCompressionLlmReasoning] = useState<boolean>(false);
+
+  // Expand thinking block after generation (default: collapsed)
+  const [expandThinkingDefault, setExpandThinkingDefault] = useState<boolean>(false);
   
   // Ref для хранения состояния showThinking для стримингового сообщения
   const streamingMessageThinkingRef = useRef<boolean>(false);
@@ -449,6 +452,9 @@ const ChatPage: React.FC = () => {
         }
         if (data.compression_llm_reasoning !== undefined) {
           setCompressionLlmReasoning(data.compression_llm_reasoning === 'true' || data.compression_llm_reasoning === '1');
+        }
+        if (data.expand_thinking_after_generation !== undefined) {
+          setExpandThinkingDefault(data.expand_thinking_after_generation === 'true');
         }
       } catch (err) {
         console.error('Error loading settings:', err);
@@ -1465,6 +1471,7 @@ const ChatPage: React.FC = () => {
                <MessageList
                   key={chatId}
                   messages={memoizedMessages}
+                  expandThinkingDefault={expandThinkingDefault}
                   onRegenerate={handleRegenerate}
                   onEdit={handleEditMessage}
                   onDelete={handleDeleteMessage}

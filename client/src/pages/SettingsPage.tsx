@@ -57,6 +57,9 @@ const SettingsPage: React.FC = () => {
   
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [soundLoading, setSoundLoading] = useState<boolean>(false);
+
+  const [expandThinkingAfterGeneration, setExpandThinkingAfterGeneration] = useState<boolean>(false);
+  const [expandThinkingLoading, setExpandThinkingLoading] = useState<boolean>(false);
   
   const [notificationVolume, setNotificationVolume] = useState<number>(70);
   const [translationEnabled, setTranslationEnabled] = useState<boolean>(true);
@@ -128,6 +131,9 @@ const SettingsPage: React.FC = () => {
         }
         if (data?.compression_llm_reasoning !== undefined) {
           setCompressionLlmReasoning(data.compression_llm_reasoning === 'true' || data.compression_llm_reasoning === '1');
+        }
+        if (data?.expand_thinking_after_generation !== undefined) {
+          setExpandThinkingAfterGeneration(data.expand_thinking_after_generation === 'true');
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
@@ -256,6 +262,20 @@ const SettingsPage: React.FC = () => {
       setSoundEnabled(!newValue); // Revert on error
     } finally {
       setSoundLoading(false);
+    }
+  };
+
+  const handleExpandThinkingToggle = async () => {
+    const newValue = !expandThinkingAfterGeneration;
+    setExpandThinkingAfterGeneration(newValue);
+    setExpandThinkingLoading(true);
+    try {
+      await api.put('/settings', { key: 'expand_thinking_after_generation', value: String(newValue) });
+    } catch (error) {
+      console.error('Failed to save expand thinking setting:', error);
+      setExpandThinkingAfterGeneration(!newValue); // Revert on error
+    } finally {
+      setExpandThinkingLoading(false);
     }
   };
   
@@ -388,6 +408,31 @@ const SettingsPage: React.FC = () => {
                   Текущий лимит: {visibleMessageLimit} сообщений
                 </p>
               </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-300 font-medium">Разворачивать мысли после генерации</p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    При включении блок мыслей в новом сообщении LLM открывается автоматически. По умолчанию сообщения показываются свёрнутыми. Ручное сворачивание/разворачивание отдельных сообщений имеет приоритет над этой настройкой.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExpandThinkingToggle}
+                  disabled={expandThinkingLoading}
+                  className={`${
+                    expandThinkingAfterGeneration ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                  } relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
+                  role="switch"
+                  aria-checked={expandThinkingAfterGeneration}
+                >
+                  <span
+                    className={`${
+                      expandThinkingAfterGeneration ? 'translate-x-6' : 'translate-x-1'
+                    } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
+                  />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -477,6 +522,31 @@ const SettingsPage: React.FC = () => {
                 <p className="text-xs text-gray-500 mt-2">
                   Текущий лимит: {visibleMessageLimit} сообщений
                 </p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-300 font-medium">Разворачивать мысли после генерации</p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    При включении блок мыслей в новом сообщении LLM открывается автоматически. По умолчанию сообщения показываются свёрнутыми. Ручное сворачивание/разворачивание отдельных сообщений имеет приоритет над этой настройкой.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExpandThinkingToggle}
+                  disabled={expandThinkingLoading}
+                  className={`${
+                    expandThinkingAfterGeneration ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                  } relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
+                  role="switch"
+                  aria-checked={expandThinkingAfterGeneration}
+                >
+                  <span
+                    className={`${
+                      expandThinkingAfterGeneration ? 'translate-x-6' : 'translate-x-1'
+                    } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
+                  />
+                </button>
               </div>
             </div>
           </div>
