@@ -488,69 +488,6 @@ const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Display settings */}
-          <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
-            <h2 className="text-xl font-bold text-white mb-6">Отображение</h2>
-            
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="visibleLimit" className="block text-sm font-medium text-gray-300 mb-2">
-                  Лимит отображаемых сообщений
-                </label>
-                <p className="text-xs text-gray-400 mb-3">
-                  Оптимизация производительности: на экране отображается только указанное количество сообщений одновременно.
-                  Вся история сохраняется и доступна при прокрутке.
-                </p>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="number"
-                    id="visibleLimit"
-                    value={limitInput}
-                    onChange={(e) => setLimitInput(e.target.value)}
-                    min="10"
-                    max="500"
-                    className="w-32 px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500"
-                    placeholder="50"
-                  />
-                  <button
-                    onClick={handleSaveLimit}
-                    className="py-3 px-6 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold text-white transition"
-                  >
-                    Применить
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  Текущий лимит: {visibleMessageLimit} сообщений
-                </p>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-300 font-medium">Разворачивать мысли после генерации</p>
-                  <p className="text-sm text-gray-400 mt-1">
-                    При включении блок мыслей в новом сообщении LLM открывается автоматически. По умолчанию сообщения показываются свёрнутыми. Ручное сворачивание/разворачивание отдельных сообщений имеет приоритет над этой настройкой.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleExpandThinkingToggle}
-                  disabled={expandThinkingLoading}
-                  className={`${
-                    expandThinkingAfterGeneration ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
-                  } relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
-                  role="switch"
-                  aria-checked={expandThinkingAfterGeneration}
-                >
-                  <span
-                    className={`${
-                      expandThinkingAfterGeneration ? 'translate-x-6' : 'translate-x-1'
-                    } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
-                  />
-                </button>
-              </div>
-            </div>
-          </div>
-
             {/* Dialog Tagging section */}
             <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
               <h2 className="text-xl font-bold text-white mb-6">Подсветка диалогов</h2>
