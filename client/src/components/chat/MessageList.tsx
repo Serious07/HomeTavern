@@ -32,8 +32,7 @@ interface MessageListProps {
   onRegenerate?: (messageId: number) => void;
   onEdit?: (messageId: number, content: string, otherContent?: string, editingTranslated?: boolean) => void;
   onDelete?: (messageId: number) => void;
-  showThinking?: Record<number, boolean>;
-  onToggleThinking?: (messageId: number) => void;
+  onReasoningChange?: (messageId: number, content: string, reasoning: string | null) => void;
   translatingMessageId?: number | null;
   onTranslate?: (messageId: number) => void;
   translationEnabled?: boolean;
@@ -65,8 +64,7 @@ interface MessageItemProps {
   onRegenerate?: (messageId: number) => void;
   onEditStart?: (message: Message, isTranslated?: boolean) => void;
   onDelete?: (messageId: number) => void;
-  showThinking: Record<number, boolean>;
-  onToggleThinking?: (messageId: number) => void;
+  onReasoningChange?: (messageId: number, content: string, reasoning: string | null) => void;
   translatingMessageId?: number | null;
   onTranslate?: (messageId: number) => void;
   translationEnabled: boolean;
@@ -77,13 +75,101 @@ interface MessageItemProps {
   onSelectionClick?: (messageId: number) => void;
 }
 
+const THINKING_LINE_HEIGHT = 20; // text-sm + leading-5 = 20px
+
+/**
+ * Локальная модалка редактирования мыслей (reasoning_content).
+ * По мотивам MessageEditModal, но проще: только textarea.
+ */
+const ThinkingEditModal: React.FC<{
+  initialReasoning: string;
+  onSave: (reasoning: string | null) => void;
+  onCancel: () => void;
+}> = ({ initialReasoning, onSave, onCancel }) => {
+  const [draft, setDraft] = useState(initialReasoning);
+  const [isSaving, setIsSaving] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => textareaRef.current?.focus(), 100);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSaving) onCancel();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel, isSaving]);
+
+  const handleSave = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      await onSave(draft.trim() ? draft : null);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-gray-800 rounded-xl w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+          <span className="text-sm text-gray-300 flex items-center gap-2">🧠 Редактирование мыслей</span>
+          <button onClick={onCancel} disabled={isSaving} className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="p-4 flex-1 overflow-y-auto">
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Текст мыслей модели..."
+            className="w-full bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500 resize-y text-sm leading-relaxed px-3 py-2.5"
+            style={{ minHeight: '200px', maxHeight: '50vh' }}
+          />
+        </div>
+        <div className="border-t border-gray-700 px-4 py-3 flex gap-3">
+          <button
+            onClick={onCancel}
+            disabled={isSaving}
+            className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800 text-white rounded-lg font-medium transition"
+          >
+            Отмена
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg font-medium transition"
+          >
+            {isSaving ? 'Сохранение...' : 'Сохранить'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+interface DragInfo {
+  startY: number;
+  baseContentLines: number;
+  totalLines: number;
+  lineH: number;
+  contentLines: string[];
+  reasoningLines: string[];
+}
+
 const MessageItem = memo(({
   message,
   onRegenerate,
   onEditStart,
   onDelete,
-  showThinking,
-  onToggleThinking,
+  onReasoningChange,
   translatingMessageId,
   onTranslate,
   translationEnabled,
@@ -95,6 +181,98 @@ const MessageItem = memo(({
 }: MessageItemProps) => {
   const [showOriginal, setShowOriginal] = useState<boolean>(false);
   const [copied, setCopied] = useState(false);
+
+  // ============ Секция мыслей (reasoning_content) ============
+  const hasReasoning = message.role === 'assistant' && !!message.reasoning_content;
+  const thinkingStorageKey = `hometavern_thinking_collapsed_${message.id}`;
+  const [thinkingExpanded, setThinkingExpanded] = useState<boolean>(() => {
+    if (!message.reasoning_content) return true;
+    return localStorage.getItem(thinkingStorageKey) !== '1';
+  });
+  const [editingThinking, setEditingThinking] = useState(false);
+  // Во время drag рендерим обычный текст (без MarkdownRenderer) для точного позиционирования по Y
+  const [dragState, setDragState] = useState<{ content: string; reasoning: string } | null>(null);
+  const dragInfoRef = useRef<DragInfo | null>(null);
+  const thinkingBoxRef = useRef<HTMLDivElement>(null);
+
+  const isDragging = dragState !== null;
+  const dragStateRef = useRef<{ content: string; reasoning: string } | null>(null);
+
+  // Синхронизируем ref с dragState, чтобы handleDragEnd мог прочитать актуальное
+  // значение без побочных эффектов внутри updater'а setState
+  useEffect(() => {
+    dragStateRef.current = dragState;
+  }, [dragState]);
+
+  const toggleThinking = useCallback(() => {
+    setThinkingExpanded((prev) => {
+      const next = !prev;
+      localStorage.setItem(thinkingStorageKey, next ? '0' : '1');
+      return next;
+    });
+  }, [thinkingStorageKey]);
+
+  const handleDragStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!onReasoningChange) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+
+    const contentLines = message.content.split('\n');
+    const reasoningText = message.reasoning_content || '';
+    const reasoningLines = reasoningText ? reasoningText.split('\n') : [];
+    const totalLines = contentLines.length + reasoningLines.length;
+    if (totalLines === 0) return;
+
+    // Высота логической строки: измеряем из секции мыслей (она всегда рендерится как pre-wrap текст)
+    let lineH = THINKING_LINE_HEIGHT;
+    const thinkEl = thinkingBoxRef.current;
+    if (thinkEl && reasoningLines.length > 0) {
+      const computed = parseFloat(getComputedStyle(thinkEl).lineHeight);
+      if (!isNaN(computed) && computed > 0) lineH = computed;
+    }
+
+    dragInfoRef.current = {
+      startY: e.clientY,
+      baseContentLines: contentLines.length,
+      totalLines,
+      lineH,
+      contentLines,
+      reasoningLines,
+    };
+    setDragState({ content: message.content, reasoning: reasoningText });
+  }, [onReasoningChange, message.content, message.reasoning_content]);
+
+  const handleDragMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const info = dragInfoRef.current;
+    if (!info) return;
+    e.preventDefault();
+
+    const dy = e.clientY - info.startY;
+    const deltaLines = Math.round(dy / info.lineH);
+    let splitAt = info.baseContentLines + deltaLines;
+    splitAt = Math.max(0, Math.min(info.totalLines, splitAt));
+
+    const combined = info.contentLines.concat(info.reasoningLines);
+    const newContent = combined.slice(0, splitAt).join('\n');
+    const newReasoning = splitAt < info.totalLines ? combined.slice(splitAt).join('\n') : '';
+
+    setDragState((prev) => (prev ? { content: newContent, reasoning: newReasoning } : prev));
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    dragInfoRef.current = null;
+    const prev = dragStateRef.current;
+    setDragState(null);
+    dragStateRef.current = null;
+
+    if (!prev || !onReasoningChange) return;
+    const newReasoning = prev.reasoning.trim() ? prev.reasoning : null;
+    const oldReasoning = message.reasoning_content ?? null;
+    if (prev.content !== message.content || newReasoning !== oldReasoning) {
+      onReasoningChange(message.id, prev.content, newReasoning);
+    }
+  }, [onReasoningChange, message.id, message.content, message.reasoning_content]);
 
   const isSystem = message.role === 'system';
   const isUser = message.role === 'user';
@@ -234,47 +412,104 @@ const MessageItem = memo(({
         }`}
       >
         <div
-          className={`rounded-2xl px-4 py-3 ${
+          className={`relative rounded-2xl px-4 py-3 ${
             isUser
               ? 'bg-gray-600 text-white rounded-br-md'
               : 'bg-gray-700/80 text-white rounded-bl-md'
           }`}
         >
-          {message.reasoning_content && (
-            <div className="mb-3 pb-3 border-b border-gray-600">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleThinking?.(message.id);
-                }}
-                className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-300 transition"
+          {/* Оранжевая стрелка: → = мысли свёрнуты, ↓ (rotate-90) = развёрнуты */}
+          {hasReasoning && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleThinking();
+              }}
+              title={thinkingExpanded ? 'Свернуть мысли' : 'Показать мысли'}
+              className="absolute -top-2.5 -right-2 z-10 p-1.5 bg-gray-800 text-orange-400 hover:text-orange-300 hover:bg-gray-700 rounded-full shadow transition-colors"
+            >
+              <svg
+                className={`w-4 h-4 transition-transform duration-300 ease-in-out ${thinkingExpanded ? 'rotate-90' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
               >
-                <svg
-                  className={`w-4 h-4 transition-transform ${showThinking[message.id] ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-                {showThinking[message.id] ? 'Скрыть мышление' : 'Показать мышление'}
-              </button>
-              {showThinking[message.id] && (
-                <div className="mt-2 p-3 bg-gray-800/50 rounded-lg text-sm text-gray-400 whitespace-pre-wrap">
-                  {message.reasoning_content}
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          )}
+
+          {/* Секция ответа */}
+          <div className="whitespace-pre-wrap">
+            {isDragging ? (
+              <span className="block text-sm leading-5">{dragState!.content}</span>
+            ) : (
+              <MarkdownRenderer>{getTextToRender()}</MarkdownRenderer>
+            )}
+          </div>
+
+          {/* Секция мыслей: сворачиваемый wrapper (grid-template-rows 1fr <-> 0fr) */}
+          {hasReasoning && (
+            <div
+              className="grid transition-[grid-template-rows] duration-300 ease-in-out"
+              style={{ gridTemplateRows: thinkingExpanded ? '1fr' : '0fr' }}
+            >
+              <div className="overflow-hidden min-h-0">
+                {/* Оранжевая пунктирная линия + зона захвата drag (>=44px) — только в развёрнутом состоянии */}
+                {thinkingExpanded && (
+                  <div
+                    className="relative h-11 -my-4 flex items-center cursor-row-resize select-none"
+                    style={{ touchAction: 'none' }}
+                    onPointerDown={handleDragStart}
+                    onPointerMove={handleDragMove}
+                    onPointerUp={handleDragEnd}
+                    onPointerCancel={handleDragEnd}
+                    title="Перетащите линию, чтобы разделить ответ и мысли"
+                  >
+                    <div className="w-full border-t-2 border-dashed border-orange-400/90" />
+                    <div className="absolute left-1/2 -translate-x-1/2 w-10 h-3 rounded-full bg-orange-400/50 shadow" />
+                  </div>
+                )}
+                {/* Заголовок секции мыслей */}
+                <div className="flex items-center justify-between px-1 pt-1 pb-1">
+                  <span className="text-xs text-gray-500 flex items-center gap-1">🧠 Мысли</span>
+                  {thinkingExpanded && onReasoningChange && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingThinking(true);
+                      }}
+                      title="Редактировать мысли"
+                      className="p-1 text-gray-500 hover:text-orange-400 hover:bg-gray-700 rounded transition"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
-              )}
+                {/* Текст мыслей (приглушённый) */}
+                <div
+                  ref={thinkingBoxRef}
+                  className="px-1 pb-2 text-sm text-gray-400/80 whitespace-pre-wrap leading-5"
+                >
+                  {isDragging ? dragState!.reasoning : message.reasoning_content}
+                </div>
+              </div>
             </div>
           )}
 
-          <div className="whitespace-pre-wrap">
-            <MarkdownRenderer>{getTextToRender()}</MarkdownRenderer>
-          </div>
+          {/* Модалка редактирования мыслей */}
+          {editingThinking && onReasoningChange && (
+            <ThinkingEditModal
+              initialReasoning={message.reasoning_content || ''}
+              onCancel={() => setEditingThinking(false)}
+              onSave={(reasoning) => {
+                onReasoningChange(message.id, message.content, reasoning);
+                setEditingThinking(false);
+              }}
+            />
+          )}
         </div>
 
         {message.role === 'assistant' && (
@@ -443,8 +678,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onRegenerate,
   onEdit,
   onDelete,
-  showThinking = {},
-  onToggleThinking,
+  onReasoningChange,
   translatingMessageId = null,
   onTranslate,
   translationEnabled = true,
@@ -708,8 +942,7 @@ const MessageList: React.FC<MessageListProps> = ({
                     onRegenerate={onRegenerate}
                     onEditStart={handleEditStart}
                     onDelete={onDelete}
-                    showThinking={showThinking}
-                    onToggleThinking={onToggleThinking}
+                    onReasoningChange={onReasoningChange}
                     translatingMessageId={translatingMessageId}
                     onTranslate={onTranslate}
                     translationEnabled={translationEnabled}
@@ -741,8 +974,7 @@ const MessageList: React.FC<MessageListProps> = ({
           onRegenerate={onRegenerate}
           onEditStart={handleEditStart}
           onDelete={onDelete}
-          showThinking={showThinking}
-          onToggleThinking={onToggleThinking}
+          onReasoningChange={onReasoningChange}
           translatingMessageId={translatingMessageId}
           onTranslate={onTranslate}
           translationEnabled={translationEnabled}
@@ -754,7 +986,7 @@ const MessageList: React.FC<MessageListProps> = ({
         />
       );
     }
-  }, [expandedBlockMessages, lastAssistantIndex, translationEnabled, isSelectionMode, selectionStart, selectionEnd, onEditBlock, onToggleBlockCompression, onDeleteBlock, handleExpandBlock, handleCollapseBlock, handleEditStart, onRegenerate, onDelete, showThinking, onToggleThinking, translatingMessageId, onTranslate, handleSelectionClick, editingTranslated]);
+  }, [expandedBlockMessages, lastAssistantIndex, translationEnabled, isSelectionMode, selectionStart, selectionEnd, onEditBlock, onToggleBlockCompression, onDeleteBlock, handleExpandBlock, handleCollapseBlock, handleEditStart, onRegenerate, onDelete, onReasoningChange, translatingMessageId, onTranslate, handleSelectionClick, editingTranslated]);
 
   const hasMoreMessages = totalItemCount > displayCount;
 

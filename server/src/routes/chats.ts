@@ -85,6 +85,7 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
   res.setHeader('X-Accel-Buffering', 'no');
 
   let fullContent = '';
+  let fullReasoning = '';
    let translatedText = '';
    let startTime = 0;
    let contentTokenCount = 0;
@@ -302,6 +303,7 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
         lastActivity = Date.now();
         if (chunk.type === 'reasoning_token') {
           reasoningTokenCount++;
+          fullReasoning += chunk.token;
           sendSSEEvent(res, 'reasoning_token', { token: chunk.token });
         } else if (chunk.type === 'content_token') {
           sendSSEEvent(res, 'content_token', { token: chunk.token });
@@ -333,6 +335,13 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
      const activeHeroStream = heroVariationRepository.getActiveHeroVariationByUserId(userId);
      const heroNameStream = activeHeroStream?.display_name || activeHeroStream?.name || null;
      fullContent = replaceUserPlaceholders(fullContent, heroNameStream);
+
+     // 7.7. Если контент пустой, а мысли есть — переносим мысли в контент
+     // (решение: весь reasoning в content, секция мыслей остаётся пустой)
+     if (!fullContent.trim() && fullReasoning.trim()) {
+       fullContent = fullReasoning;
+       fullReasoning = '';
+     }
 
     // 2.7: Переводим ответ на displayLang (если оригинал на английском и перевод включен)
     // Для LLM провайдера - стримим перевод токенами через SSE
@@ -432,6 +441,7 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
     // 9. Обновляем сообщение ассистента в БД с полным контентом, переводом и метриками
     messageRepository.updateMessage(tempMessage.id, {
       content: fullContent,
+      reasoning_content: fullReasoning || null,
       translated_content: translationEnabled && translatedText !== fullContent ? translatedText : undefined,
       generated_at: new Date().toISOString(),
       tokens_per_sec: tokensPerSec,
@@ -622,6 +632,7 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
 
   let messageId: string | null = null;
   let fullContent = '';
+  let genFullReasoning = '';
   let translatedText = '';
   let genStartTime = 0;
   let genContentTokenCount = 0;
@@ -720,6 +731,7 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
         genLastActivity = Date.now();
         if (chunk.type === 'reasoning_token') {
           genReasoningTokenCount++;
+          genFullReasoning += chunk.token;
           sendSSEEvent(res, 'reasoning_token', { token: chunk.token });
         } else if (chunk.type === 'content_token') {
           sendSSEEvent(res, 'content_token', { token: chunk.token });
@@ -752,6 +764,13 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
      const heroNameGen = activeHeroGen?.display_name || activeHeroGen?.name || null;
      fullContent = replaceUserPlaceholders(fullContent, heroNameGen);
 
+     // 7.7. Если контент пустой, а мысли есть — переносим мысли в контент
+     // (решение: весь reasoning в content, секция мыслей остаётся пустой)
+     if (!fullContent.trim() && genFullReasoning.trim()) {
+       fullContent = genFullReasoning;
+       genFullReasoning = '';
+     }
+
     // 2.7: Переводим ответ на displayLang (если оригинал на английском и перевод включен)
     if (translationEnabled) {
       const responseLang = await detectLanguage(fullContent);
@@ -783,8 +802,9 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
     );
     messageId = String(assistantMessage.id);
     
-    // Обновляем сообщение с метриками
+    // Обновляем сообщение с метриками и содержимым мыслей
     messageRepository.updateMessage(assistantMessage.id, {
+      reasoning_content: genFullReasoning || null,
       generated_at: new Date().toISOString(),
       tokens_per_sec: genTokensPerSec,
       total_tokens: genTotalTokenCount,

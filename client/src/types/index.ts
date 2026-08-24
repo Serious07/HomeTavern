@@ -44,7 +44,7 @@ export interface Message {
   user_id: number;
   content: string;
   role: 'user' | 'assistant' | 'system';
-  reasoning_content?: string;
+  reasoning_content?: string | null;
   translated_content?: string | null;
   created_at: string;
   // Поля для статистики генерации (только для assistant сообщений)

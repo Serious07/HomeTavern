@@ -13,6 +13,7 @@ export interface Message {
   tokens_per_sec?: number | null;
   total_tokens?: number | null;
   reasoning_tokens?: number | null;
+  reasoning_content?: string | null;
 }
 
 export interface CreateMessageParams {
@@ -34,6 +35,7 @@ export interface UpdateMessageParams {
   tokens_per_sec?: number;
   total_tokens?: number;
   reasoning_tokens?: number;
+  reasoning_content?: string | null;
 }
 
 export class MessageRepository {
@@ -84,7 +86,11 @@ export class MessageRepository {
  * Обновление сообщения
  */
   updateMessage(id: number, updates: UpdateMessageParams): Message | undefined {
-    const { role, content, translated_content, message_id, hidden, generated_at, tokens_per_sec, total_tokens, reasoning_tokens } = updates;
+    const { role, content, translated_content, message_id, hidden, generated_at, tokens_per_sec, total_tokens, reasoning_tokens, reasoning_content } = updates;
+
+    // reasoning_content: undefined = не менять, null = явно очистить (NULL), string = установить
+    // (COALESCE(?, col) не умеет записывать NULL, поэтому отдельный CASE-флаг)
+    const clearReasoning = reasoning_content === null;
 
     const stmt = db.prepare(`
       UPDATE messages
@@ -96,7 +102,8 @@ export class MessageRepository {
           generated_at = COALESCE(?, generated_at),
           tokens_per_sec = COALESCE(?, tokens_per_sec),
           total_tokens = COALESCE(?, total_tokens),
-          reasoning_tokens = COALESCE(?, reasoning_tokens)
+          reasoning_tokens = COALESCE(?, reasoning_tokens),
+          reasoning_content = CASE WHEN ? = 1 THEN NULL ELSE COALESCE(?, reasoning_content) END
       WHERE id = ?
     `);
     stmt.run(
@@ -109,6 +116,8 @@ export class MessageRepository {
       tokens_per_sec !== undefined ? tokens_per_sec : null,
       total_tokens !== undefined ? total_tokens : null,
       reasoning_tokens !== undefined ? reasoning_tokens : null,
+      clearReasoning ? 1 : 0,
+      clearReasoning ? null : (reasoning_content !== undefined ? reasoning_content : null),
       id
     );
 

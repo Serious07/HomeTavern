@@ -85,7 +85,6 @@ const ChatPage: React.FC = () => {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
-  const [showThinking, setShowThinking] = useState<Record<number, boolean>>({});
   const [isStreaming, setIsStreaming] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -559,6 +558,25 @@ const ChatPage: React.FC = () => {
     }
   };
 
+  // Пересборка content/reasoning_content: drag разделителя или редактирование мыслей
+  const handleReasoningChange = useCallback(async (messageId: number, content: string, reasoning: string | null) => {
+    if (!chatId) return;
+    try {
+      // Оптимистичное обновление локального состояния, чтобы не ждать сети
+      setMessages((prev) => prev.map((m) => m.id === messageId
+        ? { ...m, content, reasoning_content: reasoning ?? undefined }
+        : m));
+
+      await chatsApi.updateMessage(parseInt(chatId), messageId, {
+        content,
+        reasoning_content: reasoning,
+      });
+      await fetchMessages(false);
+    } catch (err) {
+      console.error('Error updating reasoning split:', err);
+    }
+  }, [chatId, fetchMessages]);
+
   const handleEditMessage = async (messageId: number, newContent: string, otherContent?: string, editingTranslated?: boolean) => {
     if (!chatId) return;
 
@@ -744,13 +762,6 @@ const ChatPage: React.FC = () => {
     } catch (err: any) {
       console.error('Error editing message:', err);
     }
-  };
-
-  const handleToggleThinking = (messageId: number) => {
-    setShowThinking((prev) => ({
-      ...prev,
-      [messageId]: !prev[messageId],
-    }));
   };
 
   const handleStreamingToggleThinking = () => {
@@ -1457,8 +1468,7 @@ const ChatPage: React.FC = () => {
                   onRegenerate={handleRegenerate}
                   onEdit={handleEditMessage}
                   onDelete={handleDeleteMessage}
-                  showThinking={showThinking}
-                  onToggleThinking={handleToggleThinking}
+                  onReasoningChange={handleReasoningChange}
                   translatingMessageId={translatingMessageId}
                   onTranslate={handleTranslateMessage}
                   translationEnabled={translationEnabled}
