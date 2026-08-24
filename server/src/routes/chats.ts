@@ -336,11 +336,12 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
      const heroNameStream = activeHeroStream?.display_name || activeHeroStream?.name || null;
      fullContent = replaceUserPlaceholders(fullContent, heroNameStream);
 
-     // 7.7. Если контент пустой, а мысли есть — переносим мысли в контент
-     // (решение: весь reasoning в content, секция мыслей остаётся пустой)
+     // 7.7. Если контент пустой, а мысли есть — переносим мысли в контент.
+     // В reasoning_content оставляем заглушку «Мысли:», чтобы в UI появилась
+     // пунктирная линия-разделитель, которой можно воспользоваться для разделения.
      if (!fullContent.trim() && fullReasoning.trim()) {
        fullContent = fullReasoning;
-       fullReasoning = '';
+       fullReasoning = 'Мысли:\n';
      }
 
     // 2.7: Переводим ответ на displayLang (если оригинал на английском и перевод включен)
@@ -764,11 +765,12 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
      const heroNameGen = activeHeroGen?.display_name || activeHeroGen?.name || null;
      fullContent = replaceUserPlaceholders(fullContent, heroNameGen);
 
-     // 7.7. Если контент пустой, а мысли есть — переносим мысли в контент
-     // (решение: весь reasoning в content, секция мыслей остаётся пустой)
+     // 7.7. Если контент пустой, а мысли есть — переносим мысли в контент.
+     // В reasoning_content оставляем заглушку «Мысли:», чтобы в UI появилась
+     // пунктирная линия-разделитель, которой можно воспользоваться для разделения.
      if (!fullContent.trim() && genFullReasoning.trim()) {
        fullContent = genFullReasoning;
-       genFullReasoning = '';
+       genFullReasoning = 'Мысли:\n';
      }
 
     // 2.7: Переводим ответ на displayLang (если оригинал на английском и перевод включен)
