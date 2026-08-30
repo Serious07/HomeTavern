@@ -781,7 +781,7 @@ const MessageList: React.FC<MessageListProps> = ({
     for (const msg of messages) {
       const block = messageToBlock.get(msg.id);
 
-      if (block) {
+      if (block && block.is_compressed === 1) {
         if (msg.id === block.start_message_id) {
           items.push({ type: 'block', block, key: `block-${block.id}` });
         }

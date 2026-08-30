@@ -429,10 +429,16 @@ export function useCompression(chatId: number | null) {
 
       const updatedBlock = await response.json();
       
-      return {
+      const parsedBlock = {
         ...updatedBlock,
         original_message_ids: JSON.parse(updatedBlock.original_message_ids || '[]')
       } as ChatBlockWithParsedIds;
+
+      // Обновляем локальное состояние блока (например, после переключения is_compressed),
+      // иначе UI продолжит отображать старое значение
+      setBlocks(prev => prev.map(b => (b.id === blockId ? parsedBlock : b)));
+
+      return parsedBlock;
     } catch (error) {
       console.error('[useCompression] Error editing block:', error);
       return null;
