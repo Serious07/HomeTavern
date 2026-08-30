@@ -78,9 +78,20 @@ export const ChatBlock: React.FC<ChatBlockProps> = ({
   };
 
   const messageCount = block.original_message_ids.length;
+  const isCompressed = block.is_compressed === 1;
 
   return (
-    <div className="mb-4 rounded-lg border border-cyan-700 bg-cyan-900/20 p-4">
+    <div className={`mb-4 rounded-lg border p-4 ${
+      isCompressed
+        ? 'border-cyan-700 bg-cyan-900/20'
+        : 'border-yellow-700/60 bg-yellow-900/10'
+    }`}>
+      {/* Бейдж статуса сжатия: когда сжатие отключено — блок всегда развёрнут */}
+      {!isCompressed && (
+        <div className="mb-2 inline-flex items-center gap-1 rounded bg-yellow-900/40 px-2 py-1 text-xs font-medium text-yellow-300">
+          🔄 Сжатие: ВЫКЛ — оригинальные сообщения показаны полностью
+        </div>
+      )}
       {/* Заголовок блока */}
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-2">
@@ -128,11 +139,13 @@ export const ChatBlock: React.FC<ChatBlockProps> = ({
         </div>
       </div>
 
-      {/* Краткий пересказ */}
-      <div className="text-sm text-cyan-100/80 mb-3">
-        <div className="font-medium text-cyan-300 mb-1">Краткий пересказ:</div>
-        <p className="whitespace-pre-wrap">{displaySummary}</p>
-      </div>
+      {/* Краткий пересказ — только когда сжатие включено (в режиме ВЫКЛ показаны оригинальные сообщения) */}
+      {isCompressed && (
+        <div className="text-sm text-cyan-100/80 mb-3">
+          <div className="font-medium text-cyan-300 mb-1">Краткий пересказ:</div>
+          <p className="whitespace-pre-wrap">{displaySummary}</p>
+        </div>
+      )}
 
       {/* Кнопка развернуть */}
       {onExpand && !isExpanded && (

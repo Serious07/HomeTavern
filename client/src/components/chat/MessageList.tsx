@@ -781,7 +781,9 @@ const MessageList: React.FC<MessageListProps> = ({
     for (const msg of messages) {
       const block = messageToBlock.get(msg.id);
 
-      if (block && block.is_compressed === 1) {
+      // Любой блок (включая отключённые, is_compressed = 0) рендерим как карточку ChatBlock;
+      // внутренние сообщения блока не рендерим отдельно
+      if (block) {
         if (msg.id === block.start_message_id) {
           items.push({ type: 'block', block, key: `block-${block.id}` });
         }
@@ -923,7 +925,14 @@ const MessageList: React.FC<MessageListProps> = ({
 
   const renderItemContent = useCallback((item: RenderItem, index: number) => {
     if (item.type === 'block') {
+      const isCompressed = item.block.is_compressed === 1;
       const isExpanded = expandedBlockMessages && expandedBlockMessages.blockId === item.block.id;
+      // Для блока со сжатым = ВЫКЛ оригинальные сообщения всегда показаны (без возможности свернуть)
+      const isForcedExpanded = !isCompressed;
+      const blockMessages = (isForcedExpanded || isExpanded)
+        ? messages.filter(m => item.block.original_message_ids.includes(m.id))
+        : [];
+      const showOriginals = isForcedExpanded || !!isExpanded;
       return (
         <React.Fragment key={item.key}>
           <ChatBlock
@@ -931,23 +940,25 @@ const MessageList: React.FC<MessageListProps> = ({
             onEdit={(blockId, updates) => onEditBlock?.(blockId, updates)}
             onToggleCompression={(blockId, isCompressed) => onToggleBlockCompression?.(blockId, isCompressed)}
             onDelete={(blockId) => onDeleteBlock?.(blockId)}
-            onExpand={handleExpandBlock}
+            onExpand={isCompressed ? handleExpandBlock : undefined}
             isExpanded={!!isExpanded}
             onBlockUpdate={onBlockUpdate}
           />
-          {isExpanded && (
+          {showOriginals && (
             <div className="ml-4 border-l-2 border-cyan-700 pl-4 py-2 mb-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-cyan-400 font-medium">Оригинальные сообщения ({expandedBlockMessages.messages.length})</span>
-                <button
-                  onClick={handleCollapseBlock}
-                  className="text-xs text-cyan-400 hover:text-cyan-300 transition"
-                >
-                  ▲ Свернуть
-                </button>
+                <span className="text-xs text-cyan-400 font-medium">Оригинальные сообщения ({blockMessages.length})</span>
+                {!isForcedExpanded && (
+                  <button
+                    onClick={handleCollapseBlock}
+                    className="text-xs text-cyan-400 hover:text-cyan-300 transition"
+                  >
+                    ▲ Свернуть
+                  </button>
+                )}
               </div>
               <div className="space-y-2">
-                {expandedBlockMessages.messages.map((msg) => (
+                {blockMessages.map((msg) => (
                   <MessageItem
                     key={msg.id}
                     message={msg}
