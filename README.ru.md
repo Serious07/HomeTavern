@@ -148,7 +148,7 @@ npm run dev
 
 ```mermaid
 graph TD
-  UI[React SPA :3000] -->|/api/* (Vite proxy)| API[Express API :4000]
+  UI[React SPA :3000] -->|/api/* via Vite proxy| API[Express API :4000]
   API --> DB[(SQLite hometavern.db)]
   API --> LLM[llama.cpp / OpenAI-compatible :1234]
   API --> TR[Провайдер перевода]
