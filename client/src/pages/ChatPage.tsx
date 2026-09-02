@@ -6,6 +6,7 @@ import { STORAGE_KEYS } from '../constants/storage';
 import { Chat, Message, Character } from '../types';
 import { CompressionMethod } from '../types/compression';
 import { playNotificationSound } from '../utils/notificationSound';
+import { buildChatExportText, buildExportFileName, downloadChatExport } from '../utils/exportChat';
 import MessageList from '../components/chat/MessageList';
 import StreamingResponse from '../components/chat/StreamingResponse';
 import ChatInputArea from '../components/chat/ChatInputArea';
@@ -16,6 +17,7 @@ import { useCompression } from '../hooks/useCompression';
 import { EditBlockModal } from '../components/chat/EditBlockModal';
 import { ChatBlockWithParsedIds } from '../types/compression';
 import AppHeader from '../components/common/AppHeader';
+import DownloadFileIcon from '../components/common/DownloadFileIcon';
 import CompressionProgressOverlay from '../components/chat/CompressionProgressOverlay';
 import CompressionConfirmModal from '../components/chat/CompressionConfirmModal';
 import LLMTranslationModal from '../components/LLMTranslationModal';
@@ -1169,6 +1171,20 @@ const ChatPage: React.FC = () => {
     setShowCompressionConfirm(false);
   }, []);
 
+  // Экспорт текущего чата в .txt файл (на клиенте, без backend)
+  const handleExportChat = useCallback(() => {
+    if (!currentChat || messages.length === 0) return;
+    const character = getCharacterById(currentChat.character_id);
+    const characterName = character?.name || currentChat.title || 'Чат';
+    const lastMessage = [...messages].sort(
+      (a, b) => a.id - b.id || new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+    const lastMessageAt = lastMessage.length > 0 ? lastMessage[lastMessage.length - 1].created_at : currentChat.updated_at;
+    const fileName = buildExportFileName(characterName, lastMessageAt);
+    const text = buildChatExportText(characterName, messages);
+    downloadChatExport(fileName, text);
+  }, [currentChat, messages, characters]);
+
   const handleCloseEditModal = useCallback(() => {
     setIsEditModalOpen(false);
     setEditingBlock(null);
@@ -1392,6 +1408,15 @@ const ChatPage: React.FC = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
+              {/* Кнопка экспорта чата в .txt (между сжатием и удалением) */}
+              <button
+                onClick={handleExportChat}
+                disabled={!currentChat || messages.length === 0}
+                className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-cyan-400"
+                title={messages.length === 0 ? 'Нет сообщений для экспорта' : 'Экспортировать чат в .txt'}
+              >
+                <DownloadFileIcon className="w-5 h-5" />
+              </button>
               {currentChat && (
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
@@ -1428,6 +1453,15 @@ const ChatPage: React.FC = () => {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
+              </button>
+              {/* Кнопка экспорта чата в .txt (между сжатием и удалением) */}
+              <button
+                onClick={handleExportChat}
+                disabled={!currentChat || messages.length === 0}
+                className="p-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-cyan-400"
+                title={messages.length === 0 ? 'Нет сообщений для экспорта' : 'Экспортировать чат в .txt'}
+              >
+                <DownloadFileIcon className="w-5 h-5" />
               </button>
               {currentChat && (
                 <button
