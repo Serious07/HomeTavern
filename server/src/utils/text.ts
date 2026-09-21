@@ -19,5 +19,11 @@ export function stripThoughtTags(text: string): string {
   const thinkCloseRegex = new RegExp('<think>[\\s\\S]*?<\\/think>', 'gi');
   text = text.replace(thinkCloseRegex, '');
   
+  // Remove <|channel>...</channel|> (Kimi K2-style inline reasoning channel)
+  // Unclosed closing tag is tolerated: everything after an unclosed opening tag is dropped
+  // ($ без флага m совпадает только с концом строки; \z в JS-regex — просто буква z)
+  const channelRegex = /<\|channel\>[\s\S]*?(?:<channel\|>|$)/gi;
+  text = text.replace(channelRegex, '');
+
   return text.trim();
 }

@@ -1492,6 +1492,81 @@ export class LLMService {
         // в середине генерации, что вызывает "обрыв" ответа
         let inContentPhase = false; // true если уже получали content токены
         let lastContentToken = ''; // последний content токен для контекста
+
+        // === Инлайн-блок канала размышлений: <|channel>...<channel|> ===
+        // Некоторые модели (Kimi K2 и др.) выводят размышления прямо в content в формате
+        // "<|channel>thought ... <channel|>" вместо отдельного поля reasoning_content
+        // (llama.cpp не маппит такие теги в reasoning_content).
+        // Перенаправляем содержимое между тегами в reasoning_token, а сами теги удаляем.
+        // Буферизация хвоста нужна, потому что тег может быть разорван между чанками —
+        // тот же приём, что и в LLMTranslationModal на клиенте для <thinking>...</thinking>.
+        const CHANNEL_OPEN = '<|channel>';
+        const CHANNEL_CLOSE = '<channel|>';
+        const channelOpenPartials = Array.from({ length: CHANNEL_OPEN.length - 1 }, (_, i) => CHANNEL_OPEN.slice(0, i + 1));
+        const channelClosePartials = Array.from({ length: CHANNEL_CLOSE.length - 1 }, (_, i) => CHANNEL_CLOSE.slice(0, i + 1));
+        let channelBuf = ''; // хвост content, который может быть частью тега (ждёт дозаполнения)
+        let insideChannel = false; // true — находимся внутри блока <|channel>...<channel|>
+
+        // Проверяет, заканчивается ли текст неполным (разорванным) открывающим/закрывающим тегом
+        const findChannelPartialAtEnd = (text: string, isInside: boolean): number => {
+          const partials = isInside ? channelClosePartials : channelOpenPartials;
+          for (const partial of partials) {
+            if (text.endsWith(partial)) return text.length - partial.length;
+          }
+          return -1;
+        };
+
+        // Разделяет входящий content-чанк на обычный текст и содержимое канала размышлений
+        const splitChannelContent = (token: string): { content: string; reasoning: string } => {
+          channelBuf += token;
+          let contentOut = '';
+          let reasoningOut = '';
+          let consumed = 0;
+          while (consumed < channelBuf.length) {
+            if (insideChannel) {
+              // Внутри блока — ищем закрывающий тег <channel|>
+              const closeIdx = channelBuf.indexOf(CHANNEL_CLOSE, consumed);
+              if (closeIdx !== -1) {
+                reasoningOut += channelBuf.slice(consumed, closeIdx);
+                consumed = closeIdx + CHANNEL_CLOSE.length;
+                insideChannel = false;
+              } else {
+                // Закрывающего тега ещё нет — буферизуем возможный неполный тег на конце
+                const partialIdx = findChannelPartialAtEnd(channelBuf.slice(consumed), true);
+                if (partialIdx !== -1) {
+                  reasoningOut += channelBuf.slice(consumed, consumed + partialIdx);
+                  consumed += partialIdx;
+                } else {
+                  reasoningOut += channelBuf.slice(consumed);
+                  consumed = channelBuf.length;
+                }
+                break;
+              }
+            } else {
+              // Снаружи блока — ищем открывающий тег <|channel>
+              const openIdx = channelBuf.indexOf(CHANNEL_OPEN, consumed);
+              if (openIdx !== -1) {
+                contentOut += channelBuf.slice(consumed, openIdx);
+                consumed = openIdx + CHANNEL_OPEN.length;
+                insideChannel = true;
+              } else {
+                // Открывающего тега ещё нет — буферизуем возможный неполный тег на конце
+                const partialIdx = findChannelPartialAtEnd(channelBuf.slice(consumed), false);
+                if (partialIdx !== -1) {
+                  contentOut += channelBuf.slice(consumed, consumed + partialIdx);
+                  consumed += partialIdx;
+                } else {
+                  contentOut += channelBuf.slice(consumed);
+                  consumed = channelBuf.length;
+                }
+                break;
+              }
+            }
+          }
+          // Неразобранный хвост (неполный тег) остаётся в буфере до следующего чанка
+          channelBuf = channelBuf.slice(consumed);
+          return { content: contentOut, reasoning: reasoningOut };
+        };
         
         for await (const chunk of stream) {
           // Устанавливаем время первого токена (если ещё не установлено)
@@ -1543,6 +1618,18 @@ export class LLMService {
           }
         }
 
+        // Применяем инлайн-разделитель канала к content: содержимое между
+        // <|channel>...<channel|> уходит в reasoning, сами теги удаляются
+        if (content) {
+          const channelSplit = splitChannelContent(content);
+          content = channelSplit.content;
+          if (channelSplit.reasoning) {
+            reasoningContent = reasoningContent
+              ? reasoningContent + channelSplit.reasoning
+              : channelSplit.reasoning;
+          }
+        }
+
         // Обновляем состояние фазы генерации
         if (content) {
           inContentPhase = true;
@@ -1568,7 +1655,20 @@ export class LLMService {
         }
       }
 
-       // Удаляем AbortController после завершения генерации
+     // Финальный flush буфера канала: если генерация оборвалась внутри
+     // <|channel>...<channel|>, неотправленный хвост относим к размышлениям
+     if (channelBuf) {
+       if (insideChannel) {
+         reasoningTokenCount++;
+         yield { type: 'reasoning_token', token: channelBuf };
+       } else {
+         contentTokenCount++;
+         yield { type: 'content_token', token: channelBuf };
+       }
+       channelBuf = '';
+     }
+
+     // Удаляем AbortController после завершения генерации
        this.activeAbortControllers.delete(chatId);
 
        // Сохраняем информацию о токенах в БД после завершения генерации
