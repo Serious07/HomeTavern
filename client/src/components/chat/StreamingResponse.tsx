@@ -527,12 +527,11 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
               retrySource.addEventListener('reasoning_token', (event: MessageEvent) => {
                 try {
                   const data = JSON.parse(event.data);
-                  setReasoningContent((prev) => {
-                    const newValue = prev + data.token;
-                    reasoningContentRef.current = newValue;
-                    hasReasoningContentRef.current = true;
-                    return newValue;
-                  });
+                  // Тот же пакетный вывод, что и в основном подключении:
+                  // раньше retry-путь на каждый токен делал отдельный ре-рендер.
+                  reasoningContentRef.current += data.token;
+                  hasReasoningContentRef.current = true;
+                  flushTokens();
                 } catch (err) {
                   // Ignore parse errors
                 }
@@ -541,11 +540,8 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
               retrySource.addEventListener('content_token', (event: MessageEvent) => {
                 try {
                   const data = JSON.parse(event.data);
-                  setContent((prev) => {
-                    const newValue = prev + data.token;
-                    contentRef.current = newValue;
-                    return newValue;
-                  });
+                  contentRef.current += data.token;
+                  flushTokens();
                 } catch (err) {
                   // Ignore parse errors
                 }
@@ -574,6 +570,10 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
               retrySource.addEventListener('done', (event: MessageEvent) => {
                 try {
                   const data = JSON.parse(event.data);
+                  // Синхронно отдаём накопленное, чтобы ни один токен не потерялся
+                  // в ещё не наступившем кадре перед передачей сообщения родителю.
+                  flushTokensNow();
+                  diagLog('stream-done', `retry content=${contentRef.current.length} reasoning=${reasoningContentRef.current.length}`);
                   setIsStreaming(false);
                   retrySource.close();
                   eventSourceRef.current = null;
