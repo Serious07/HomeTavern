@@ -123,8 +123,17 @@ function wrapQuotesWithSpan(text: string): string {
  */
 const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean }> = ({
   children,
+  streaming = false,
 }) => {
   const { statusBar, processedContent } = useMemo(() => {
+    // Режим стриминга ничего не парсит (см. ранний возврат ниже). Это снимает
+    // главный источник тормозов генерации: раньше ВЕСЬ уже накопленный текст
+    // перечитывался markdown-парсером и тремя проходами regex на каждый новый
+    // токен, то есть работа росла квадратично от длины ответа.
+    if (streaming) {
+      return { statusBar: null, processedContent: '' };
+    }
+
     // Сначала нормализуем позицию статус-блоков (переносим в начало если нужно)
     const { content: normalizedContent, allParsed } = normalizeStatusBarPosition(children);
     
@@ -137,7 +146,29 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
     
     const withSpan = wrapQuotesWithSpan(extractedContent);
     return { statusBar: mainStatusBar, processedContent: withSpan };
-  }, [children]);
+  }, [children, streaming]);
+
+  // ===== Режим стриминга: только простой текст =====
+  // Абзацы и переносы строк сохраняются через whitespace-pre-wrap, но без
+  // react-markdown, подсветки кода и regex-проходов. Полное оформление
+  // включается ОДИН раз — когда генерация завершена (streaming === false).
+  if (streaming) {
+    // Статус-бар достаём и здесь: его regex привязан к началу строки
+    // (/^\[...\]/), поэтому операция дешёвая даже для длинного текста, а
+    // фирменная плашка не исчезает на время печати.
+    const { statusBar: streamingStatusBar, content: streamingContent } = extractStatusBar(children);
+    return (
+      <div className="markdown-content whitespace-pre-wrap break-words">
+        {streamingStatusBar && (
+          <>
+            <StatusBar {...streamingStatusBar} />
+            <div className="mt-3" />
+          </>
+        )}
+        {streamingContent}
+      </div>
+    );
+  }
 
   // Рекурсивно обходим детей и сбрасываем margin/padding у всех React-элементов
   const resetMarginsInChildren = (children: React.ReactNode): React.ReactNode => {

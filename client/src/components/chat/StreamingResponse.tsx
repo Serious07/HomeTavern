@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Message } from '../../types';
 import { STORAGE_KEYS } from '../../constants/storage';
 import { MarkdownRenderer } from '../common/MarkdownRenderer';
@@ -96,6 +96,40 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   const translatedTextRef = useRef<string | null>(null);
   const contentRef = useRef<string>('');
   const reasoningContentRef = useRef<string>('');
+  // ===== Пакетный вывод токенов =====
+  // Раньше КАЖДЫЙ токен вызывал setContent/setReasoningContent, то есть полный
+  // ре-рендер стримящегося сообщения. Теперь токены накапливаются в ref-ах выше,
+  // а в состояние попадают не чаще одного раза за кадр.
+  const flushRafRef = useRef<number | null>(null);
+
+  const flushTokens = useCallback(() => {
+    if (flushRafRef.current !== null) return;
+    flushRafRef.current = requestAnimationFrame(() => {
+      flushRafRef.current = null;
+      setContent(contentRef.current);
+      setReasoningContent(reasoningContentRef.current);
+    });
+  }, []);
+
+  // Принудительный синхронный сброс — на done/stop/error, чтобы ни один токен
+  // не потерялся в еще не наступившем кадре.
+  const flushTokensNow = useCallback(() => {
+    if (flushRafRef.current !== null) {
+      cancelAnimationFrame(flushRafRef.current);
+      flushRafRef.current = null;
+    }
+    setContent(contentRef.current);
+    setReasoningContent(reasoningContentRef.current);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (flushRafRef.current !== null) {
+        cancelAnimationFrame(flushRafRef.current);
+        flushRafRef.current = null;
+      }
+    };
+  }, []);
   
   // Эффект для автоматического скролла к стриминговому сообщению при изменении контента
   useEffect(() => {
@@ -130,12 +164,10 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
     eventSource.addEventListener('reasoning_token', (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        setReasoningContent((prev) => {
-          const newValue = prev + data.token;
-          reasoningContentRef.current = newValue;
-          hasReasoningContentRef.current = true;
-          return newValue;
-        });
+        // Токен копится в ref; в состояние попадёт пакетом на ближайшем кадре.
+        reasoningContentRef.current += data.token;
+        hasReasoningContentRef.current = true;
+        flushTokens();
       } catch (err) {
         // Ignore parse errors
       }
@@ -144,11 +176,9 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
     eventSource.addEventListener('content_token', (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        setContent((prev) => {
-          const newValue = prev + data.token;
-          contentRef.current = newValue;
-          return newValue;
-        });
+        // Токен копится в ref; в состояние попадёт пакетом на ближайшем кадре.
+        contentRef.current += data.token;
+        flushTokens();
       } catch (err) {
         // Ignore parse errors
       }
@@ -309,6 +339,9 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
         // аргумент, поэтому дамп всего ответа и всех размышлений мешает сборщику
         // мусора: на длинной сессии это напрямую приближает OOM-крах вкладки.
         console.log('[SSE done] content:', contentRef.current.length, 'симв., reasoning:', reasoningContentRef.current.length, 'симв.');
+        // Синхронный сброс накопленного: иначе последние токены, ожидающие кадра,
+        // не попали бы в сообщение, передаваемое родителю.
+        flushTokensNow();
         setIsStreaming(false);
         eventSource.close();
         eventSourceRef.current = null;
@@ -392,6 +425,8 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       // Не блокируем остановку если отмена не удалась
     }
     
+    // Синхронный сброс накопленных токенов перед передачей частичного сообщения.
+    flushTokensNow();
     setIsStreaming(false);
     
     // Вызываем onComplete с текущим контентом (используем refs)
