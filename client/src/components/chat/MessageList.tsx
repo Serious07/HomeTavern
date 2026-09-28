@@ -204,6 +204,21 @@ const MessageItem = memo(({
   const [dragState, setDragState] = useState<{ content: string; reasoning: string } | null>(null);
   const dragInfoRef = useRef<DragInfo | null>(null);
   const thinkingBoxRef = useRef<HTMLDivElement>(null);
+  // Текст размышлений монтируется в DOM только пока блок реально раскрыт
+  // (или идёт анимация). Само сворачивание сделано через grid-template-rows: 0fr,
+  // и раньше текст каждого сообщения висел в DOM и участвовал в разметке даже
+  // свёрнутым — на длинном чате это основной остаток лишней памяти.
+  // Размонтирование отложено до конца анимации (300 мс), иначе схлопывание
+  // стало бы мгновенным и анимация пропала бы.
+  const [thinkingMounted, setThinkingMounted] = useState<boolean>(thinkingExpanded);
+  useEffect(() => {
+    if (thinkingExpanded) {
+      setThinkingMounted(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setThinkingMounted(false), 320);
+    return () => window.clearTimeout(timer);
+  }, [thinkingExpanded]);
 
   const isDragging = dragState !== null;
   const dragStateRef = useRef<{ content: string; reasoning: string } | null>(null);
@@ -477,13 +492,15 @@ const MessageItem = memo(({
                     </button>
                   )}
                 </div>
-                {/* Текст мыслей (приглушённый) */}
-                <div
-                  ref={thinkingBoxRef}
-                  className="px-1 pb-1 text-sm text-gray-400/80 whitespace-pre-wrap leading-5"
-                >
-                  {isDragging ? dragState!.reasoning : message.reasoning_content}
-                </div>
+                {/* Текст мыслей (приглушённый) — см. thinkingMounted выше */}
+                {thinkingMounted && (
+                  <div
+                    ref={thinkingBoxRef}
+                    className="px-1 pb-1 text-sm text-gray-400/80 whitespace-pre-wrap leading-5"
+                  >
+                    {isDragging ? dragState!.reasoning : message.reasoning_content}
+                  </div>
+                )}
                 {/* Оранжевая пунктирная линия МЕЖДУ мыслями и ответом + зона захвата drag (>=44px)
                     — только в развёрнутом состоянии; при сворачивании уходит вверх вместе с мыслями */}
                 {thinkingExpanded && (
