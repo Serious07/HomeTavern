@@ -15,12 +15,24 @@ export function initLlmConnectionsTable(): void {
       api_key_encrypted TEXT,
       model TEXT NOT NULL,
       max_tokens INTEGER NOT NULL DEFAULT 64000,
+      context_length INTEGER,
       is_active INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
       updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
       UNIQUE(user_id, name)
     )
   `).run();
+
+  // Миграция для таблиц, созданных до появления context_length.
+  // NULL означает «размер контекста не задан вручную» - в этом случае он
+  // определяется автоматически (llama.cpp /props, TabbyAPI /v1/model).
+  // Отдельная проверка нужна потому, что CREATE TABLE IF NOT EXISTS на уже
+  // существующей таблице ничего не добавляет.
+  const tableInfo = db.prepare('PRAGMA table_info(llm_connections)').all() as Array<{ name: string }>;
+  if (!tableInfo.some((col) => col.name === 'context_length')) {
+    db.exec('ALTER TABLE llm_connections ADD COLUMN context_length INTEGER;');
+    console.log('[LLM Connections] Added column: context_length');
+  }
 
   console.log('[LLM Connections] Table llm_connections checked/initialized');
 }

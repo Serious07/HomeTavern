@@ -170,6 +170,25 @@ try {
     db.exec("ALTER TABLE chats ADD COLUMN context_last_synced TEXT;");
     console.log('[Database] Added column: context_last_synced');
   }
+
+  // Миграция: context_length в llm_connections.
+  // Держим её именно здесь, а не только в initLlmConnectionsTable: тот вызывается
+  // ПОСЛЕ инициализации LLMService, и на первом запуске после обновления сервис
+  // не нашёл бы колонку и молча откатился к настройкам .env.
+  // На чистой установке таблицы ещё нет - её создаст initLlmConnectionsTable
+  // уже с колонкой, поэтому здесь проверяем её существование.
+  const llmConnTable = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='llm_connections'"
+  ).get() as { name: string } | undefined;
+
+  if (llmConnTable) {
+    const llmConnColumnNames = (db.prepare('PRAGMA table_info(llm_connections)').all() as any[])
+      .map((col: any) => col.name);
+    if (!llmConnColumnNames.includes('context_length')) {
+      db.exec('ALTER TABLE llm_connections ADD COLUMN context_length INTEGER;');
+      console.log('[Database] Added column: context_length');
+    }
+  }
   
   console.log('[Database] Migrations completed successfully');
 } catch (error) {

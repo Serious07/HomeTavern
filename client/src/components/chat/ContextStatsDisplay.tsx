@@ -61,9 +61,23 @@ export const ContextStatsDisplay: React.FC<ContextStatsDisplayProps> = ({
     return null;
   }
 
-  const { tokensUsed: used, contextLimit: total, percentage } = stats;
+  const { tokensUsed: used, contextLimit: total, percentage, limitSource, limitNote } = stats;
+  // Лимит может быть неизвестен - тогда врать про процент нельзя
+  const isUnknown = total <= 0 || limitSource === 'unknown';
+  // Оценка «не меньше израсходованного» - не точное окно модели, показываем ~
+  const isEstimated = limitSource === 'observed';
   const progressColor = getProgressColor(percentage);
   const displayPercentage = Math.min(percentage, 100).toFixed(2);
+
+  const sourceLabel: Record<string, string> = {
+    connection: 'лимит задан вручную в настройках подключения',
+    'llama.cpp': 'получен с эндпоинта llama.cpp (/props)',
+    tabbyapi: 'получен с эндпоинта TabbyAPI (/v1/model)',
+    observed: 'точный лимит неизвестен - показано округлённое значение по факту расхода',
+    unknown: 'эндпоинт не сообщает размер контекста',
+  };
+  const tooltip = limitNote
+    || (limitSource ? sourceLabel[limitSource] : `Использовано ${formatNumber(used)} из ${formatNumber(total)} токенов`);
 
   return (
     <div className={`context-stats-display w-full ${className}`}>
@@ -71,14 +85,23 @@ export const ContextStatsDisplay: React.FC<ContextStatsDisplayProps> = ({
       <div className="w-full h-3 bg-gray-700/50 rounded-full overflow-hidden mb-1">
         <div
           className={`h-full ${progressColor} transition-all duration-500 ease-out`}
-          style={{ width: `${displayPercentage}%` }}
-          title={`Использовано: ${formatNumber(used)} из ${formatNumber(total)} токенов`}
+          style={{ width: isUnknown ? '0%' : `${displayPercentage}%` }}
+          title={`Использовано: ${formatNumber(used)} токенов. ${tooltip}`}
         />
       </div>
-      
+
       {/* Текст со статистикой */}
-      <p className="text-gray-400 text-xs text-center">
-        {formatNumber(used)} t / {formatNumber(total)} t ({displayPercentage}%)
+      <p className="text-gray-400 text-xs text-center" title={tooltip}>
+        {isUnknown ? (
+          <>
+            {formatNumber(used)} t / {' '}
+            <span className="text-gray-500">контекст неизвестен - заполните его в настройках подключения</span>
+          </>
+        ) : (
+          <>
+            {formatNumber(used)} t / {isEstimated ? '~' : ''}{formatNumber(total)} t ({displayPercentage}%)
+          </>
+        )}
       </p>
     </div>
   );

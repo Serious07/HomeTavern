@@ -10,6 +10,10 @@ export interface ContextStats {
   lastSynced: string | null;
   cached: boolean;
   slotId: number | null;
+  /** Откуда взялся лимит: вручную, с эндпоинта, оценка или неизвестен */
+  limitSource?: 'connection' | 'llama.cpp' | 'tabbyapi' | 'observed' | 'unknown';
+  /** Короткая сводка о происхождении лимита для подсказки */
+  limitNote?: string;
 }
 
 // Create axios instance with default config

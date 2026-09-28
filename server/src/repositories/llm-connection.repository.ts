@@ -8,6 +8,12 @@ export interface LlmConnection {
   api_key_encrypted: string | null;
   model: string;
   max_tokens: number;
+  /**
+   * Размер контекста модели в токенах, указанный пользователем.
+   * null = не задано вручную, тогда лимит определяется автоматически.
+   * Не путать с max_tokens - это лимит ВЫВОДА, а не размер окна.
+   */
+  context_length: number | null;
   /** Enable reasoning/thinking mode (1=enabled, 0=disabled). Default: 1 */
   reasoning: number;
   /** Enable strict role alternation (merge consecutive same-role messages). Default: 0 */
@@ -24,6 +30,7 @@ export interface CreateLlmConnectionInput {
   api_key: string;
   model: string;
   max_tokens: number;
+  context_length?: number | null;
   reasoning?: number;
   strict_role_alternation?: number;
 }
@@ -34,6 +41,8 @@ export interface UpdateLlmConnectionInput {
   api_key?: string; // only provided when changing the key
   model?: string;
   max_tokens?: number;
+  /** null очищает значение и возвращает к автоопределению */
+  context_length?: number | null;
   reasoning?: number;
   strict_role_alternation?: number;
 }
@@ -56,7 +65,7 @@ class LlmConnectionRepository {
 
   getAllByUserId(userId: number): LlmConnection[] {
     const rows = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, strict_role_alternation, is_active, created_at, updated_at
+      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, context_length, reasoning, strict_role_alternation, is_active, created_at, updated_at
       FROM llm_connections
       WHERE user_id = ?
       ORDER BY created_at DESC
@@ -66,7 +75,7 @@ class LlmConnectionRepository {
 
   getById(id: number): LlmConnection | null {
     const row = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, strict_role_alternation, is_active, created_at, updated_at
+      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, context_length, reasoning, strict_role_alternation, is_active, created_at, updated_at
       FROM llm_connections
       WHERE id = ?
     `).get(id) as LlmConnection | undefined;
@@ -84,7 +93,7 @@ class LlmConnectionRepository {
 
   getActiveByUserId(userId: number): LlmConnection | null {
     const row = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, strict_role_alternation, is_active, created_at, updated_at
+      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, context_length, reasoning, strict_role_alternation, is_active, created_at, updated_at
       FROM llm_connections
       WHERE user_id = ? AND is_active = 1
       LIMIT 1
@@ -97,8 +106,8 @@ class LlmConnectionRepository {
     const reasoning = input.reasoning ?? 1; // Default: reasoning enabled
     const strictRoleAlternation = input.strict_role_alternation ?? 0; // Default: disabled
     const stmt = db.prepare(`
-      INSERT INTO llm_connections (user_id, name, base_url, api_key_encrypted, model, max_tokens, reasoning, strict_role_alternation, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO llm_connections (user_id, name, base_url, api_key_encrypted, model, max_tokens, context_length, reasoning, strict_role_alternation, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
     const result = stmt.run(
       input.user_id,
@@ -107,6 +116,7 @@ class LlmConnectionRepository {
       encryptedKey,
       input.model,
       input.max_tokens,
+      input.context_length ?? null,
       reasoning,
       strictRoleAlternation
     );
@@ -136,6 +146,10 @@ class LlmConnectionRepository {
     if (input.max_tokens !== undefined) {
       updates.push('max_tokens = ?');
       params.push(input.max_tokens);
+    }
+    if (input.context_length !== undefined) {
+      updates.push('context_length = ?');
+      params.push(input.context_length);
     }
     if (input.reasoning !== undefined) {
       updates.push('reasoning = ?');

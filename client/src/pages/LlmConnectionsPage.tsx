@@ -3,6 +3,17 @@ import { llmConnectionsApi } from '../services/api';
 import { LlmConnection, LlmTestResult } from '../types';
 import AppHeader from '../components/common/AppHeader';
 
+/**
+ * Поле размера контекста остаётся пустым, когда пользователь хочет автоопределение.
+ * Пустая строка должна уйти на сервер как null, а не как 0.
+ */
+function parseContextLengthInput(raw: string): number | null {
+  const trimmed = (raw || '').trim();
+  if (trimmed === '') return null;
+  const parsed = parseInt(trimmed, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 const LlmConnectionsPage: React.FC = () => {
   // State
   const [connections, setConnections] = useState<LlmConnection[]>([]);
@@ -24,6 +35,8 @@ const LlmConnectionsPage: React.FC = () => {
   const [formApiKey, setFormApiKey] = useState('');
   const [formModel, setFormModel] = useState('');
   const [formMaxTokens, setFormMaxTokens] = useState(64000);
+  // Пустая строка = «не задано», размер контекста определится автоматически
+  const [formContextLength, setFormContextLength] = useState('');
   const [formReasoning, setFormReasoning] = useState(true);
   const [formStrictRoleAlternation, setFormStrictRoleAlternation] = useState(false);
   const [formError, setFormError] = useState('');
@@ -51,6 +64,7 @@ const LlmConnectionsPage: React.FC = () => {
     setFormApiKey('');
     setFormModel('');
     setFormMaxTokens(64000);
+    setFormContextLength('');
     setFormReasoning(true);
     setFormStrictRoleAlternation(false);
     setFormError('');
@@ -65,6 +79,7 @@ const LlmConnectionsPage: React.FC = () => {
     setFormApiKey(''); // Don't prefill API key for security
     setFormModel(connection.model);
     setFormMaxTokens(connection.max_tokens);
+    setFormContextLength(connection.context_length ? String(connection.context_length) : '');
     setFormReasoning(connection.reasoning !== 0); // 1 = enabled, 0 = disabled
     setFormStrictRoleAlternation((connection.strict_role_alternation || 0) !== 0);
     setFormError('');
@@ -93,6 +108,7 @@ const LlmConnectionsPage: React.FC = () => {
           base_url: formBaseUrl,
           model: formModel,
           max_tokens: formMaxTokens,
+          context_length: parseContextLengthInput(formContextLength),
           reasoning: formReasoning ? 1 : 0,
           strict_role_alternation: formStrictRoleAlternation ? 1 : 0,
         };
@@ -107,6 +123,7 @@ const LlmConnectionsPage: React.FC = () => {
           api_key: formApiKey,
           model: formModel,
           max_tokens: formMaxTokens,
+          context_length: parseContextLengthInput(formContextLength),
           reasoning: formReasoning ? 1 : 0,
           strict_role_alternation: formStrictRoleAlternation ? 1 : 0,
         });
@@ -375,6 +392,9 @@ const LlmConnectionsPage: React.FC = () => {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                           </svg>
                           <span className="text-gray-400 text-sm">Max Tokens: {conn.max_tokens.toLocaleString()}</span>
+                          <span className="text-gray-400 text-sm">
+                            Контекст: {conn.context_length ? conn.context_length.toLocaleString() : 'авто'}
+                          </span>
                         </div>
                         {/* Reasoning toggle */}
                         <div className="flex items-center gap-2">
@@ -635,6 +655,27 @@ const LlmConnectionsPage: React.FC = () => {
                   max="1000000"
                   className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Контекст модели (токенов)
+                </label>
+                <input
+                  type="number"
+                  value={formContextLength}
+                  onChange={(e) => setFormContextLength(e.target.value)}
+                  min="1024"
+                  max="4000000"
+                  placeholder="пусто = определять автоматически"
+                  className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500"
+                />
+                <p className="text-gray-500 text-xs mt-2">
+                  Это размер окна контекста, а не лимит генерации (Max Tokens). Если оставить
+                  пустым, значение возьмётся с эндпоинта: llama.cpp /props, затем TabbyAPI
+                  /v1/model. Для внешних API, которые ничего не сообщают о контексте, заполните
+                  вручную - иначе полоска над чатом не сможет показать реальный максимум.
+                </p>
               </div>
 
               {/* Reasoning Toggle */}
