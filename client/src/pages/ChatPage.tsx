@@ -7,6 +7,7 @@ import { Chat, Message, Character } from '../types';
 import { CompressionMethod } from '../types/compression';
 import { playNotificationSound } from '../utils/notificationSound';
 import { buildChatExportText, buildExportFileName, downloadChatExport } from '../utils/exportChat';
+import { diagLog } from '../utils/diagnostics';
 import MessageList from '../components/chat/MessageList';
 import StreamingResponse from '../components/chat/StreamingResponse';
 import ChatInputArea from '../components/chat/ChatInputArea';
@@ -483,6 +484,9 @@ const ChatPage: React.FC = () => {
     const messageToSend = currentInputRef.current.trim();
     if (!messageToSend || !chatId || isSending || isStreaming) return;
     
+    // «След» для диагностики крахов: размер отправки и идентификатор чата.
+    diagLog('send', `chat=${chatId} len=${messageToSend.length}`);
+
     // Сбрасываем состояние showThinking для нового стримингового сообщения
     streamingMessageThinkingRef.current = false;
     

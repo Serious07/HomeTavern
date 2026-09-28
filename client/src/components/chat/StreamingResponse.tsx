@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Message } from '../../types';
 import { STORAGE_KEYS } from '../../constants/storage';
 import { MarkdownRenderer } from '../common/MarkdownRenderer';
+import { diagLog } from '../../utils/diagnostics';
 
 interface StreamingResponseProps {
   chatId: number;
@@ -317,6 +318,7 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
         const data = JSON.parse(event.data);
         console.error('[SSE error] Server reported error:', data.message);
         const errorMessage = data.message || 'Ошибка генерации ответа на сервере';
+        diagLog('stream-err', errorMessage);
         setError(errorMessage);
         setIsStreaming(false);
         eventSource.close();
@@ -339,6 +341,7 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
         // аргумент, поэтому дамп всего ответа и всех размышлений мешает сборщику
         // мусора: на длинной сессии это напрямую приближает OOM-крах вкладки.
         console.log('[SSE done] content:', contentRef.current.length, 'симв., reasoning:', reasoningContentRef.current.length, 'симв.');
+        diagLog('stream-done', `content=${contentRef.current.length} reasoning=${reasoningContentRef.current.length}`);
         // Синхронный сброс накопленного: иначе последние токены, ожидающие кадра,
         // не попали бы в сообщение, передаваемое родителю.
         flushTokensNow();
@@ -396,6 +399,7 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   // Функция остановки генерации
   const handleStop = async () => {
     console.log('[handleStop] Stopping generation');
+    diagLog('stream-stop', `content=${contentRef.current.length} reasoning=${reasoningContentRef.current.length}`);
     
     // Сначала закрываем SSE соединение
     if (eventSourceRef.current) {
