@@ -8,6 +8,9 @@ import { MessageEditModal } from './MessageEditModal';
 
 const VISIBLE_LIMIT_STORAGE_KEY = 'hometavern_visible_message_limit';
 const DEFAULT_VISIBLE_LIMIT = 50;
+// Расстояние от верха списка (px), при котором считается, что пользователь
+// долистал до старых сообщений и можно подгрузить ещё.
+const TOP_LOAD_THRESHOLD_PX = 240;
 
 export function getVisibleMessageLimit(): number {
   const stored = localStorage.getItem(VISIBLE_LIMIT_STORAGE_KEY);
@@ -723,6 +726,11 @@ const MessageList: React.FC<MessageListProps> = ({
   
   // Ref to track if user is scrolled near bottom (to avoid auto-scroll when reading history)
   const isScrolledToBottomRef = useRef<boolean>(true);
+  // Зеркало displayCount для чтения внутри обработчика scroll без пересоздания
+  // колбэка на каждое изменение счётчика.
+  const displayCountRef = useRef<number>(visibleLimit);
+  // Блокировка: пока предыдущее расширение списка не отрисовано, новое не запускаем.
+  const isLoadingMoreRef = useRef<boolean>(false);
   
   const handleExpandBlock = useCallback((block: ChatBlockWithParsedIds) => {
     const blockMessages = messages.filter(msg => block.original_message_ids.includes(msg.id));
@@ -764,6 +772,14 @@ const MessageList: React.FC<MessageListProps> = ({
     setEditingMessage(null);
     setEditingTranslated(false);
   }, [onEdit, messages, editingTranslated]);
+
+  // Синхронизируем зеркало счётчика и снимаем блокировку подгрузки после того,
+  // как новые сообщения реально отрисованы (commit). Без этого эффекта
+  // блокировка isLoadingMoreRef никогда бы не снялась.
+  useEffect(() => {
+    displayCountRef.current = displayCount;
+    isLoadingMoreRef.current = false;
+  }, [displayCount]);
 
   const messageToBlock = useMemo(() => {
     const map = new Map<number, ChatBlockWithParsedIds>();
@@ -884,16 +900,25 @@ const MessageList: React.FC<MessageListProps> = ({
     const container = scrollContainerRef.current;
     if (!container) return;
     
-    const { scrollHeight, scrollTop, clientHeight } = container;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    // Нужен только scrollTop — он и есть расстояние от верха списка.
+    const { scrollTop } = container;
     
-    // If user scrolled up and is near the top of loaded content, load more
-    if (distanceFromBottom > clientHeight * 0.8) {
-      setDisplayCount(prev => {
-        const newCount = prev + visibleLimit;
-        return Math.min(newCount, totalItemCount);
-      });
-    }
+    // Автоподгрузка старых сообщений: ТОЛЬКО когда пользователь действительно
+    // у самого верха списка.
+    //
+    // Прежнее условие (distanceFromBottom > clientHeight * 0.8) выполнялось на
+    // всём протяжении чата выше нижних 80% окна, из-за чего КАЖДОЕ событие
+    // scroll добавляло по visibleLimit сообщений. На тач-скролле события идут
+    // пачками (~60/сек), поэтому один свайп вверх раздувал DOM в десятки раз
+    // и убивал вкладку на мобильных. Теперь: расширение только у верха и не
+    // чаще одного отрисованного шага (isLoadingMoreRef).
+    const distanceFromTop = scrollTop;
+    if (distanceFromTop > TOP_LOAD_THRESHOLD_PX) return;
+    if (isLoadingMoreRef.current) return;
+    if (displayCountRef.current >= totalItemCount) return;
+
+    isLoadingMoreRef.current = true;
+    setDisplayCount(prev => Math.min(prev + visibleLimit, totalItemCount));
   }, [totalItemCount, visibleLimit, checkScrollPosition]);
 
   // Load more messages when scrolling near top
