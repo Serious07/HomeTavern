@@ -929,7 +929,9 @@ const MessageList: React.FC<MessageListProps> = ({
     });
   }, [totalItemCount, visibleLimit]);
 
-  const handleSelectionClick = (messageId: number) => {
+  // Стабильная ссылка обязательна: этот колбэк уходит в memo(MessageItem),
+  // и без useCallback каждый рендер списка перерисовывал бы ВСЕ сообщения.
+  const handleSelectionClick = useCallback((messageId: number) => {
     if (!onMessageSelectionClick) return;
     
     if (selectionStart === null) {
@@ -939,7 +941,7 @@ const MessageList: React.FC<MessageListProps> = ({
     } else {
       onMessageSelectionClick(messageId);
     }
-  };
+  }, [onMessageSelectionClick, selectionStart]);
 
   const selectionCount = useMemo(() => {
     if (selectionStart === null || selectionEnd === null) return 0;
@@ -1123,4 +1125,11 @@ const MessageList: React.FC<MessageListProps> = ({
   );
 };
 
-export default MessageList;
+// memo: список НЕ должен перерисовываться на каждый рендер ChatPage.
+// Раньше любое слово перевода (setStreamingTranslation на каждый токен)
+// перерисовывало все ~50 сообщений разом. Условие работы memo — стабильные
+// props; нестабильные обработчики страницы закрыты прокси-обёртками в ChatPage.
+const MemoizedMessageList = memo(MessageList);
+MemoizedMessageList.displayName = 'MessageList';
+
+export default MemoizedMessageList;

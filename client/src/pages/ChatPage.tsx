@@ -1270,6 +1270,48 @@ const ChatPage: React.FC = () => {
     streamingTranslation?.errorMessage,
   ]);
 
+  // ===== Стабильные прокси-обработчики для мемоизированного MessageList =====
+  // handleRegenerate / handleEditMessage / handleDeleteMessage / handleTranslateMessage —
+  // большие async-функции, читающие множество состояния страницы. Оборачивать их
+  // в useCallback с вручную перечисленными зависимостями ОПАСНО: пропуск любой
+  // зависимости даёт устаревшее замыкание (тот самый класс бага, что уже чинили
+  // в MessageList). Поэтому наружу отдаём неизменяемые обёртки, которые всегда
+  // вызывают СВЕЖУЮ версию функции из ref: стабильность ссылок без риска.
+  const messageHandlersRef = useRef({
+    onRegenerate: handleRegenerate,
+    onEdit: handleEditMessage,
+    onDelete: handleDeleteMessage,
+    onTranslate: handleTranslateMessage,
+  });
+
+  // Обновляем после каждого commit'а — к моменту любого клика ref уже актуален.
+  useEffect(() => {
+    messageHandlersRef.current = {
+      onRegenerate: handleRegenerate,
+      onEdit: handleEditMessage,
+      onDelete: handleDeleteMessage,
+      onTranslate: handleTranslateMessage,
+    };
+  });
+
+  const stableRegenerate = useCallback(
+    (messageId: number) => messageHandlersRef.current.onRegenerate(messageId),
+    []
+  );
+  const stableEditMessage = useCallback(
+    (messageId: number, content: string, otherContent?: string, editingTranslated?: boolean) =>
+      messageHandlersRef.current.onEdit(messageId, content, otherContent, editingTranslated),
+    []
+  );
+  const stableDeleteMessage = useCallback(
+    (messageId: number) => messageHandlersRef.current.onDelete(messageId),
+    []
+  );
+  const stableTranslateMessage = useCallback(
+    (messageId: number) => messageHandlersRef.current.onTranslate(messageId),
+    []
+  );
+
   // Loading state
   if (isLoading) {
     return (
@@ -1522,12 +1564,12 @@ const ChatPage: React.FC = () => {
                   key={chatId}
                   messages={memoizedMessages}
                   expandThinkingDefault={expandThinkingDefault}
-                  onRegenerate={handleRegenerate}
-                  onEdit={handleEditMessage}
-                  onDelete={handleDeleteMessage}
+                  onRegenerate={stableRegenerate}
+                  onEdit={stableEditMessage}
+                  onDelete={stableDeleteMessage}
                   onReasoningChange={handleReasoningChange}
                   translatingMessageId={translatingMessageId}
-                  onTranslate={handleTranslateMessage}
+                  onTranslate={stableTranslateMessage}
                   translationEnabled={translationEnabled}
                   // Пропсы для сжатия истории
                   blocks={blocks}
