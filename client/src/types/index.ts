@@ -96,6 +96,8 @@ export interface LlmConnection {
   api_key_encrypted: string | null;
   model: string;
   max_tokens: number;
+  /** Размер контекста в токенах; null = определяется автоматически */
+  context_length: number | null;
   /** Enable reasoning/thinking mode (1=enabled, 0=disabled) */
   reasoning: number;
   /** Enable strict role alternation (1=enabled, 0=disabled) - merges consecutive same-role messages */
@@ -114,6 +116,7 @@ export interface LlmConnectionCreate {
   api_key: string;
   model: string;
   max_tokens: number;
+  context_length?: number | null;
   reasoning?: number;
   strict_role_alternation?: number;
 }
@@ -124,6 +127,7 @@ export interface LlmConnectionUpdate {
   api_key?: string;
   model?: string;
   max_tokens?: number;
+  context_length?: number | null;
   reasoning?: number;
   strict_role_alternation?: number;
 }

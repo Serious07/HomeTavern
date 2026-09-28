@@ -16,14 +16,18 @@ import { characterRepository } from '../repositories/character.repository';
 import { heroVariationRepository } from '../repositories/hero.variation.repository';
 import { formatMessagesForQwen, formatMessagesForQwenWithCompression, replaceUserPlaceholders } from './llm.service';
 import { chatBlockRepository } from '../repositories/chat-block.repository';
-import { llmConnectionRepository } from '../repositories/llm-connection.repository';
+import { llmConnectionRepository, LlmConnection } from '../repositories/llm-connection.repository';
 
 // Типы для llama.cpp API
 interface LlamaProps {
-  default_generation_settings: {
-    n_ctx: number;
+  default_generation_settings?: {
+    n_ctx?: number;
     [key: string]: unknown;
   };
+  // Разные сборки llama.cpp кладут n_ctx то в default_generation_settings,
+  // то в корень ответа
+  n_ctx?: number;
+  total_n_ctx?: number;
   [key: string]: unknown;
 }
 
@@ -54,19 +58,129 @@ interface LlamaSlotsResponse {
 
 export interface ContextStats {
   tokensUsed: number;         // Сколько токенов использовано
-  contextLimit: number;       // Максимальный контекст
+  contextLimit: number;       // Максимальный контекст (0 = неизвестен)
   percentage: number;         // Процент использования (0-100)
   cached: boolean;            // Данные из кэша БД или с llama.cpp
   slotId: number | null;      // ID слота llama.cpp если найден
   lastSynced: string | null;  // Время последней синхронизации
+  limitSource: ContextLimitSource; // Откуда взялся лимит
+  limitNote: string;          // Короткая сводка для подсказки в UI
+}
+
+/**
+ * Откуда известен размер контекста. Приоритет именно такой, каким его хочет
+ * пользователь: указанное вручную значение важнее любого автоопределения.
+ */
+export type ContextLimitSource =
+  | 'connection'   // заполнено поле context_length в подключении
+  | 'llama.cpp'    // получено из /props сервера llama.cpp
+  | 'tabbyapi'     // получено из /v1/model TabbyAPI
+  | 'observed'     // оценка снизу вверх: израсходовано больше известного лимита
+  | 'unknown';     // источник не найден
+
+export interface ResolvedContextLimit {
+  limit: number;                  // 0 = неизвестен
+  source: ContextLimitSource;
+  note: string;
+}
+
+/**
+ * Ответ TabbyAPI на GET /v1/model.
+ * Размер контекста прячется в нескольких местах, и какие из них заполнены,
+ * зависит от версии TabbyAPI и от того, задан ли лимит в её конфиге.
+ */
+interface TabbyModelResponse {
+  parameters?: {
+    max_seq_len?: number;
+    cache_size?: number;
+    [key: string]: unknown;
+  };
+  meta?: {
+    n_ctx?: number;
+    n_ctx_train?: number;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+/**
+ * Вытаскивает размер контекста из ответа TabbyAPI /v1/model.
+ *
+ * max_seq_len  - верхняя граница длины последовательности из конфига TabbyAPI;
+ * cache_size   - размер KV-кэша, то есть сколько токенов реально влезет (именно
+ *                его указывает пользователь в конфиге);
+ * meta.n_ctx   - фактический контекст загруженной модели;
+ * meta.n_ctx_train - контекст обучения, последний довод.
+ *
+ * Из нескольких заполненных значений берётся НАИМЕНЬШЕЕ положительное: если
+ * последовательность ограничена сильнее, чем размер кэша, ориентироваться нужно
+ * на ограничение, иначе полоска снова будет врать.
+ */
+export function parseTabbyContextLimit(payload: TabbyModelResponse | null | undefined): { limit: number; field: string } {
+  if (!payload || typeof payload !== 'object') return { limit: 0, field: '' };
+
+  const candidates: Array<{ value: unknown; field: string }> = [
+    { value: payload.parameters?.max_seq_len, field: 'parameters.max_seq_len' },
+    { value: payload.parameters?.cache_size, field: 'parameters.cache_size' },
+    { value: payload.meta?.n_ctx, field: 'meta.n_ctx' },
+  ];
+
+  let best = 0;
+  let bestField = '';
+  for (const candidate of candidates) {
+    const value = Number(candidate.value);
+    // 0, null и мусор означают «не задано», а не «ноль токенов»
+    if (!Number.isFinite(value) || value <= 0) continue;
+    if (best === 0 || value < best) {
+      best = Math.floor(value);
+      bestField = candidate.field;
+    }
+  }
+  if (best > 0) return { limit: best, field: bestField };
+
+  // Последний довод: контекст обучения. Он может быть больше рабочего окна,
+  // но это всё равно честнее константы 16384.
+  const trained = Number(payload.meta?.n_ctx_train);
+  if (Number.isFinite(trained) && trained > 0) {
+    return { limit: Math.floor(trained), field: 'meta.n_ctx_train' };
+  }
+
+  return { limit: 0, field: '' };
+}
+
+/**
+ * Округляет вверх до ближайшего блока в 1024 токена - чтобы оценка «не меньше
+ * израсходованного» выглядела как размер окна, а не как случайное число.
+ */
+function roundUpToContextChunk(tokens: number): number {
+  return Math.max(1024, Math.ceil(tokens / 1024) * 1024);
 }
 
 export class ContextService {
-  private propsCache: { n_ctx: number; timestamp: number; baseURL: string } | null = null;
-  private readonly PROPS_CACHE_TTL = 60000; // 1 минута кэширование для /props
+  private limitCache: { key: string; resolved: ResolvedContextLimit; timestamp: number } | null = null;
+  private readonly LIMIT_CACHE_TTL = 60000;         // успешное определение держим минуту
+  private readonly LIMIT_CACHE_TTL_UNKNOWN = 15000; // неудачу держим коротко, чтобы не долбить эндпоинт
 
   constructor() {
     console.log('[ContextService] Initialized — reads LLM URL from active connection in DB');
+  }
+
+  /**
+   * Активное подключение пользователя целиком.
+   * Нужно не только ради URL: в том же подключении лежит поле context_length,
+   * указанное пользователем, и ключ доступа к эндпоинту.
+   */
+  private getActiveConnection(userId: number): LlmConnection | null {
+    try {
+      const conn = llmConnectionRepository.getActiveByUserId(userId);
+      if (!conn) {
+        console.log(`[ContextService] No active connection found for user ${userId}`);
+      }
+      return conn;
+    } catch (err) {
+      console.error(`[ContextService] Error getting active connection for user ${userId}:`, err);
+      return null;
+    }
   }
 
   /**
@@ -74,20 +188,12 @@ export class ContextService {
    * Возвращает URL без /v1 суффикса (для /props, /slots, /tokenize)
    */
   private getActiveLlmBaseUrl(userId: number): string | null {
-    try {
-      const conn = llmConnectionRepository.getActiveByUserId(userId);
-      if (!conn) {
-        console.log(`[ContextService] No active connection found for user ${userId}`);
-        return null;
-      }
-      // Убираем /v1 суффикс если есть (llama.cpp API на корневом уровне)
-      const baseURL = conn.base_url.replace(/\/v1\/?$/, '');
-      console.log(`[ContextService] Active connection for user ${userId}: ${baseURL}`);
-      return baseURL;
-    } catch (err) {
-      console.error(`[ContextService] Error getting active connection for user ${userId}:`, err);
-      return null;
-    }
+    const conn = this.getActiveConnection(userId);
+    if (!conn) return null;
+    // Убираем /v1 суффикс если есть (llama.cpp API на корневом уровне)
+    const baseURL = conn.base_url.replace(/\/v1\/?$/, '');
+    console.log(`[ContextService] Active connection for user ${userId}: ${baseURL}`);
+    return baseURL;
   }
 
   /**
@@ -104,51 +210,136 @@ export class ContextService {
   }
 
   /**
-   * Получение максимального контекста из /props
-   * Использует кэширование для снижения нагрузки
+   * Определяет размер контекста активного подключения.
+   *
+   * Порядок источников (первый успешный выигрывает):
+   *   1. Поле context_length в подключении - то, что указал сам пользователь.
+   *   2. GET /props у llama.cpp-совместимого сервера. Раньше этот шаг делался
+   *      только для localhost, из-за чего любой внешний эндпоинт получал
+   *      константу 16384 независимо от реальной модели.
+   *   3. GET /v1/model у TabbyAPI.
+   * Если не сработало ни одно - limit = 0, и UI обязан показать «неизвестно»,
+   * а не выдуманное число.
    */
-  async getMaxContext(userId: number): Promise<number> {
-    const baseURL = this.getActiveLlmBaseUrl(userId);
-    if (!baseURL) {
-      return 16384; // Значение по умолчанию если нет подключения
+  async resolveContextLimit(userId: number): Promise<ResolvedContextLimit> {
+    const conn = this.getActiveConnection(userId);
+    if (!conn) {
+      return { limit: 0, source: 'unknown', note: 'нет активного подключения' };
     }
 
-    // Для удаленных серверов не обращаемся к llama.cpp API
-    if (!this.isLocalServer(baseURL)) {
-      return 16384;
+    // Ручное значение важнее автоопределения и не требует запросов к эндпоинту
+    const manual = Number(conn.context_length);
+    if (Number.isFinite(manual) && manual > 0) {
+      return { limit: Math.floor(manual), source: 'connection', note: 'указано в подключении' };
     }
 
+    const rootURL = conn.base_url.replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+    // Ключ привязан к подключению и к значению его полей: правка подключения
+    // сама сбрасывает кэш, отдельная инвалидация не нужна
+    const cacheKey = `${conn.id}|${conn.base_url}|${conn.context_length ?? ''}`;
     const now = Date.now();
 
-    // Проверяем кэш (только если тот же baseURL)
-    if (this.propsCache && this.propsCache.baseURL === baseURL && (now - this.propsCache.timestamp) < this.PROPS_CACHE_TTL) {
-      return this.propsCache.n_ctx;
+    if (this.limitCache && this.limitCache.key === cacheKey) {
+      const ttl = this.limitCache.resolved.source === 'unknown'
+        ? this.LIMIT_CACHE_TTL_UNKNOWN
+        : this.LIMIT_CACHE_TTL;
+      if (now - this.limitCache.timestamp < ttl) {
+        return this.limitCache.resolved;
+      }
     }
 
+    const apiKey = this.getApiKey(conn);
+
+    const llamaCtx = await this.detectFromLlamaCpp(rootURL, apiKey);
+    if (llamaCtx > 0) {
+      return this.cacheLimit(cacheKey, { limit: llamaCtx, source: 'llama.cpp', note: 'llama.cpp /props' }, now);
+    }
+
+    const tabby = await this.detectFromTabby(rootURL, apiKey);
+    if (tabby.limit > 0) {
+      return this.cacheLimit(cacheKey, {
+        limit: tabby.limit,
+        source: 'tabbyapi',
+        note: `TabbyAPI /v1/model: ${tabby.field}`,
+      }, now);
+    }
+
+    return this.cacheLimit(cacheKey, {
+      limit: 0,
+      source: 'unknown',
+      note: 'эндпоинт не сообщает размер контекста',
+    }, now);
+  }
+
+  private cacheLimit(key: string, resolved: ResolvedContextLimit, timestamp: number): ResolvedContextLimit {
+    this.limitCache = { key, resolved, timestamp };
+    console.log(`[ContextService] Context limit for ${key}: ${resolved.limit || 'unknown'} (${resolved.source})`);
+    return resolved;
+  }
+
+  /** Ключ доступа к эндпоинту, если он задан в подключении */
+  private getApiKey(conn: LlmConnection): string {
+    if (!conn.api_key_encrypted) return '';
     try {
-      const response = await fetch(`${baseURL}/props`, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch /props: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json() as LlamaProps;
-      const n_ctx = data.default_generation_settings?.n_ctx;
-
-      if (!n_ctx || typeof n_ctx !== 'number') {
-        throw new Error('Invalid response from /props: n_ctx not found');
-      }
-
-      // Кэшируем результат
-      this.propsCache = { n_ctx, timestamp: now, baseURL };
-      return n_ctx;
-    } catch (error) {
-      console.error('[ContextService] Error fetching /props:', error);
-      throw error;
+      return Buffer.from(conn.api_key_encrypted, 'base64').toString('utf-8');
+    } catch {
+      return '';
     }
+  }
+
+  /**
+   * Запрос /props к llama.cpp-совместимому серверу на ЛЮБОМ хосте.
+   */
+  private async detectFromLlamaCpp(rootURL: string, apiKey: string): Promise<number> {
+    const payload = await this.fetchJsonSafe<LlamaProps>(`${rootURL}/props`, apiKey);
+    if (!payload) return 0;
+
+    const candidates = [payload.default_generation_settings?.n_ctx, payload.total_n_ctx, payload.n_ctx];
+    for (const candidate of candidates) {
+      const value = Number(candidate);
+      if (Number.isFinite(value) && value > 0) return Math.floor(value);
+    }
+    return 0;
+  }
+
+  /**
+   * Запрос /v1/model к TabbyAPI: у неё нет /props, но этот эндпоинт отдаёт
+   * параметры запущенной модели, включая размер KV-кэша.
+   */
+  private async detectFromTabby(rootURL: string, apiKey: string): Promise<{ limit: number; field: string }> {
+    const payload = await this.fetchJsonSafe<TabbyModelResponse>(`${rootURL}/v1/model`, apiKey);
+    return parseTabbyContextLimit(payload);
+  }
+
+  /**
+   * GET с разбором JSON. null при любой неудаче (эндпоинта нет, не тот формат,
+   * хост недоступен) - для автоопределения это штатная ситуация, а не ошибка.
+   */
+  private async fetchJsonSafe<T>(url: string, apiKey: string): Promise<T | null> {
+    try {
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+      const response = await fetch(url, { method: 'GET', headers });
+      if (!response.ok) {
+        console.log(`[ContextService] ${url} -> HTTP ${response.status}, источник не подходит`);
+        return null;
+      }
+      return await response.json() as T;
+    } catch (error) {
+      console.log(`[ContextService] ${url} недоступен:`, (error as Error).message);
+      return null;
+    }
+  }
+
+  /**
+   * Совместимость: роут /api/context/props ожидает число. При неизвестном
+   * лимите возвращает прежнее значение по умолчанию, чтобы существующие
+   * потребители не получили ноль.
+   */
+  async getMaxContext(userId: number): Promise<number> {
+    const resolved = await this.resolveContextLimit(userId);
+    return resolved.limit > 0 ? resolved.limit : 16384;
   }
 
   /**
@@ -349,7 +540,10 @@ export class ContextService {
       const baseURL = this.getActiveLlmBaseUrl(userId);
       const isLocal = baseURL ? this.isLocalServer(baseURL) : false;
 
-      const maxContext = await this.getMaxContext(userId).catch(() => 16384);
+      const resolvedLimit = await this.resolveContextLimit(userId);
+      let maxContext = resolvedLimit.limit;
+      let limitSource: ContextLimitSource = resolvedLimit.source;
+      let limitNote: string = resolvedLimit.note;
       let tokensUsed: number | null = null;
       let slotId: number | null = null;
       let isCached = false;
@@ -432,9 +626,20 @@ export class ContextService {
         }
       }
 
+      // Пол правды: лимит не должен быть меньше того, что уже израсходовано.
+      // Если эндпоинт отдал больше, чем «известный» контекст, значит известный
+      // лимит неверен или не найден - показываем округлённый вверх факт и честно
+      // помечаем его как оценку, а не как точное окно модели.
+      if (tokensUsed > maxContext) {
+        const claimed = maxContext > 0 ? `, эндпоинт заявлял ${maxContext}` : '';
+        maxContext = roundUpToContextChunk(tokensUsed);
+        limitSource = 'observed';
+        limitNote = `не меньше израсходованного (оценка)${claimed}`;
+      }
+
       const percentage = maxContext > 0 ? (tokensUsed / maxContext) * 100 : 0;
 
-      console.log(`[ContextService] Final stats for chat ${chatId}: ${tokensUsed}/${maxContext} tokens (${percentage.toFixed(1)}%) ${isCached ? '[cached]' : '[live]'} ${isLocal ? '[local]' : '[remote]'}`);
+      console.log(`[ContextService] Final stats for chat ${chatId}: ${tokensUsed}/${maxContext} tokens (${percentage.toFixed(1)}%) [limit: ${limitSource}] ${isCached ? '[cached]' : '[live]'} ${isLocal ? '[local]' : '[remote]'}`);
 
       return {
         tokensUsed,
@@ -442,6 +647,8 @@ export class ContextService {
         percentage,
         cached: isCached,
         slotId,
+        limitSource,
+        limitNote,
         lastSynced: isCached ? contextRepository.getCachedStats(chatId)?.context_last_synced ?? null : new Date().toISOString(),
       };
     } catch (error) {
@@ -449,29 +656,54 @@ export class ContextService {
 
       // Полный fallback: попробуем кэш из БД
       try {
-        const maxContext = await this.getMaxContext(userId).catch(() => 16384);
+        const fallbackLimit = await this.resolveContextLimit(userId);
+        let maxContext = fallbackLimit.limit;
+        let limitSource: ContextLimitSource = fallbackLimit.source;
+        let limitNote = fallbackLimit.note;
+
         const cached = contextRepository.getCachedStats(chatId);
         if (cached && cached.context_tokens_used > 0) {
-          const percentage = maxContext > 0 ? (cached.context_tokens_used / maxContext) * 100 : 0;
+          const used = cached.context_tokens_used;
+          if (used > maxContext) {
+            maxContext = roundUpToContextChunk(used);
+            limitSource = 'observed';
+            limitNote = 'не меньше израсходованного (оценка)';
+          }
+          const percentage = maxContext > 0 ? (used / maxContext) * 100 : 0;
           return {
-            tokensUsed: cached.context_tokens_used,
+            tokensUsed: used,
             contextLimit: maxContext,
             percentage,
             cached: true,
             slotId: null,
+            limitSource,
+            limitNote,
             lastSynced: cached.context_last_synced,
           };
         }
+
+        return {
+          tokensUsed: 0,
+          contextLimit: maxContext,
+          percentage: 0,
+          cached: false,
+          slotId: null,
+          limitSource,
+          limitNote,
+          lastSynced: null,
+        };
       } catch (err) {
         // ignore
       }
 
       return {
         tokensUsed: 0,
-        contextLimit: 16384,
+        contextLimit: 0,
         percentage: 0,
         cached: false,
         slotId: null,
+        limitSource: 'unknown',
+        limitNote: 'не удалось определить лимит',
         lastSynced: null,
       };
     }

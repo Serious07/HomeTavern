@@ -89,6 +89,18 @@ router.get('/active', authenticate, (req: AuthenticatedRequest, res: Response) =
 });
 
 /**
+ * Поле «размер контекста» приходит из формы строкой. Пустая строка, ноль и мусор
+ * должны превращаться в null - это режим автоопределения, а не «ноль токенов
+ * контекста»: ноль ниже по коду означает «лимит неизвестен».
+ */
+function normalizeContextLength(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
+/**
  * POST /api/llm-connections
  * Creates a new LLM connection for the authenticated user
  */
@@ -110,6 +122,7 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
       api_key,
       model,
       max_tokens: max_tokens || 64000,
+      context_length: normalizeContextLength(req.body.context_length),
       reasoning: reasoning ?? 1,
       strict_role_alternation: strict_role_alternation ?? 0,
     });
@@ -150,6 +163,9 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
     if (req.body.api_key !== undefined && req.body.api_key.length > 0) updates.api_key = req.body.api_key;
     if (req.body.model !== undefined) updates.model = req.body.model;
     if (req.body.max_tokens !== undefined) updates.max_tokens = req.body.max_tokens;
+    if (req.body.context_length !== undefined) {
+      updates.context_length = normalizeContextLength(req.body.context_length);
+    }
     if (req.body.reasoning !== undefined) updates.reasoning = req.body.reasoning;
     if (req.body.strict_role_alternation !== undefined) updates.strict_role_alternation = req.body.strict_role_alternation;
 
