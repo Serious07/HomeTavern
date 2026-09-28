@@ -1036,7 +1036,12 @@ const MessageList: React.FC<MessageListProps> = ({
         />
       );
     }
-  }, [expandedBlockMessages, lastAssistantIndex, translationEnabled, isSelectionMode, selectionStart, selectionEnd, onEditBlock, onToggleBlockCompression, onDeleteBlock, handleExpandBlock, handleCollapseBlock, handleEditStart, onRegenerate, onDelete, onReasoningChange, translatingMessageId, onTranslate, handleSelectionClick, editingTranslated]);
+  // ВАЖНО: в зависимостях обязаны быть messages и expandThinkingDefault —
+  // они читаются внутри колбэка (поиск индекса сообщения, стартовое состояние
+  // блока мыслей). Пока список перерисовывался на каждый рендер родителя,
+  // устаревшее замыкание было невидимым; после добавления memo() к MessageList
+  // оно проявилось бы поехавшими индексами в раскрытых блоках.
+  }, [expandedBlockMessages, lastAssistantIndex, translationEnabled, isSelectionMode, selectionStart, selectionEnd, onEditBlock, onToggleBlockCompression, onDeleteBlock, handleExpandBlock, handleCollapseBlock, handleEditStart, onRegenerate, onDelete, onReasoningChange, translatingMessageId, onTranslate, handleSelectionClick, editingTranslated, messages, expandThinkingDefault]);
 
   const hasMoreMessages = totalItemCount > displayCount;
 
