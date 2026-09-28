@@ -1,0 +1,31 @@
+# Переводы строк: проект ведут попеременно с Windows и Linux.
+#
+# Сейчас в индексе и так хранится только LF (проверено: git ls-files --eol,
+# 0 файлов с CRLF), поэтому этот файл ничего не переписывает задним числом.
+# Он страхует будущее: файл, сохранённый в Windows-редакторе с CRLF, будет
+# нормализован при коммите, а не покажет себя diff'ом на весь файл.
+
+* text=auto
+
+# Скрипты оболочки обязаны быть с LF: start.sh сохранный в Windows с CRLF
+# отказывается запускаться на Linux (интерпретатор спотыкается о \r).
+*.sh text eol=lf
+
+# Бинарные файлы git не должен пытаться править или считать текстовым diff'ом
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.gguf binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+*.pyc binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.mp3 binary
+*.wav binary
+*.zip binary

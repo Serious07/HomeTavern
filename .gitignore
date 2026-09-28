@@ -129,3 +129,20 @@ temp/
 
 # Ignore local overrides
 *.local
+
+# Python (translation-library): байткод - артефакт сборки, привязан к конкретной
+# версии CPython (cpython-313), на другой машине пересоздаётся сам
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+
+# Артефакты Windows: проект регулярно открывается с Windows и Linux, эти файлы
+# создаёт проводник и они никогда не являются частью проекта
+desktop.ini
+$RECYCLE.BIN/
