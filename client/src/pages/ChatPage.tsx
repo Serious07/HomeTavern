@@ -7,6 +7,7 @@ import { Chat, Message, Character } from '../types';
 import { CompressionMethod } from '../types/compression';
 import { playNotificationSound } from '../utils/notificationSound';
 import { buildChatExportText, buildExportFileName, downloadChatExport } from '../utils/exportChat';
+import { diagLog } from '../utils/diagnostics';
 import MessageList from '../components/chat/MessageList';
 import StreamingResponse from '../components/chat/StreamingResponse';
 import ChatInputArea from '../components/chat/ChatInputArea';
@@ -483,6 +484,9 @@ const ChatPage: React.FC = () => {
     const messageToSend = currentInputRef.current.trim();
     if (!messageToSend || !chatId || isSending || isStreaming) return;
     
+    // «След» для диагностики крахов: размер отправки и идентификатор чата.
+    diagLog('send', `chat=${chatId} len=${messageToSend.length}`);
+
     // Сбрасываем состояние showThinking для нового стримингового сообщения
     streamingMessageThinkingRef.current = false;
     
@@ -1270,6 +1274,48 @@ const ChatPage: React.FC = () => {
     streamingTranslation?.errorMessage,
   ]);
 
+  // ===== Стабильные прокси-обработчики для мемоизированного MessageList =====
+  // handleRegenerate / handleEditMessage / handleDeleteMessage / handleTranslateMessage —
+  // большие async-функции, читающие множество состояния страницы. Оборачивать их
+  // в useCallback с вручную перечисленными зависимостями ОПАСНО: пропуск любой
+  // зависимости даёт устаревшее замыкание (тот самый класс бага, что уже чинили
+  // в MessageList). Поэтому наружу отдаём неизменяемые обёртки, которые всегда
+  // вызывают СВЕЖУЮ версию функции из ref: стабильность ссылок без риска.
+  const messageHandlersRef = useRef({
+    onRegenerate: handleRegenerate,
+    onEdit: handleEditMessage,
+    onDelete: handleDeleteMessage,
+    onTranslate: handleTranslateMessage,
+  });
+
+  // Обновляем после каждого commit'а — к моменту любого клика ref уже актуален.
+  useEffect(() => {
+    messageHandlersRef.current = {
+      onRegenerate: handleRegenerate,
+      onEdit: handleEditMessage,
+      onDelete: handleDeleteMessage,
+      onTranslate: handleTranslateMessage,
+    };
+  });
+
+  const stableRegenerate = useCallback(
+    (messageId: number) => messageHandlersRef.current.onRegenerate(messageId),
+    []
+  );
+  const stableEditMessage = useCallback(
+    (messageId: number, content: string, otherContent?: string, editingTranslated?: boolean) =>
+      messageHandlersRef.current.onEdit(messageId, content, otherContent, editingTranslated),
+    []
+  );
+  const stableDeleteMessage = useCallback(
+    (messageId: number) => messageHandlersRef.current.onDelete(messageId),
+    []
+  );
+  const stableTranslateMessage = useCallback(
+    (messageId: number) => messageHandlersRef.current.onTranslate(messageId),
+    []
+  );
+
   // Loading state
   if (isLoading) {
     return (
@@ -1303,7 +1349,7 @@ const ChatPage: React.FC = () => {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex">
+    <div className="app-viewport overflow-hidden bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex">
       {/* Sidebar overlay for mobile */}
       {showSidebar && (
         <div
@@ -1369,7 +1415,7 @@ const ChatPage: React.FC = () => {
       </div>
 
       {/* Main chat area */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col app-viewport overflow-hidden">
         {/* Chat header */}
         <div className={`shrink-0 transition-all duration-300 chat-header ${
           showHeaderFooter ? 'block' : 'hidden'
@@ -1522,12 +1568,12 @@ const ChatPage: React.FC = () => {
                   key={chatId}
                   messages={memoizedMessages}
                   expandThinkingDefault={expandThinkingDefault}
-                  onRegenerate={handleRegenerate}
-                  onEdit={handleEditMessage}
-                  onDelete={handleDeleteMessage}
+                  onRegenerate={stableRegenerate}
+                  onEdit={stableEditMessage}
+                  onDelete={stableDeleteMessage}
                   onReasoningChange={handleReasoningChange}
                   translatingMessageId={translatingMessageId}
-                  onTranslate={handleTranslateMessage}
+                  onTranslate={stableTranslateMessage}
                   translationEnabled={translationEnabled}
                   // Пропсы для сжатия истории
                   blocks={blocks}

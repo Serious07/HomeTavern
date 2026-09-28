@@ -8,12 +8,22 @@ import { MessageEditModal } from './MessageEditModal';
 
 const VISIBLE_LIMIT_STORAGE_KEY = 'hometavern_visible_message_limit';
 const DEFAULT_VISIBLE_LIMIT = 50;
+// Расстояние от верха списка (px), при котором считается, что пользователь
+// долистал до старых сообщений и можно подгрузить ещё.
+const TOP_LOAD_THRESHOLD_PX = 240;
+// Жёсткий потолок разово монтируемых сообщений: страховка для значения,
+// которое пользователь вводит на странице настроек.
+const MAX_VISIBLE_LIMIT = 300;
 
 export function getVisibleMessageLimit(): number {
   const stored = localStorage.getItem(VISIBLE_LIMIT_STORAGE_KEY);
   if (stored) {
     const parsed = parseInt(stored, 10);
-    if (!isNaN(parsed) && parsed > 0) return parsed;
+    // Верхняя граница обязательна: значение берётся из настройки на странице
+    // настроек, а каждое смонтированное сообщение - это полный рендер Markdown.
+    // Введённое по невнимательности большое число означало бы монтаж всего чата
+    // разом и на мобильном убило бы вкладку.
+    if (!isNaN(parsed) && parsed > 0) return Math.min(parsed, MAX_VISIBLE_LIMIT);
   }
   return DEFAULT_VISIBLE_LIMIT;
 }
@@ -167,6 +177,54 @@ interface DragInfo {
   reasoningLines: string[];
 }
 
+/**
+ * Сравнитель для memo(MessageItem).
+ *
+ * По умолчанию memo сверяет props по ссылке. Но после каждой генерации ChatPage
+ * перезагружает историю целиком (fetchMessages -> setMessages(response.data)),
+ * то есть получает НОВЫЕ объекты для каждого сообщения. При сверке по ссылкам
+ * это означает перерисовку всего чата и повторный парсинг Markdown у каждого
+ * сообщения - пик нагрузки приходился ровно на момент окончания генерации.
+ *
+ * Поэтому поля сообщения сравниваются по значению, а остальные пропсы - по
+ * ссылке (все колбэки стабильны: useCallback в MessageList и прокси в ChatPage).
+ *
+ * Сравнение сделано перебором ключей, а не жёстким списком полей: если сервер
+ * начнёт отдавать новое поле, оно не будет «забыто». Отказ безопасный - если
+ * значение окажется объектом и ссылки разойдутся, просто случится лишний
+ * ре-рендер, а не пропущенное обновление.
+ */
+function areMessageItemsEqual(prev: MessageItemProps, next: MessageItemProps): boolean {
+  if (
+    prev.expandThinkingDefault !== next.expandThinkingDefault ||
+    prev.translatingMessageId !== next.translatingMessageId ||
+    prev.translationEnabled !== next.translationEnabled ||
+    prev.isLastAssistantMessage !== next.isLastAssistantMessage ||
+    prev.messageIndex !== next.messageIndex ||
+    prev.isSelectionMode !== next.isSelectionMode ||
+    prev.isSelected !== next.isSelected ||
+    prev.onRegenerate !== next.onRegenerate ||
+    prev.onEditStart !== next.onEditStart ||
+    prev.onDelete !== next.onDelete ||
+    prev.onReasoningChange !== next.onReasoningChange ||
+    prev.onTranslate !== next.onTranslate ||
+    prev.onSelectionClick !== next.onSelectionClick
+  ) {
+    return false;
+  }
+
+  const a = prev.message as unknown as Record<string, unknown>;
+  const b = next.message as unknown as Record<string, unknown>;
+  if (a === b) return true;
+
+  const keysA = Object.keys(a);
+  if (keysA.length !== Object.keys(b).length) return false;
+  for (const key of keysA) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
 const MessageItem = memo(({
   message,
   expandThinkingDefault = false,
@@ -201,6 +259,21 @@ const MessageItem = memo(({
   const [dragState, setDragState] = useState<{ content: string; reasoning: string } | null>(null);
   const dragInfoRef = useRef<DragInfo | null>(null);
   const thinkingBoxRef = useRef<HTMLDivElement>(null);
+  // Текст размышлений монтируется в DOM только пока блок реально раскрыт
+  // (или идёт анимация). Само сворачивание сделано через grid-template-rows: 0fr,
+  // и раньше текст каждого сообщения висел в DOM и участвовал в разметке даже
+  // свёрнутым — на длинном чате это основной остаток лишней памяти.
+  // Размонтирование отложено до конца анимации (300 мс), иначе схлопывание
+  // стало бы мгновенным и анимация пропала бы.
+  const [thinkingMounted, setThinkingMounted] = useState<boolean>(thinkingExpanded);
+  useEffect(() => {
+    if (thinkingExpanded) {
+      setThinkingMounted(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setThinkingMounted(false), 320);
+    return () => window.clearTimeout(timer);
+  }, [thinkingExpanded]);
 
   const isDragging = dragState !== null;
   const dragStateRef = useRef<{ content: string; reasoning: string } | null>(null);
@@ -474,13 +547,15 @@ const MessageItem = memo(({
                     </button>
                   )}
                 </div>
-                {/* Текст мыслей (приглушённый) */}
-                <div
-                  ref={thinkingBoxRef}
-                  className="px-1 pb-1 text-sm text-gray-400/80 whitespace-pre-wrap leading-5"
-                >
-                  {isDragging ? dragState!.reasoning : message.reasoning_content}
-                </div>
+                {/* Текст мыслей (приглушённый) — см. thinkingMounted выше */}
+                {thinkingMounted && (
+                  <div
+                    ref={thinkingBoxRef}
+                    className="px-1 pb-1 text-sm text-gray-400/80 whitespace-pre-wrap leading-5"
+                  >
+                    {isDragging ? dragState!.reasoning : message.reasoning_content}
+                  </div>
+                )}
                 {/* Оранжевая пунктирная линия МЕЖДУ мыслями и ответом + зона захвата drag (>=44px)
                     — только в развёрнутом состоянии; при сворачивании уходит вверх вместе с мыслями */}
                 {thinkingExpanded && (
@@ -501,8 +576,9 @@ const MessageItem = memo(({
             </div>
           )}
 
-          {/* Секция ответа (ниже мыслей) */}
-          <div className="whitespace-pre-wrap">
+          {/* Секция ответа (ниже мыслей). Класс msg-body включает content-visibility:
+              браузер пропускает разметку и отрисовку сообщений вне экрана. */}
+          <div className="whitespace-pre-wrap msg-body">
             {isDragging ? (
               <span className="block text-sm leading-5">{dragState!.content}</span>
             ) : (
@@ -676,7 +752,7 @@ const MessageItem = memo(({
       </div>
     </div>
   );
-});
+}, areMessageItemsEqual);
 
 MessageItem.displayName = 'MessageItem';
 
@@ -723,6 +799,11 @@ const MessageList: React.FC<MessageListProps> = ({
   
   // Ref to track if user is scrolled near bottom (to avoid auto-scroll when reading history)
   const isScrolledToBottomRef = useRef<boolean>(true);
+  // Зеркало displayCount для чтения внутри обработчика scroll без пересоздания
+  // колбэка на каждое изменение счётчика.
+  const displayCountRef = useRef<number>(visibleLimit);
+  // Блокировка: пока предыдущее расширение списка не отрисовано, новое не запускаем.
+  const isLoadingMoreRef = useRef<boolean>(false);
   
   const handleExpandBlock = useCallback((block: ChatBlockWithParsedIds) => {
     const blockMessages = messages.filter(msg => block.original_message_ids.includes(msg.id));
@@ -764,6 +845,14 @@ const MessageList: React.FC<MessageListProps> = ({
     setEditingMessage(null);
     setEditingTranslated(false);
   }, [onEdit, messages, editingTranslated]);
+
+  // Синхронизируем зеркало счётчика и снимаем блокировку подгрузки после того,
+  // как новые сообщения реально отрисованы (commit). Без этого эффекта
+  // блокировка isLoadingMoreRef никогда бы не снялась.
+  useEffect(() => {
+    displayCountRef.current = displayCount;
+    isLoadingMoreRef.current = false;
+  }, [displayCount]);
 
   const messageToBlock = useMemo(() => {
     const map = new Map<number, ChatBlockWithParsedIds>();
@@ -884,16 +973,25 @@ const MessageList: React.FC<MessageListProps> = ({
     const container = scrollContainerRef.current;
     if (!container) return;
     
-    const { scrollHeight, scrollTop, clientHeight } = container;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    // Нужен только scrollTop — он и есть расстояние от верха списка.
+    const { scrollTop } = container;
     
-    // If user scrolled up and is near the top of loaded content, load more
-    if (distanceFromBottom > clientHeight * 0.8) {
-      setDisplayCount(prev => {
-        const newCount = prev + visibleLimit;
-        return Math.min(newCount, totalItemCount);
-      });
-    }
+    // Автоподгрузка старых сообщений: ТОЛЬКО когда пользователь действительно
+    // у самого верха списка.
+    //
+    // Прежнее условие (distanceFromBottom > clientHeight * 0.8) выполнялось на
+    // всём протяжении чата выше нижних 80% окна, из-за чего КАЖДОЕ событие
+    // scroll добавляло по visibleLimit сообщений. На тач-скролле события идут
+    // пачками (~60/сек), поэтому один свайп вверх раздувал DOM в десятки раз
+    // и убивал вкладку на мобильных. Теперь: расширение только у верха и не
+    // чаще одного отрисованного шага (isLoadingMoreRef).
+    const distanceFromTop = scrollTop;
+    if (distanceFromTop > TOP_LOAD_THRESHOLD_PX) return;
+    if (isLoadingMoreRef.current) return;
+    if (displayCountRef.current >= totalItemCount) return;
+
+    isLoadingMoreRef.current = true;
+    setDisplayCount(prev => Math.min(prev + visibleLimit, totalItemCount));
   }, [totalItemCount, visibleLimit, checkScrollPosition]);
 
   // Load more messages when scrolling near top
@@ -904,7 +1002,9 @@ const MessageList: React.FC<MessageListProps> = ({
     });
   }, [totalItemCount, visibleLimit]);
 
-  const handleSelectionClick = (messageId: number) => {
+  // Стабильная ссылка обязательна: этот колбэк уходит в memo(MessageItem),
+  // и без useCallback каждый рендер списка перерисовывал бы ВСЕ сообщения.
+  const handleSelectionClick = useCallback((messageId: number) => {
     if (!onMessageSelectionClick) return;
     
     if (selectionStart === null) {
@@ -914,7 +1014,7 @@ const MessageList: React.FC<MessageListProps> = ({
     } else {
       onMessageSelectionClick(messageId);
     }
-  };
+  }, [onMessageSelectionClick, selectionStart]);
 
   const selectionCount = useMemo(() => {
     if (selectionStart === null || selectionEnd === null) return 0;
@@ -1011,7 +1111,12 @@ const MessageList: React.FC<MessageListProps> = ({
         />
       );
     }
-  }, [expandedBlockMessages, lastAssistantIndex, translationEnabled, isSelectionMode, selectionStart, selectionEnd, onEditBlock, onToggleBlockCompression, onDeleteBlock, handleExpandBlock, handleCollapseBlock, handleEditStart, onRegenerate, onDelete, onReasoningChange, translatingMessageId, onTranslate, handleSelectionClick, editingTranslated]);
+  // ВАЖНО: в зависимостях обязаны быть messages и expandThinkingDefault —
+  // они читаются внутри колбэка (поиск индекса сообщения, стартовое состояние
+  // блока мыслей). Пока список перерисовывался на каждый рендер родителя,
+  // устаревшее замыкание было невидимым; после добавления memo() к MessageList
+  // оно проявилось бы поехавшими индексами в раскрытых блоках.
+  }, [expandedBlockMessages, lastAssistantIndex, translationEnabled, isSelectionMode, selectionStart, selectionEnd, onEditBlock, onToggleBlockCompression, onDeleteBlock, handleExpandBlock, handleCollapseBlock, handleEditStart, onRegenerate, onDelete, onReasoningChange, translatingMessageId, onTranslate, handleSelectionClick, editingTranslated, messages, expandThinkingDefault]);
 
   const hasMoreMessages = totalItemCount > displayCount;
 
@@ -1020,7 +1125,7 @@ const MessageList: React.FC<MessageListProps> = ({
       <div className="flex-1 flex flex-col h-full">
         <div 
           ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto px-4 pt-4 pb-4"
+          className="flex-1 overflow-y-auto chat-scroll px-4 pt-4 pb-4"
           onScroll={handleScroll}
         >
         {/* Load more button when user scrolls up */}
@@ -1093,4 +1198,11 @@ const MessageList: React.FC<MessageListProps> = ({
   );
 };
 
-export default MessageList;
+// memo: список НЕ должен перерисовываться на каждый рендер ChatPage.
+// Раньше любое слово перевода (setStreamingTranslation на каждый токен)
+// перерисовывало все ~50 сообщений разом. Условие работы memo — стабильные
+// props; нестабильные обработчики страницы закрыты прокси-обёртками в ChatPage.
+const MemoizedMessageList = memo(MessageList);
+MemoizedMessageList.displayName = 'MessageList';
+
+export default MemoizedMessageList;
