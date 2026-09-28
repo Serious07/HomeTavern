@@ -23,6 +23,23 @@ body {
   }
 }
 
+/* Актуальная высота видимой области для полноэкранного контейнера чата.
+   100vh в Chrome на Android = высота БЕЗ учёта адресуемой строки, поэтому
+   нижняя часть интерфейса (поле ввода) уезжала за экран, а при открытии
+   клавиатуры всё дёргалось. dvh следует за реальным вьюпортом; первая
+   строка — фолбэк для браузеров без поддержки dvh. */
+.app-viewport {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Прокрутка списка сообщений: блокируем «резиновый» оверскролл, который на
+   Android пробрасывает жест родичу и дёргает весь экран на границах. */
+.chat-scroll {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* Prevent header from being cut off when keyboard is shown */
 @media (max-width: 768px) {
   /* Ensure fixed header stays visible */

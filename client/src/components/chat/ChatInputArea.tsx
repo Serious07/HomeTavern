@@ -1,5 +1,15 @@
 import React, { useState, useCallback, useRef, useEffect, useTransition, memo } from 'react';
 
+// Chrome 123+ умеет свойство field-sizing: content — авторастягивание textarea
+// средствами самого движка. Прежний JS-путь на КАЖДОЕ нажатие клавиши писал
+// style.height = 'auto' и тут же читал scrollHeight: чтение сразу после записи
+// означает принудительную синхронную переразмётку всей страницы (весь чат над
+// полем ввода). На мобильном это и есть основной лаг ввода.
+const SUPPORTS_FIELD_SIZING =
+  typeof CSS !== 'undefined' &&
+  typeof CSS.supports === 'function' &&
+  CSS.supports('field-sizing', 'content');
+
 interface ChatInputAreaProps {
   initialValue?: string;
   onChange: (value: string) => void;
@@ -34,6 +44,9 @@ const ChatInputAreaInternal: React.FC<ChatInputAreaProps> = ({
 
   // Debounced auto-resize textarea с использованием requestAnimationFrame
   const autoResize = useCallback((textarea: HTMLTextAreaElement) => {
+    // Если браузер сам растягивает поле через field-sizing — JS-измерения не нужны.
+    if (SUPPORTS_FIELD_SIZING) return;
+
     if (resizeTimeoutRef.current) {
       cancelAnimationFrame(resizeTimeoutRef.current);
     }
@@ -120,15 +133,26 @@ const ChatInputAreaInternal: React.FC<ChatInputAreaProps> = ({
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         className="w-full bg-gray-700/30 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 resize-none overflow-hidden"
-        style={{
-          minHeight: '40px',
-          maxHeight: '400px',
-          lineHeight: '20px',
-        }}
+        style={
+          SUPPORTS_FIELD_SIZING
+            ? ({
+                minHeight: '40px',
+                maxHeight: '400px',
+                lineHeight: '20px',
+                fieldSizing: 'content',
+                overflowY: 'auto',
+              } as React.CSSProperties)
+            : {
+                minHeight: '40px',
+                maxHeight: '400px',
+                lineHeight: '20px',
+              }
+        }
         disabled={disabled}
         autoCorrect="off"
         autoCapitalize="off"
         spellCheck="false"
+        enterKeyHint="send"
       />
       <button
         onClick={onSend}

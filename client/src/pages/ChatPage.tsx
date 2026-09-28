@@ -1345,7 +1345,7 @@ const ChatPage: React.FC = () => {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex">
+    <div className="app-viewport overflow-hidden bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex">
       {/* Sidebar overlay for mobile */}
       {showSidebar && (
         <div
@@ -1411,7 +1411,7 @@ const ChatPage: React.FC = () => {
       </div>
 
       {/* Main chat area */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col app-viewport overflow-hidden">
         {/* Chat header */}
         <div className={`shrink-0 transition-all duration-300 chat-header ${
           showHeaderFooter ? 'block' : 'hidden'

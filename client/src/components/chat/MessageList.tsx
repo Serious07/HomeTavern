@@ -1052,7 +1052,7 @@ const MessageList: React.FC<MessageListProps> = ({
       <div className="flex-1 flex flex-col h-full">
         <div 
           ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto px-4 pt-4 pb-4"
+          className="flex-1 overflow-y-auto chat-scroll px-4 pt-4 pb-4"
           onScroll={handleScroll}
         >
         {/* Load more button when user scrolls up */}
