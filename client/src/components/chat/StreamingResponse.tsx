@@ -305,9 +305,10 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
     eventSource.addEventListener('done', (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('[SSE done] Received done event:', data);
-        console.log('[SSE done] contentRef.current:', contentRef.current);
-        console.log('[SSE done] reasoningContentRef.current:', reasoningContentRef.current);
+        // Логируем ТОЛЬКО длины, а не сами тексты. console.log удерживает ссылку на
+        // аргумент, поэтому дамп всего ответа и всех размышлений мешает сборщику
+        // мусора: на длинной сессии это напрямую приближает OOM-крах вкладки.
+        console.log('[SSE done] content:', contentRef.current.length, 'симв., reasoning:', reasoningContentRef.current.length, 'симв.');
         setIsStreaming(false);
         eventSource.close();
         eventSourceRef.current = null;
