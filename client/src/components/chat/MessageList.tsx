@@ -11,12 +11,19 @@ const DEFAULT_VISIBLE_LIMIT = 50;
 // Расстояние от верха списка (px), при котором считается, что пользователь
 // долистал до старых сообщений и можно подгрузить ещё.
 const TOP_LOAD_THRESHOLD_PX = 240;
+// Жёсткий потолок разово монтируемых сообщений: страховка для значения,
+// которое пользователь вводит на странице настроек.
+const MAX_VISIBLE_LIMIT = 300;
 
 export function getVisibleMessageLimit(): number {
   const stored = localStorage.getItem(VISIBLE_LIMIT_STORAGE_KEY);
   if (stored) {
     const parsed = parseInt(stored, 10);
-    if (!isNaN(parsed) && parsed > 0) return parsed;
+    // Верхняя граница обязательна: значение берётся из настройки на странице
+    // настроек, а каждое смонтированное сообщение - это полный рендер Markdown.
+    // Введённое по невнимательности большое число означало бы монтаж всего чата
+    // разом и на мобильном убило бы вкладку.
+    if (!isNaN(parsed) && parsed > 0) return Math.min(parsed, MAX_VISIBLE_LIMIT);
   }
   return DEFAULT_VISIBLE_LIMIT;
 }
@@ -168,6 +175,54 @@ interface DragInfo {
   lineH: number;
   contentLines: string[];
   reasoningLines: string[];
+}
+
+/**
+ * Сравнитель для memo(MessageItem).
+ *
+ * По умолчанию memo сверяет props по ссылке. Но после каждой генерации ChatPage
+ * перезагружает историю целиком (fetchMessages -> setMessages(response.data)),
+ * то есть получает НОВЫЕ объекты для каждого сообщения. При сверке по ссылкам
+ * это означает перерисовку всего чата и повторный парсинг Markdown у каждого
+ * сообщения - пик нагрузки приходился ровно на момент окончания генерации.
+ *
+ * Поэтому поля сообщения сравниваются по значению, а остальные пропсы - по
+ * ссылке (все колбэки стабильны: useCallback в MessageList и прокси в ChatPage).
+ *
+ * Сравнение сделано перебором ключей, а не жёстким списком полей: если сервер
+ * начнёт отдавать новое поле, оно не будет «забыто». Отказ безопасный - если
+ * значение окажется объектом и ссылки разойдутся, просто случится лишний
+ * ре-рендер, а не пропущенное обновление.
+ */
+function areMessageItemsEqual(prev: MessageItemProps, next: MessageItemProps): boolean {
+  if (
+    prev.expandThinkingDefault !== next.expandThinkingDefault ||
+    prev.translatingMessageId !== next.translatingMessageId ||
+    prev.translationEnabled !== next.translationEnabled ||
+    prev.isLastAssistantMessage !== next.isLastAssistantMessage ||
+    prev.messageIndex !== next.messageIndex ||
+    prev.isSelectionMode !== next.isSelectionMode ||
+    prev.isSelected !== next.isSelected ||
+    prev.onRegenerate !== next.onRegenerate ||
+    prev.onEditStart !== next.onEditStart ||
+    prev.onDelete !== next.onDelete ||
+    prev.onReasoningChange !== next.onReasoningChange ||
+    prev.onTranslate !== next.onTranslate ||
+    prev.onSelectionClick !== next.onSelectionClick
+  ) {
+    return false;
+  }
+
+  const a = prev.message as unknown as Record<string, unknown>;
+  const b = next.message as unknown as Record<string, unknown>;
+  if (a === b) return true;
+
+  const keysA = Object.keys(a);
+  if (keysA.length !== Object.keys(b).length) return false;
+  for (const key of keysA) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
 }
 
 const MessageItem = memo(({
@@ -521,8 +576,9 @@ const MessageItem = memo(({
             </div>
           )}
 
-          {/* Секция ответа (ниже мыслей) */}
-          <div className="whitespace-pre-wrap">
+          {/* Секция ответа (ниже мыслей). Класс msg-body включает content-visibility:
+              браузер пропускает разметку и отрисовку сообщений вне экрана. */}
+          <div className="whitespace-pre-wrap msg-body">
             {isDragging ? (
               <span className="block text-sm leading-5">{dragState!.content}</span>
             ) : (
@@ -696,7 +752,7 @@ const MessageItem = memo(({
       </div>
     </div>
   );
-});
+}, areMessageItemsEqual);
 
 MessageItem.displayName = 'MessageItem';
 

@@ -40,6 +40,19 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Тело сообщения вне экрана не размечается и не рисуется. Это «виртуализация
+   лёгкого веса»: узлы остаются в DOM, но Chrome пропускает самую дорогую работу
+   (layout + paint) для того, чего всё равно не видно. На чате в тысячу сообщений
+   это и есть основная стоимость прокрутки.
+
+   contain-intrinsic-size с ключевым словом auto означает «запомнить фактическую
+   высоту после первой отрисовки», поэтому высота сообщений не «прыгает» при
+   возврате к уже просмотренному месту. */
+.msg-body {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+
 /* Prevent header from being cut off when keyboard is shown */
 @media (max-width: 768px) {
   /* Ensure fixed header stays visible */
