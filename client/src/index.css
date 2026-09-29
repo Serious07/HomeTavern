@@ -493,6 +493,33 @@ div.markdown-content li.markdown-li blockquote {
 }
 
 /* ========================================
+   Стриминговый вывод (MarkdownRenderer, streaming=true)
+   ========================================
+   Во время генерации Markdown не парсится react-markdown, поэтому переносы
+   строк должны давать сами блоки. white-space нужен именно с !important:
+   .markdown-content выше перебивает утилиты Tailwind (whitespace-pre-wrap),
+   из-за чего текст во время печати сливался в одну строку.
+   Отступ абзаца (1rem) совпадает с .markdown-content p, чтобы текст не
+   «прыгал» в момент, когда генерация завершается и включается полный Markdown. */
+.markdown-streaming {
+  white-space: pre-wrap !important;
+  overflow-wrap: break-word;
+}
+
+.markdown-streaming > p {
+  white-space: pre-wrap !important;
+  margin-bottom: 1rem;
+}
+
+.markdown-streaming > p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-streaming > pre {
+  white-space: pre-wrap !important;
+}
+
+/* ========================================
    Экономичный режим - для экономии батареи
    ======================================== */
 

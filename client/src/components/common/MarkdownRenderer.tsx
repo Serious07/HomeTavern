@@ -1,4 +1,4 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -112,6 +112,261 @@ function wrapQuotesWithSpan(text: string): string {
   return withWrappedQuotes;
 }
 
+// ==================== Стриминговый рендер ====================
+//
+// Во время генерации полный Markdown не используется: react-markdown на каждый
+// токен перечитывал бы ВЕСЬ уже накопленный текст (работа росла квадратично).
+// Здесь — дешёвая построчная разметка: абзацы, заголовки, списки, цитаты,
+// блоки кода, **bold**/*italic*, `inline code` и кавычки.
+//
+// Главное отличие от прежнего «простого текста»: видны переносы строк и абзацы.
+// Главное отличие от Markdown-парсера: стоимость за кадр равна длине текущего
+// (ещё растущего) абзаца, а не всего ответа — см. splitSealedTail и кэш в
+// компоненте ниже.
+
+/** Разделитель абзацев: одна или несколько пустых строк подряд */
+const PARAGRAPH_SPLIT_RE = /\n{2,}/;
+
+/**
+ * Делит накопленный текст на «закрытую» часть (всё до последнего разделителя
+ * абзацев — она больше не изменится, её можно переиспользовать) и «растущий»
+ * хвост (последний абзац, который сейчас печатается).
+ */
+function splitSealedTail(text: string): { sealed: string; tail: string } {
+  const re = new RegExp(PARAGRAPH_SPLIT_RE.source, 'g');
+  let boundary = -1;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    boundary = match.index + match[0].length;
+  }
+  if (boundary === -1) return { sealed: '', tail: text };
+  return { sealed: text.slice(0, boundary), tail: text.slice(boundary) };
+}
+
+// Блочные маркеры привязаны к началу строки — проверки дешёвые
+const HEADING_RE = /^(#{1,4})\s+(.*)$/;
+const UL_ITEM_RE = /^\s*[-*+]\s+(.*)$/;
+const OL_ITEM_RE = /^\s*\d+[.)]\s+(.*)$/;
+const QUOTE_LINE_RE = /^>\s?(.*)$/;
+const HR_RE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
+const FENCE_RE = /^\s*```/;
+
+// Инлайн-разметка: `code`, **bold**, *italic*, _italic_, кавычки
+const INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(_[^_\n]+_)|("[^"\n]*")|(«[^»\n]*»)/g;
+
+/** Строка начинается с блочного маркера — её нельзя склеить с обычным абзацем */
+function isStreamingSpecialLine(line: string): boolean {
+  return (
+    HEADING_RE.test(line) ||
+    UL_ITEM_RE.test(line) ||
+    OL_ITEM_RE.test(line) ||
+    QUOTE_LINE_RE.test(line) ||
+    HR_RE.test(line) ||
+    FENCE_RE.test(line)
+  );
+}
+
+/**
+ * Инлайн-оформление куска текста: `code`, **bold**, *italic*, кавычки оранжевым
+ * (как wrapQuotesInText в финальном рендере) и LaTeX-символы.
+ */
+function renderStreamingInline(text: string, keyPrefix: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const re = new RegExp(INLINE_RE.source, 'g');
+  let last = 0;
+  let idx = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = re.exec(text)) !== null) {
+    const full = match[0];
+    const before = text.slice(last, match.index);
+
+    // _italic_ внутри слова (snake_case) оставляем как обычный текст:
+    // с обеих сторон должны быть границы слова
+    const isInnerUnderscore =
+      full.charAt(0) === '_' &&
+      (/[A-Za-z0-9_]/.test(text.charAt(match.index - 1)) ||
+        /[A-Za-z0-9_]/.test(text.charAt(match.index + full.length)));
+
+    if (isInnerUnderscore) {
+      if (before + full) nodes.push(processLatexSymbols(before + full));
+      last = match.index + full.length;
+      continue;
+    }
+
+    if (before) nodes.push(processLatexSymbols(before));
+
+    const key = `${keyPrefix}-${idx++}`;
+    if (full.charAt(0) === '`') {
+      nodes.push(
+        <code key={key} className="bg-gray-800 px-2 py-1 rounded text-sm font-mono">{full.slice(1, -1)}</code>
+      );
+    } else if (full.startsWith('**')) {
+      nodes.push(
+        <strong key={key} className="font-bold text-gray-300">{processLatexSymbols(full.slice(2, -2))}</strong>
+      );
+    } else if (full.charAt(0) === '"' || full.charAt(0) === '«') {
+      nodes.push(
+        <span key={key} className="text-orange-400 font-medium">{processLatexSymbols(full)}</span>
+      );
+    } else {
+      nodes.push(
+        <em key={key} className="italic text-gray-300">{processLatexSymbols(full.slice(1, -1))}</em>
+      );
+    }
+
+    last = match.index + full.length;
+  }
+
+  if (last < text.length) nodes.push(processLatexSymbols(text.slice(last)));
+
+  return nodes;
+}
+
+/**
+ * Разметка одного блока — строк до пустой строки. Одиночный перевод строки
+ * сохраняется внутри абзаца за счёт white-space: pre-wrap (см. index.css),
+ * как и в финальном рендере с remark-breaks.
+ */
+function renderStreamingBlock(block: string, key: number): React.ReactNode {
+  if (block.trim() === '') return null;
+
+  const lines = block.split('\n');
+
+  // Блок кода ```...```. Незакрытый fence — тоже pre: текст ещё печатается.
+  if (FENCE_RE.test(lines[0])) {
+    const body = lines.slice(1);
+    if (body.length > 0 && FENCE_RE.test(body[body.length - 1])) body.pop();
+    return (
+      <pre key={key} className="bg-gray-900 p-4 rounded-lg overflow-x-auto my-4 font-mono text-sm">
+        {body.join('\n')}
+      </pre>
+    );
+  }
+
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
+  let sub = 0;
+  const nextKey = () => `${key}-${sub++}`;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (HR_RE.test(line)) {
+      nodes.push(<hr key={nextKey()} className="my-4 border-gray-700" />);
+      i++;
+      continue;
+    }
+
+    const heading = line.match(HEADING_RE);
+    if (heading) {
+      const level = heading[1].length;
+      const content = renderStreamingInline(processLatexSymbols(heading[2]), `${key}-h${sub}`);
+      if (level === 1) nodes.push(<h1 key={nextKey()} className="text-2xl font-bold mb-4 mt-6">{content}</h1>);
+      else if (level === 2) nodes.push(<h2 key={nextKey()} className="text-xl font-bold mb-3 mt-5">{content}</h2>);
+      else if (level === 3) nodes.push(<h3 key={nextKey()} className="text-lg font-bold mb-2 mt-4">{content}</h3>);
+      else nodes.push(<h4 key={nextKey()} className="text-base font-bold mb-2 mt-4">{content}</h4>);
+      i++;
+      continue;
+    }
+
+    // Подряд идущие строки списка склеиваем в один ul/ol
+    const listMatch = line.match(UL_ITEM_RE);
+    if (listMatch) {
+      const items: string[] = [];
+      while (i < lines.length) {
+        const itemMatch = lines[i].match(UL_ITEM_RE);
+        if (!itemMatch) break;
+        items.push(itemMatch[1]);
+        i++;
+      }
+      nodes.push(
+        <ul key={nextKey()} className="list-disc list-outside mb-2 ml-5">
+          {items.map((item, itemIdx) => (
+            <li key={itemIdx} className="leading-normal mb-1.5">
+              {renderStreamingInline(processLatexSymbols(item), `${key}-li${itemIdx}`)}
+            </li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    const orderedMatch = line.match(OL_ITEM_RE);
+    if (orderedMatch) {
+      const items: string[] = [];
+      while (i < lines.length) {
+        const itemMatch = lines[i].match(OL_ITEM_RE);
+        if (!itemMatch) break;
+        items.push(itemMatch[1]);
+        i++;
+      }
+      nodes.push(
+        <ol key={nextKey()} className="list-decimal list-outside mb-2 ml-5">
+          {items.map((item, itemIdx) => (
+            <li key={itemIdx} className="leading-normal mb-1.5">
+              {renderStreamingInline(processLatexSymbols(item), `${key}-li${itemIdx}`)}
+            </li>
+          ))}
+        </ol>
+      );
+      continue;
+    }
+
+    const quoteMatch = line.match(QUOTE_LINE_RE);
+    if (quoteMatch) {
+      const quoted: string[] = [];
+      while (i < lines.length) {
+        const quoteLine = lines[i].match(QUOTE_LINE_RE);
+        if (!quoteLine) break;
+        quoted.push(quoteLine[1]);
+        i++;
+      }
+      nodes.push(
+        <blockquote
+          key={nextKey()}
+          className="border-l-4 border-gray-600 pl-4 py-2 my-4 bg-gray-800/50 italic text-gray-300"
+        >
+          {renderStreamingInline(processLatexSymbols(quoted.join('\n')), `${key}-bq`)}
+        </blockquote>
+      );
+      continue;
+    }
+
+    // Обычный абзац: подряд идущие обычные строки — один абзац с переносами
+    const paragraph: string[] = [];
+    while (i < lines.length && !isStreamingSpecialLine(lines[i])) {
+      paragraph.push(lines[i]);
+      i++;
+    }
+    // Маркер (например незакрытый fence) в середине блока — печатаем строку как
+    // есть, иначе цикл выше не сдвинул бы индекс
+    if (paragraph.length === 0) {
+      paragraph.push(lines[i]);
+      i++;
+    }
+    nodes.push(
+      <p key={nextKey()}>{renderStreamingInline(processLatexSymbols(paragraph.join('\n')), `${key}-p`)}</p>
+    );
+  }
+
+  return nodes;
+}
+
+/**
+ * Разметка текста на абзацы-блоки. keyOffset смещает ключи, чтобы блоки,
+ * переиспользованные из кэша, и новые не конфликтовали между собой.
+ */
+function renderStreamingBlocks(text: string, keyOffset: number): React.ReactNode[] {
+  const blocks = text.split(PARAGRAPH_SPLIT_RE);
+  const nodes: React.ReactNode[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const node = renderStreamingBlock(blocks[i], keyOffset + nodes.length);
+    if (node !== null) nodes.push(node);
+  }
+  return nodes;
+}
+
 // ==================== React-компонент ====================
 
 /**
@@ -148,24 +403,50 @@ const MarkdownRendererInternal: React.FC<{ children: string; streaming?: boolean
     return { statusBar: mainStatusBar, processedContent: withSpan };
   }, [children, streaming]);
 
-  // ===== Режим стриминга: только простой текст =====
-  // Абзацы и переносы строк сохраняются через whitespace-pre-wrap, но без
-  // react-markdown, подсветки кода и regex-проходов. Полное оформление
-  // включается ОДИН раз — когда генерация завершена (streaming === false).
+  // Кэш уже «закрытых» абзацев. Текст при генерации только дописывается,
+  // поэтому на каждый кадр перечитывается лишь то, что закрылось с прошлого
+  // кадра, плюс последний растущий абзац — а не весь ответ целиком.
+  const streamingCacheRef = useRef<{ sealed: string; nodes: React.ReactNode[] } | null>(null);
+
+  // ===== Режим стриминга: дешёвая разметка без react-markdown =====
+  // Переносы строк и абзацы видны сразу (white-space: pre-wrap плюс отдельные
+  // блоки для абзацев, списков, заголовков и кода), но без react-markdown,
+  // подсветки кода и тяжёлых regex-проходов. Полное оформление включается
+  // ОДИН раз — когда генерация завершена (streaming === false).
   if (streaming) {
     // Статус-бар достаём и здесь: его regex привязан к началу строки
     // (/^\[...\]/), поэтому операция дешёвая даже для длинного текста, а
     // фирменная плашка не исчезает на время печати.
     const { statusBar: streamingStatusBar, content: streamingContent } = extractStatusBar(children);
+    const { sealed, tail } = splitSealedTail(streamingContent);
+
+    const cache = streamingCacheRef.current;
+    let sealedNodes: React.ReactNode[];
+    if (cache && sealed.startsWith(cache.sealed)) {
+      // Начало текста не изменилось — переиспользуем готовые блоки и разбираем
+      // только те, что закрылись с прошлого кадра
+      sealedNodes = sealed.length > cache.sealed.length
+        ? cache.nodes.concat(renderStreamingBlocks(sealed.slice(cache.sealed.length), cache.nodes.length))
+        : cache.nodes;
+    } else {
+      // Начало поменялось (появился статус-бар, повторный запуск генерации) —
+      // кэш не подходит, собираем заново
+      sealedNodes = renderStreamingBlocks(sealed, 0);
+    }
+    // Хвостовой абзац печатается прямо сейчас — его пересобираем каждый кадр
+    const tailNodes = tail ? renderStreamingBlocks(tail, sealedNodes.length) : [];
+    streamingCacheRef.current = { sealed, nodes: sealedNodes };
+
     return (
-      <div className="markdown-content whitespace-pre-wrap break-words">
+      <div className="markdown-streaming break-words">
         {streamingStatusBar && (
           <>
             <StatusBar {...streamingStatusBar} />
             <div className="mt-3" />
           </>
         )}
-        {streamingContent}
+        {sealedNodes}
+        {tailNodes}
       </div>
     );
   }
