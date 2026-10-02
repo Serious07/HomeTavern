@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { llmConnectionsApi } from '../services/api';
-import { LlmConnection, LlmTestResult } from '../types';
+import { LlmConnection, LlmTestResult, ReasoningEffort } from '../types';
 import AppHeader from '../components/common/AppHeader';
 
 /**
@@ -12,6 +12,15 @@ function parseContextLengthInput(raw: string): number | null {
   if (trimmed === '') return null;
   const parsed = parseInt(trimmed, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
+ * Reasoning effort может прийти из БД любым значением (строки, созданные до миграции).
+ * Дропдаун допускает только low / medium / high, поэтому всё остальное -> medium.
+ */
+function normalizeReasoningEffort(raw: unknown): ReasoningEffort {
+  const value = String(raw ?? '').trim().toLowerCase();
+  return value === 'low' || value === 'medium' || value === 'high' ? value : 'medium';
 }
 
 const LlmConnectionsPage: React.FC = () => {
@@ -38,6 +47,7 @@ const LlmConnectionsPage: React.FC = () => {
   // Пустая строка = «не задано», размер контекста определится автоматически
   const [formContextLength, setFormContextLength] = useState('');
   const [formReasoning, setFormReasoning] = useState(true);
+  const [formReasoningEffort, setFormReasoningEffort] = useState<ReasoningEffort>('medium');
   const [formStrictRoleAlternation, setFormStrictRoleAlternation] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -66,6 +76,7 @@ const LlmConnectionsPage: React.FC = () => {
     setFormMaxTokens(64000);
     setFormContextLength('');
     setFormReasoning(true);
+    setFormReasoningEffort('medium');
     setFormStrictRoleAlternation(false);
     setFormError('');
     setShowApiKeyModal(false);
@@ -81,6 +92,7 @@ const LlmConnectionsPage: React.FC = () => {
     setFormMaxTokens(connection.max_tokens);
     setFormContextLength(connection.context_length ? String(connection.context_length) : '');
     setFormReasoning(connection.reasoning !== 0); // 1 = enabled, 0 = disabled
+    setFormReasoningEffort(normalizeReasoningEffort(connection.reasoning_effort));
     setFormStrictRoleAlternation((connection.strict_role_alternation || 0) !== 0);
     setFormError('');
     setShowApiKeyModal(false);
@@ -110,6 +122,7 @@ const LlmConnectionsPage: React.FC = () => {
           max_tokens: formMaxTokens,
           context_length: parseContextLengthInput(formContextLength),
           reasoning: formReasoning ? 1 : 0,
+          reasoning_effort: formReasoningEffort,
           strict_role_alternation: formStrictRoleAlternation ? 1 : 0,
         };
         if (formApiKey) {
@@ -125,6 +138,7 @@ const LlmConnectionsPage: React.FC = () => {
           max_tokens: formMaxTokens,
           context_length: parseContextLengthInput(formContextLength),
           reasoning: formReasoning ? 1 : 0,
+          reasoning_effort: formReasoningEffort,
           strict_role_alternation: formStrictRoleAlternation ? 1 : 0,
         });
       }
@@ -163,6 +177,20 @@ const LlmConnectionsPage: React.FC = () => {
       loadConnections();
     } catch (error) {
       console.error('Failed to toggle reasoning:', error);
+    }
+  };
+
+  /**
+   * Мгновенное сохранение reasoning effort из дропдауна в карточке подключения.
+   * Значение отправляется на эндпоинт только когда reasoning включён.
+   */
+  const handleUpdateReasoningEffort = async (conn: LlmConnection, raw: string) => {
+    const value = normalizeReasoningEffort(raw);
+    try {
+      await llmConnectionsApi.update(conn.id, { reasoning_effort: value });
+      loadConnections();
+    } catch (error) {
+      console.error('Failed to update reasoning effort:', error);
     }
   };
 
@@ -420,6 +448,30 @@ const LlmConnectionsPage: React.FC = () => {
                           </button>
                           <span className={`text-xs font-medium ${conn.reasoning !== 0 ? 'text-blue-400' : 'text-gray-500'}`}>
                             {conn.reasoning !== 0 ? 'Вкл' : 'Выкл'}
+                          </span>
+                        </div>
+                        {/* Reasoning Effort dropdown */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-400 text-sm">Reasoning Effort:</span>
+                          <select
+                            value={normalizeReasoningEffort(conn.reasoning_effort)}
+                            onChange={(e) => handleUpdateReasoningEffort(conn, e.target.value)}
+                            disabled={conn.reasoning === 0}
+                            title={conn.reasoning !== 0
+                              ? 'Reasoning effort - передаётся на эндпоинт как reasoning_effort'
+                              : 'Reasoning выключен - reasoning_effort не отправляется'}
+                            className={`px-2 py-1 rounded-lg text-sm border transition ${
+                              conn.reasoning !== 0
+                                ? 'bg-gray-700/50 border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500'
+                                : 'bg-gray-800/40 border-gray-700 text-gray-500 cursor-not-allowed'
+                            }`}
+                          >
+                            <option value="low">low</option>
+                            <option value="medium">medium</option>
+                            <option value="high">high</option>
+                          </select>
+                          <span className="text-xs text-gray-500">
+                            {conn.reasoning !== 0 ? 'на эндпоинт' : 'не отправляется'}
                           </span>
                         </div>
                         {/* Strict Role Alternation toggle */}
@@ -703,6 +755,30 @@ const LlmConnectionsPage: React.FC = () => {
                     }`}
                   />
                 </button>
+              </div>
+
+              {/* Reasoning Effort Dropdown */}
+              <div>
+                <label htmlFor="reasoning-effort" className="block text-sm font-medium text-gray-300 mb-2">
+                  Reasoning Effort
+                </label>
+                <select
+                  id="reasoning-effort"
+                  value={formReasoningEffort}
+                  onChange={(e) => setFormReasoningEffort(e.target.value as ReasoningEffort)}
+                  disabled={!formReasoning}
+                  className={`w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white ${
+                    formReasoning ? '' : 'opacity-50 cursor-not-allowed'
+                  }`}
+                >
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                </select>
+                <p className="text-gray-500 text-xs mt-2">
+                  Передаётся на эндпоинт как reasoning_effort только когда Reasoning включён.
+                  При выключенном Reasoning поле не отправляется.
+                </p>
               </div>
 
               {/* Strict Role Alternation Toggle */}

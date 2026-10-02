@@ -56,6 +56,8 @@ export interface ChatConfig {
     presence_penalty?: number;
     /** Включить reasoning режим для LLM (например, o1, o3-mini модели) */
     reasoning?: boolean;
+    /** Reasoning effort: low | medium | high. Отправляется только когда reasoning включён */
+    reasoning_effort?: 'low' | 'medium' | 'high';
 }
 
 /**
@@ -75,6 +77,8 @@ export interface ChatCompletionCreateParams {
     user?: string;
     /** Enable reasoning mode for the LLM (e.g., o1, o3-mini models) */
     reasoning?: boolean;
+    /** Reasoning effort: low | medium | high. Отправляется только когда reasoning включён */
+    reasoning_effort?: 'low' | 'medium' | 'high';
 }
 
 /**

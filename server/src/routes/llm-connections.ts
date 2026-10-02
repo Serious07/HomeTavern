@@ -101,13 +101,26 @@ function normalizeContextLength(raw: unknown): number | null {
 }
 
 /**
+ * Reasoning effort приходит из формы строкой. Допустимы только low / medium / high.
+ * Всё остальное (пустая строка, мусор, 'none') превращается в 'medium' - значение
+ * по умолчанию. 'none' здесь не является допустым значением: поле reasoning_effort
+ * отправляется провайдеру только когда reasoning включён, поэтому хранить 'none'
+ * в подключении смысла нет.
+ */
+function normalizeReasoningEffort(raw: unknown): string {
+  const value = String(raw ?? '').trim().toLowerCase();
+  if (value === 'low' || value === 'medium' || value === 'high') return value;
+  return 'medium';
+}
+
+/**
  * POST /api/llm-connections
  * Creates a new LLM connection for the authenticated user
  */
 router.post('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { name, base_url, api_key, model, max_tokens, reasoning, strict_role_alternation }: CreateLlmConnectionInput = req.body;
+    const { name, base_url, api_key, model, max_tokens, reasoning, reasoning_effort, strict_role_alternation }: CreateLlmConnectionInput = req.body;
 
     if (!name || !base_url || !api_key || !model) {
       return res.status(400).json({
@@ -124,6 +137,7 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
       max_tokens: max_tokens || 64000,
       context_length: normalizeContextLength(req.body.context_length),
       reasoning: reasoning ?? 1,
+      reasoning_effort: normalizeReasoningEffort(reasoning_effort),
       strict_role_alternation: strict_role_alternation ?? 0,
     });
 
@@ -167,6 +181,9 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
       updates.context_length = normalizeContextLength(req.body.context_length);
     }
     if (req.body.reasoning !== undefined) updates.reasoning = req.body.reasoning;
+    if (req.body.reasoning_effort !== undefined) {
+      updates.reasoning_effort = normalizeReasoningEffort(req.body.reasoning_effort);
+    }
     if (req.body.strict_role_alternation !== undefined) updates.strict_role_alternation = req.body.strict_role_alternation;
 
     llmConnectionRepository.update(id, updates, userId);
@@ -187,6 +204,15 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
       const activeConn = llmConnectionRepository.getActiveByUserId(userIdForCheck);
       if (activeConn && activeConn.id === id) {
         llmService.setReasoning(updates.reasoning !== 0);
+      }
+    }
+
+    // If reasoning_effort was updated and this is the active connection, notify LLMService
+    if (updates.reasoning_effort !== undefined) {
+      const userIdForCheck = (req as AuthenticatedRequest).user!.userId;
+      const activeConn = llmConnectionRepository.getActiveByUserId(userIdForCheck);
+      if (activeConn && activeConn.id === id) {
+        llmService.setReasoningEffort(updates.reasoning_effort!);
       }
     }
 

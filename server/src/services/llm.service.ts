@@ -659,6 +659,12 @@ export class LLMService {
   private maxTokens: number;
   /** Enable reasoning/thinking mode for llama.cpp (chat_template_kwargs.enable_thinking) */
   private reasoning: boolean = true;
+  /**
+   * Reasoning effort: low | medium | high.
+   * Отправляется провайдеру только когда reasoning включён: при выключенном мышлении
+   * поле в тело запроса не попадает (некоторые эндпоинты на него реагируют ошибкой).
+   */
+  private reasoningEffort: string = 'medium';
   /** Enable strict role alternation (merge consecutive same-role messages before sending) */
   private strictRoleAlternation: boolean = false;
   private client: any; // LLMClient instance
@@ -944,6 +950,7 @@ export class LLMService {
       this.useContextLimits = false;
       // reasoning: 1 = enabled (default), 0 = disabled
       this.reasoning = decryptedConn.reasoning !== 0;
+      this.reasoningEffort = decryptedConn.reasoning_effort || 'medium';
       // strict_role_alternation: 1 = enabled, 0 = disabled (default)
       this.strictRoleAlternation = (decryptedConn.strict_role_alternation || 0) === 1;
 
@@ -1005,6 +1012,7 @@ export class LLMService {
       this.useContextLimits = false;
       // reasoning: 1 = enabled (default), 0 = disabled
       this.reasoning = conn.reasoning !== 0;
+      this.reasoningEffort = conn.reasoning_effort || 'medium';
       // strict_role_alternation: 1 = enabled, 0 = disabled (default)
       this.strictRoleAlternation = (conn.strict_role_alternation || 0) === 1;
 
@@ -1050,6 +1058,15 @@ export class LLMService {
   setReasoning(enabled: boolean): void {
     this.reasoning = enabled;
     console.log(`[LLMService] Reasoning ${enabled ? 'enabled' : 'disabled'} (updated via API)`);
+  }
+
+  /**
+   * Update reasoning effort without reinitializing the client.
+   * Called when the active connection's reasoning_effort is changed.
+   */
+  setReasoningEffort(effort: string): void {
+    this.reasoningEffort = effort;
+    console.log(`[LLMService] Reasoning effort set to '${effort}' (updated via API)`);
   }
 
   /**
@@ -1147,6 +1164,7 @@ export class LLMService {
       maxContextLength: this.maxContextLength,
       connectionId: this.currentConnectionId,
       reasoning: this.reasoning,
+      reasoningEffort: this.reasoningEffort,
       strictRoleAlternation: this.strictRoleAlternation,
     };
   }
@@ -1422,6 +1440,11 @@ export class LLMService {
         stream: true,
         max_tokens: finalMaxOutput,
       };
+      // Лог должен совпадать с реальным телом запроса: reasoning_effort добавляется
+      // только когда reasoning включён
+      if (this.reasoning) {
+        exactRequestBody.reasoning_effort = this.reasoningEffort;
+      }
       if (stopTokens !== null) {
         exactRequestBody.stop = stopTokens;
       }
@@ -1472,11 +1495,16 @@ export class LLMService {
           max_tokens: finalMaxOutput,
           chat_template_kwargs: { enable_thinking: this.reasoning },
         };
+        // reasoning_effort отправляется только при включённом reasoning: при выключенном
+        // мышлении поле не попадает в тело запроса (некоторые эндпоинты на него ругаются)
+        if (this.reasoning) {
+          streamRequest.reasoning_effort = this.reasoningEffort;
+        }
         if (stopTokens !== null) {
           streamRequest.stop = stopTokens;
         }
         
-        console.log(`[LLMService.generateStream] reasoning: ${this.reasoning}, chat_template_kwargs: ${JSON.stringify({ enable_thinking: this.reasoning })}`);
+        console.log(`[LLMService.generateStream] reasoning: ${this.reasoning}, reasoning_effort: ${this.reasoning ? this.reasoningEffort : 'не отправляется'}, chat_template_kwargs: ${JSON.stringify({ enable_thinking: this.reasoning })}`);
 
         // Вызываем API с retry логикой при временных ошибках
         const stream = await this.withRetry(

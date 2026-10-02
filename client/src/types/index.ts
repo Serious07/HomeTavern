@@ -88,6 +88,8 @@ export interface SystemPrompt {
 }
 
 // LLM Connection types
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+
 export interface LlmConnection {
   id: number;
   user_id: number;
@@ -100,6 +102,8 @@ export interface LlmConnection {
   context_length: number | null;
   /** Enable reasoning/thinking mode (1=enabled, 0=disabled) */
   reasoning: number;
+  /** Reasoning effort: low | medium | high. Отправляется только когда reasoning включён */
+  reasoning_effort: string;
   /** Enable strict role alternation (1=enabled, 0=disabled) - merges consecutive same-role messages */
   strict_role_alternation: number;
   is_active: number;
@@ -118,6 +122,8 @@ export interface LlmConnectionCreate {
   max_tokens: number;
   context_length?: number | null;
   reasoning?: number;
+  /** low | medium | high */
+  reasoning_effort?: string;
   strict_role_alternation?: number;
 }
 
@@ -129,6 +135,8 @@ export interface LlmConnectionUpdate {
   max_tokens?: number;
   context_length?: number | null;
   reasoning?: number;
+  /** low | medium | high */
+  reasoning_effort?: string;
   strict_role_alternation?: number;
 }
 

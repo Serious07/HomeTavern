@@ -130,12 +130,19 @@ function buildLibrary(settings: UserTranslationSettings, userId?: number): Trans
     config.reasoning = settings.llmReasoning;
   }
 
+  // Активное подключение читается ДО создания переводчика: LlmTranslator фиксирует
+  // model и reasoningEffort в конструкторе, поэтому config должен быть заполнен заранее.
+  const connection = settings.provider === 'llm' && userId ? llmService.getActiveConnection(userId) : null;
+  if (connection) {
+    config.model = connection.model;
+    // effort берётся из подключения; применяется только когда reasoning включён
+    config.reasoningEffort = connection.reasoning_effort || 'medium';
+  }
+
   const library = new TranslationLibrary(config);
 
   if (settings.provider === 'llm' && userId) {
-    const connection = llmService.getActiveConnection(userId);
     if (connection) {
-      config.model = connection.model;
       const { LLMClient } = require('llm-client');
       const client = new LLMClient({
         baseURL: connection.base_url,

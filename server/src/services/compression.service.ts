@@ -200,7 +200,7 @@ export class CompressionService {
    * Получает конфигурацию активного LLM-соединения пользователя из БД.
    * Fallback на environment variables, если соединение не найдено.
    */
-  private getLlmConnectionConfig(userId?: number): { baseURL: string; apiKey: string; model: string } {
+  private getLlmConnectionConfig(userId?: number): { baseURL: string; apiKey: string; model: string; reasoningEffort: string } {
     if (userId) {
       const activeConn = llmConnectionRepository.getActiveByUserId(userId);
       if (activeConn) {
@@ -211,6 +211,7 @@ export class CompressionService {
             baseURL: activeConn.base_url,
             apiKey: connWithKey.api_key_decrypted || '',
             model: activeConn.model,
+            reasoningEffort: activeConn.reasoning_effort || 'medium',
           };
         }
       }
@@ -220,6 +221,7 @@ export class CompressionService {
       baseURL: process.env.LLM_BASE_URL || 'http://localhost:1234/v1',
       apiKey: process.env.LLM_API_KEY || 'local-model-key',
       model: process.env.LLM_MODEL || 'qwen-3.5',
+      reasoningEffort: 'medium',
     };
   }
   private readonly DEFAULT_COMPRESSION_SYSTEM_INSTRUCTIONS = `Ты — опытный редактор и летописец. Твоя задача — создавать структурированные, информативные краткие пересказы диалогов и событий.
@@ -885,6 +887,10 @@ ${historyText}
             // Используем chat_template_kwargs для llama.cpp (аналогично llm.service.ts)
             chat_template_kwargs: { enable_thinking: compressionReasoning ?? false },
           };
+          // reasoning_effort добавляем только когда reasoning включён
+          if (compressionReasoning) {
+            requestParams.reasoning_effort = llmConfig.reasoningEffort;
+          }
           return await client.chatCompletionsCreate(requestParams);
         },
         `splitHistoryIntoSemanticChapters chat${chatId}`
@@ -1364,6 +1370,10 @@ ${userInstructions}`;
             // Используем chat_template_kwargs для llama.cpp (аналогично llm.service.ts)
             chat_template_kwargs: { enable_thinking: compressionReasoning ?? false },
           };
+          // reasoning_effort добавляем только когда reasoning включён
+          if (compressionReasoning) {
+            blockRequestParams.reasoning_effort = llmConfig.reasoningEffort;
+          }
           return await client.chatCompletionsCreate(blockRequestParams);
         },
         `generateBlockSummary block[${block.startMessageId}-${block.endMessageId}]`

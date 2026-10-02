@@ -22,6 +22,8 @@ export interface LlmTranslatorConfig {
   retries?: number;
   /** Enable reasoning/thinking mode for models that support it (e.g., Qwen3 with llama.cpp) */
   reasoning?: boolean;
+  /** Reasoning effort: low | medium | high. Используется только когда reasoning включён */
+  reasoningEffort?: string;
 }
 
 const DEFAULT_SYSTEM_PROMPT =
@@ -34,6 +36,7 @@ export class LlmTranslator extends BaseTranslator {
   private model: string;
   private llmClient: any; // LLMClient instance (lazy-loaded)
   private reasoning: boolean; // Enable reasoning/thinking mode
+  private reasoningEffort: string; // low | medium | high
 
   constructor(config: LlmTranslatorConfig = {}) {
     super({
@@ -47,6 +50,7 @@ export class LlmTranslator extends BaseTranslator {
     this.systemPromptTemplate = config.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     this.model = config.model || process.env.LLM_MODEL || 'qwen-3.5';
     this.reasoning = config.reasoning ?? true; // Default: reasoning enabled
+    this.reasoningEffort = config.reasoningEffort || 'medium'; // Default: medium
   }
 
   /**
@@ -54,6 +58,13 @@ export class LlmTranslator extends BaseTranslator {
    */
   setReasoning(enabled: boolean): void {
     this.reasoning = enabled;
+  }
+
+  /**
+   * Set reasoning effort (low | medium | high)
+   */
+  setReasoningEffort(effort: string): void {
+    this.reasoningEffort = effort;
   }
 
   /**
@@ -141,7 +152,12 @@ export class LlmTranslator extends BaseTranslator {
         // - enable_thinking: false — reasoning выключен (быстрее, reasoning отсутствует)
         requestParams.chat_template_kwargs = { enable_thinking: this.reasoning };
         
-        console.log(`[LlmTranslator.translate] reasoning: ${this.reasoning}, chat_template_kwargs: ${JSON.stringify({ enable_thinking: this.reasoning })}`);
+        // reasoning_effort добавляем только когда reasoning включён
+        if (this.reasoning) {
+          requestParams.reasoning_effort = this.reasoningEffort;
+        }
+
+        console.log(`[LlmTranslator.translate] reasoning: ${this.reasoning}, reasoning_effort: ${this.reasoning ? this.reasoningEffort : 'не отправляется'}, chat_template_kwargs: ${JSON.stringify({ enable_thinking: this.reasoning })}`);
         
         const result = await client.chatCompletionsCreate(requestParams);
 
@@ -219,7 +235,12 @@ export class LlmTranslator extends BaseTranslator {
       // - enable_thinking: false — reasoning выключен (быстрее, reasoning отсутствует)
       requestParams.chat_template_kwargs = { enable_thinking: this.reasoning };
       
-      console.log(`[LlmTranslator.translateStream] reasoning: ${this.reasoning}, chat_template_kwargs: ${JSON.stringify({ enable_thinking: this.reasoning })}`);
+      // reasoning_effort добавляем только когда reasoning включён
+      if (this.reasoning) {
+        requestParams.reasoning_effort = this.reasoningEffort;
+      }
+
+      console.log(`[LlmTranslator.translateStream] reasoning: ${this.reasoning}, reasoning_effort: ${this.reasoning ? this.reasoningEffort : 'не отправляется'}, chat_template_kwargs: ${JSON.stringify({ enable_thinking: this.reasoning })}`);
       
       const result = await client.chatCompletionsCreate(requestParams);
 

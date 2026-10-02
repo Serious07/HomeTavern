@@ -347,6 +347,29 @@ try {
   }
 }
 
+// Миграция: Добавление колонки reasoning_effort в таблицу llm_connections
+// Возможные значения: low / medium / high. Отправляется провайдеру только когда reasoning включён.
+try {
+  const llmConnTableInfo3 = db.prepare("PRAGMA table_info(llm_connections)").all() as any[];
+  const llmConnColumnNames3 = llmConnTableInfo3.map((col: any) => col.name);
+
+  if (!llmConnColumnNames3.includes('reasoning_effort')) {
+    db.exec(`
+      ALTER TABLE llm_connections ADD COLUMN reasoning_effort TEXT DEFAULT 'medium';
+    `);
+    console.log('[Database] Added column: reasoning_effort to llm_connections');
+  } else {
+    console.log('[Database] Column reasoning_effort already exists in llm_connections');
+  }
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate column')) {
+    console.log('[Database] Column reasoning_effort already exists in llm_connections');
+  } else {
+    console.error('[Database] reasoning_effort migration error:', error);
+  }
+}
+
 // Миграция: Добавление колонки strict_role_alternation в таблицу llm_connections
 try {
   const llmConnTableInfo2 = db.prepare("PRAGMA table_info(llm_connections)").all() as any[];

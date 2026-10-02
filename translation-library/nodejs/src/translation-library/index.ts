@@ -44,6 +44,8 @@ export interface TranslationLibraryConfigExtended extends TranslationLibraryConf
   systemPrompt?: string;
   /** Enable reasoning/thinking mode for LLM translator */
   reasoning?: boolean;
+  /** Reasoning effort for LLM translator: low | medium | high */
+  reasoningEffort?: string;
 }
 
 function createTranslator(provider: TranslatorProvider, config: TranslationLibraryConfigExtended): BaseTranslator {
@@ -77,6 +79,7 @@ function createTranslator(provider: TranslatorProvider, config: TranslationLibra
         retries: config.retries,
         systemPrompt: (config as any).systemPrompt,
         reasoning: (config as any).reasoning,
+        reasoningEffort: (config as any).reasoningEffort,
       });
     default:
       throw new TranslationError(
