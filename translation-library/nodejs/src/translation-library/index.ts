@@ -44,7 +44,7 @@ export interface TranslationLibraryConfigExtended extends TranslationLibraryConf
   systemPrompt?: string;
   /** Enable reasoning/thinking mode for LLM translator */
   reasoning?: boolean;
-  /** Reasoning effort for LLM translator: low | medium | high */
+  /** Reasoning effort for LLM translator: low | medium | high | xhigh */
   reasoningEffort?: string;
 }
 

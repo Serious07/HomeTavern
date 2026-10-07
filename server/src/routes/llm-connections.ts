@@ -101,7 +101,7 @@ function normalizeContextLength(raw: unknown): number | null {
 }
 
 /**
- * Reasoning effort приходит из формы строкой. Допустимы только low / medium / high.
+ * Reasoning effort приходит из формы строкой. Допустимы только low / medium / high / xhigh.
  * Всё остальное (пустая строка, мусор, 'none') превращается в 'medium' - значение
  * по умолчанию. 'none' здесь не является допустым значением: поле reasoning_effort
  * отправляется провайдеру только когда reasoning включён, поэтому хранить 'none'
@@ -109,7 +109,7 @@ function normalizeContextLength(raw: unknown): number | null {
  */
 function normalizeReasoningEffort(raw: unknown): string {
   const value = String(raw ?? '').trim().toLowerCase();
-  if (value === 'low' || value === 'medium' || value === 'high') return value;
+  if (value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh') return value;
   return 'medium';
 }
 

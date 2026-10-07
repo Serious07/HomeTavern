@@ -22,7 +22,7 @@ export interface LlmTranslatorConfig {
   retries?: number;
   /** Enable reasoning/thinking mode for models that support it (e.g., Qwen3 with llama.cpp) */
   reasoning?: boolean;
-  /** Reasoning effort: low | medium | high. Используется только когда reasoning включён */
+  /** Reasoning effort: low | medium | high | xhigh. Используется только когда reasoning включён */
   reasoningEffort?: string;
 }
 
@@ -36,7 +36,7 @@ export class LlmTranslator extends BaseTranslator {
   private model: string;
   private llmClient: any; // LLMClient instance (lazy-loaded)
   private reasoning: boolean; // Enable reasoning/thinking mode
-  private reasoningEffort: string; // low | medium | high
+  private reasoningEffort: string; // low | medium | high | xhigh
 
   constructor(config: LlmTranslatorConfig = {}) {
     super({
@@ -61,7 +61,7 @@ export class LlmTranslator extends BaseTranslator {
   }
 
   /**
-   * Set reasoning effort (low | medium | high)
+   * Set reasoning effort (low | medium | high | xhigh)
    */
   setReasoningEffort(effort: string): void {
     this.reasoningEffort = effort;

@@ -16,7 +16,7 @@ export interface LlmConnection {
   context_length: number | null;
   /** Enable reasoning/thinking mode (1=enabled, 0=disabled). Default: 1 */
   reasoning: number;
-  /** Reasoning effort: low | medium | high. Default: 'medium'. Используется только когда reasoning включён */
+  /** Reasoning effort: low | medium | high | xhigh. Default: 'medium'. Используется только когда reasoning включён */
   reasoning_effort: string;
   /** Enable strict role alternation (merge consecutive same-role messages). Default: 0 */
   strict_role_alternation: number;
@@ -34,7 +34,7 @@ export interface CreateLlmConnectionInput {
   max_tokens: number;
   context_length?: number | null;
   reasoning?: number;
-  /** low | medium | high */
+  /** low | medium | high | xhigh */
   reasoning_effort?: string;
   strict_role_alternation?: number;
 }
@@ -48,7 +48,7 @@ export interface UpdateLlmConnectionInput {
   /** null очищает значение и возвращает к автоопределению */
   context_length?: number | null;
   reasoning?: number;
-  /** low | medium | high */
+  /** low | medium | high | xhigh */
   reasoning_effort?: string;
   strict_role_alternation?: number;
 }

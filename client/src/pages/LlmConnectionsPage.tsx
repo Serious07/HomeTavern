@@ -16,11 +16,11 @@ function parseContextLengthInput(raw: string): number | null {
 
 /**
  * Reasoning effort может прийти из БД любым значением (строки, созданные до миграции).
- * Дропдаун допускает только low / medium / high, поэтому всё остальное -> medium.
+ * Дропдаун допускает только low / medium / high / xhigh, поэтому всё остальное -> medium.
  */
 function normalizeReasoningEffort(raw: unknown): ReasoningEffort {
   const value = String(raw ?? '').trim().toLowerCase();
-  return value === 'low' || value === 'medium' || value === 'high' ? value : 'medium';
+  return value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' ? value : 'medium';
 }
 
 const LlmConnectionsPage: React.FC = () => {
@@ -469,6 +469,7 @@ const LlmConnectionsPage: React.FC = () => {
                             <option value="low">low</option>
                             <option value="medium">medium</option>
                             <option value="high">high</option>
+                            <option value="xhigh">xhigh</option>
                           </select>
                           <span className="text-xs text-gray-500">
                             {conn.reasoning !== 0 ? 'на эндпоинт' : 'не отправляется'}
@@ -774,6 +775,7 @@ const LlmConnectionsPage: React.FC = () => {
                   <option value="low">low</option>
                   <option value="medium">medium</option>
                   <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
                 </select>
                 <p className="text-gray-500 text-xs mt-2">
                   Передаётся на эндпоинт как reasoning_effort только когда Reasoning включён.

@@ -660,7 +660,7 @@ export class LLMService {
   /** Enable reasoning/thinking mode for llama.cpp (chat_template_kwargs.enable_thinking) */
   private reasoning: boolean = true;
   /**
-   * Reasoning effort: low | medium | high.
+   * Reasoning effort: low | medium | high | xhigh.
    * Отправляется провайдеру только когда reasoning включён: при выключенном мышлении
    * поле в тело запроса не попадает (некоторые эндпоинты на него реагируют ошибкой).
    */

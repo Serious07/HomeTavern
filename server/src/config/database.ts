@@ -348,7 +348,7 @@ try {
 }
 
 // Миграция: Добавление колонки reasoning_effort в таблицу llm_connections
-// Возможные значения: low / medium / high. Отправляется провайдеру только когда reasoning включён.
+// Возможные значения: low / medium / high / xhigh. Отправляется провайдеру только когда reasoning включён.
 try {
   const llmConnTableInfo3 = db.prepare("PRAGMA table_info(llm_connections)").all() as any[];
   const llmConnColumnNames3 = llmConnTableInfo3.map((col: any) => col.name);
