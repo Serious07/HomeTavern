@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { llmConnectionsApi } from '../services/api';
-import { LlmConnection, LlmTestResult, ReasoningEffort } from '../types';
+import { LlmConnection, LlmTestResult, ReasoningEffort, StopTokensMode, ThinkingControl } from '../types';
 import AppHeader from '../components/common/AppHeader';
 
 /**
@@ -21,6 +21,36 @@ function parseContextLengthInput(raw: string): number | null {
 function normalizeReasoningEffort(raw: unknown): ReasoningEffort {
   const value = String(raw ?? '').trim().toLowerCase();
   return value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' ? value : 'medium';
+}
+
+/**
+ * top_k и min_p опциональны: пусто = не отправлять поле провайдеру
+ * (облачные API на неизвестные параметры отвечают 400).
+ */
+function parseOptionalNumber(raw: string): number | null {
+  const trimmed = (raw || '').trim();
+  if (trimmed === '') return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Числа из БД показываем в поле ввода как есть, null = пустое поле */
+function numberToInput(value: number | null | undefined): string {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+/**
+ * Значения до миграции могли не иметь режима - держим дефолты сервера,
+ * а не пустую строку в дропдауне.
+ */
+function normalizeThinkingControl(raw: unknown): ThinkingControl {
+  const value = String(raw ?? '').trim().toLowerCase();
+  return value === 'chat_template_kwargs' || value === 'none' ? value : 'reasoning_effort';
+}
+
+function normalizeStopTokensMode(raw: unknown): StopTokensMode {
+  const value = String(raw ?? '').trim().toLowerCase();
+  return value === 'legacy' || value === 'none' ? value : 'auto';
 }
 
 const LlmConnectionsPage: React.FC = () => {
@@ -49,6 +79,16 @@ const LlmConnectionsPage: React.FC = () => {
   const [formReasoning, setFormReasoning] = useState(true);
   const [formReasoningEffort, setFormReasoningEffort] = useState<ReasoningEffort>('medium');
   const [formStrictRoleAlternation, setFormStrictRoleAlternation] = useState(false);
+  // Сэмплирование: temperature/top_p отправляются всегда (пустые значения на
+  // сервере превращаются в 0.8/0.95), top_k/min_p - только если заполнены
+  const [formTemperature, setFormTemperature] = useState('0.8');
+  const [formTopP, setFormTopP] = useState('0.95');
+  const [formTopK, setFormTopK] = useState('');
+  const [formMinP, setFormMinP] = useState('');
+  const [formThinkingControl, setFormThinkingControl] = useState<ThinkingControl>('reasoning_effort');
+  const [formStopTokensMode, setFormStopTokensMode] = useState<StopTokensMode>('auto');
+  const [formRepetitionGuard, setFormRepetitionGuard] = useState(true);
+  const [formRepetitionAutoRetry, setFormRepetitionAutoRetry] = useState(true);
   const [formError, setFormError] = useState('');
 
   // Load connections on mount
@@ -78,6 +118,14 @@ const LlmConnectionsPage: React.FC = () => {
     setFormReasoning(true);
     setFormReasoningEffort('medium');
     setFormStrictRoleAlternation(false);
+    setFormTemperature('0.8');
+    setFormTopP('0.95');
+    setFormTopK('');
+    setFormMinP('');
+    setFormThinkingControl('reasoning_effort');
+    setFormStopTokensMode('auto');
+    setFormRepetitionGuard(true);
+    setFormRepetitionAutoRetry(true);
     setFormError('');
     setShowApiKeyModal(false);
     setShowModal(true);
@@ -94,6 +142,14 @@ const LlmConnectionsPage: React.FC = () => {
     setFormReasoning(connection.reasoning !== 0); // 1 = enabled, 0 = disabled
     setFormReasoningEffort(normalizeReasoningEffort(connection.reasoning_effort));
     setFormStrictRoleAlternation((connection.strict_role_alternation || 0) !== 0);
+    setFormTemperature(numberToInput(connection.temperature ?? 0.8));
+    setFormTopP(numberToInput(connection.top_p ?? 0.95));
+    setFormTopK(numberToInput(connection.top_k));
+    setFormMinP(numberToInput(connection.min_p));
+    setFormThinkingControl(normalizeThinkingControl(connection.thinking_control));
+    setFormStopTokensMode(normalizeStopTokensMode(connection.stop_tokens_mode));
+    setFormRepetitionGuard((connection.repetition_guard ?? 1) !== 0);
+    setFormRepetitionAutoRetry((connection.repetition_auto_retry ?? 1) !== 0);
     setFormError('');
     setShowApiKeyModal(false);
     setShowModal(true);
@@ -113,6 +169,19 @@ const LlmConnectionsPage: React.FC = () => {
       return;
     }
 
+    // Единый набор настроек генерации для create и update: раньше поля формы
+    // приходилось перечислять дважды, и часть из них терялась в одном из запросов
+    const generationSettings = {
+      temperature: parseOptionalNumber(formTemperature),
+      top_p: parseOptionalNumber(formTopP),
+      top_k: parseOptionalNumber(formTopK),
+      min_p: parseOptionalNumber(formMinP),
+      thinking_control: formThinkingControl,
+      stop_tokens_mode: formStopTokensMode,
+      repetition_guard: formRepetitionGuard ? 1 : 0,
+      repetition_auto_retry: formRepetitionAutoRetry ? 1 : 0,
+    };
+
     try {
       if (editingConnection) {
         const updateData: any = {
@@ -124,6 +193,7 @@ const LlmConnectionsPage: React.FC = () => {
           reasoning: formReasoning ? 1 : 0,
           reasoning_effort: formReasoningEffort,
           strict_role_alternation: formStrictRoleAlternation ? 1 : 0,
+          ...generationSettings,
         };
         if (formApiKey) {
           updateData.api_key = formApiKey;
@@ -140,6 +210,7 @@ const LlmConnectionsPage: React.FC = () => {
           reasoning: formReasoning ? 1 : 0,
           reasoning_effort: formReasoningEffort,
           strict_role_alternation: formStrictRoleAlternation ? 1 : 0,
+          ...generationSettings,
         });
       }
       setShowModal(false);
@@ -422,6 +493,9 @@ const LlmConnectionsPage: React.FC = () => {
                           <span className="text-gray-400 text-sm">Max Tokens: {conn.max_tokens.toLocaleString()}</span>
                           <span className="text-gray-400 text-sm">
                             Контекст: {conn.context_length ? conn.context_length.toLocaleString() : 'авто'}
+                          </span>
+                          <span className="text-gray-400 text-sm">
+                            T={conn.temperature ?? 0.8} / top_p={conn.top_p ?? 0.95}
                           </span>
                         </div>
                         {/* Reasoning toggle */}
@@ -738,7 +812,11 @@ const LlmConnectionsPage: React.FC = () => {
                     Reasoning (размышления модели)
                   </label>
                   <p className="text-xs text-gray-500 mt-1">
-                    Модель будет показывать свои мысли перед ответом. Отключение ускоряет генерацию.
+                    Модель будет показывать свои мысли перед ответом. Отключение ускоряет
+                    генерацию, но не везде: при контроле reasoning_effort поле просто не
+                    отправляется, и hybrid-модели (Qwen3 и подобные) продолжают думать сами.
+                    Принудительно выключать мышление через enable_thinking:false опасно -
+                    это приводит к дословным повторам прошлого ответа.
                   </p>
                 </div>
                 <button
@@ -781,6 +859,179 @@ const LlmConnectionsPage: React.FC = () => {
                   Передаётся на эндпоинт как reasoning_effort только когда Reasoning включён.
                   При выключенном Reasoning поле не отправляется.
                 </p>
+              </div>
+
+              {/* Thinking control: чем именно управлять режимом мышления */}
+              <div>
+                <label htmlFor="thinking-control" className="block text-sm font-medium text-gray-300 mb-2">
+                  Управление размышлениями
+                </label>
+                <select
+                  id="thinking-control"
+                  value={formThinkingControl}
+                  onChange={(e) => setFormThinkingControl(e.target.value as ThinkingControl)}
+                  className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
+                >
+                  <option value="reasoning_effort">reasoning_effort (рекомендуется)</option>
+                  <option value="chat_template_kwargs">chat_template_kwargs (enable_thinking)</option>
+                  <option value="none">не отправлять ничего</option>
+                </select>
+                <p className="text-gray-500 text-xs mt-2">
+                  «reasoning_effort» отправляет chat_template_kwargs.reasoning_effort и никогда не ставит
+                  enable_thinking:false. У гибридных thinking-моделей (Qwen3 и подобные) принудительно
+                  выключенное мышление приводит к вырожденному копированию предыдущего ответа.
+                  «chat_template_kwargs» - прежнее поведение для старых эндпоинтов.
+                </p>
+              </div>
+
+              {/* Sampling: без этих параметров локальные движки декодируют жадно */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="temperature" className="block text-sm font-medium text-gray-300 mb-2">
+                    Temperature
+                  </label>
+                  <input
+                    id="temperature"
+                    type="number"
+                    step="0.05"
+                    min="0.01"
+                    max="2"
+                    value={formTemperature}
+                    onChange={(e) => setFormTemperature(e.target.value)}
+                    placeholder="0.8"
+                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="top-p" className="block text-sm font-medium text-gray-300 mb-2">
+                    Top P
+                  </label>
+                  <input
+                    id="top-p"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max="1"
+                    value={formTopP}
+                    onChange={(e) => setFormTopP(e.target.value)}
+                    placeholder="0.95"
+                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="top-k" className="block text-sm font-medium text-gray-300 mb-2">
+                    Top K (опционально)
+                  </label>
+                  <input
+                    id="top-k"
+                    type="number"
+                    min="1"
+                    value={formTopK}
+                    onChange={(e) => setFormTopK(e.target.value)}
+                    placeholder="пусто = не отправлять"
+                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="min-p" className="block text-sm font-medium text-gray-300 mb-2">
+                    Min P (опционально)
+                  </label>
+                  <input
+                    id="min-p"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="1"
+                    value={formMinP}
+                    onChange={(e) => setFormMinP(e.target.value)}
+                    placeholder="пусто = не отправлять"
+                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500"
+                  />
+                </div>
+              </div>
+              <p className="text-gray-500 text-xs mt-2">
+                temperature и top_p уходят на эндпоинт всегда: без них локальный движок декодирует жадно и
+                начинает повторять предыдущий ответ дословно. top_k и min_p - расширения llama.cpp-семейства,
+                пустое поле означает «не отправлять» (облачные API на них ругаются).
+              </p>
+
+              {/* Stop tokens: раньше были зашиты для всех провайдеров сразу */}
+              <div>
+                <label htmlFor="stop-tokens" className="block text-sm font-medium text-gray-300 mb-2">
+                  Стоп-строки
+                </label>
+                <select
+                  id="stop-tokens"
+                  value={formStopTokensMode}
+                  onChange={(e) => setFormStopTokensMode(e.target.value as StopTokensMode)}
+                  className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
+                >
+                  <option value="auto">авто (по чат-шаблону движка)</option>
+                  <option value="legacy">всегда слать {"\\n\\nHuman:"} / {"\\n\\nAssistant:"}</option>
+                  <option value="none">не отправлять</option>
+                </select>
+                <p className="text-gray-500 text-xs mt-2">
+                  «Авто» читает chat_template у llama.cpp-совместимых эндпоинтов (/props): если в шаблоне
+                  есть Human:/Assistant: (Vicuna, Alpaca) - стоп-строки отправляются, для ChatML - нет.
+                  Если эндпоинт шаблон не отдаёт, поведение прежнее (отправляются).
+                </p>
+              </div>
+
+              {/* Repetition guard */}
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300">
+                    Защита от дословных повторов
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Убирает из промпта assistant-ходы, которые уже являются копией более раннего хода, и
+                    обрывает генерацию, если новый ответ начинается как предыдущий.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormRepetitionGuard(!formRepetitionGuard)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    formRepetitionGuard ? 'bg-emerald-600' : 'bg-gray-600'
+                  }`}
+                  role="switch"
+                  aria-checked={formRepetitionGuard}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formRepetitionGuard ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Repetition auto retry */}
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300">
+                    Автоперезапуск при повторе
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Если повтор всё же начался, генерация один раз перезапускается с более высоким
+                    temperature и включённым размышлением.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormRepetitionAutoRetry(!formRepetitionAutoRetry)}
+                  disabled={!formRepetitionGuard}
+                  className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    formRepetitionAutoRetry && formRepetitionGuard ? 'bg-emerald-600' : 'bg-gray-600'
+                  } ${formRepetitionGuard ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                  role="switch"
+                  aria-checked={formRepetitionAutoRetry && formRepetitionGuard}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formRepetitionAutoRetry && formRepetitionGuard ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
               </div>
 
               {/* Strict Role Alternation Toggle */}

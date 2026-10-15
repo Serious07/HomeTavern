@@ -90,6 +90,8 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
    let startTime = 0;
    let contentTokenCount = 0;
    let reasoningTokenCount = 0;
+   /** Модель скопировала собственный предыдущий ход и после ретрая - генерацию отменяем */
+   let repetitionAborted = false;
 
    // Контекст для отслеживания времени первого токена.
    // firstTokenTime устанавливается при получении первого токена от LLM,
@@ -309,10 +311,35 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
           sendSSEEvent(res, 'content_token', { token: chunk.token });
           fullContent += chunk.token;
           contentTokenCount++;
+        } else if (chunk.type === 'repetition_detected') {
+          // Сервер оборвал генерацию: она повторяет предыдущий ход ассистента
+          sendSSEEvent(res, 'repetition_detected', chunk.meta ?? {});
+        } else if (chunk.type === 'stream_restart') {
+          // Накопленный дубликат не должен уйти ни клиенту, ни в историю
+          fullContent = '';
+          fullReasoning = '';
+          sendSSEEvent(res, 'stream_restart', chunk.meta ?? {});
+        } else if (chunk.type === 'repetition_warning') {
+          fullContent = '';
+          fullReasoning = '';
+          repetitionAborted = true;
+          sendSSEEvent(res, 'repetition_warning', chunk.meta ?? {});
         }
       }
     } finally {
       clearInterval(keepAliveInterval);
+    }
+
+    // Если модель упорно копирует собственный предыдущий ход, пустую запись в
+    // истории оставлять нельзя: дубликат только закрепил бы цикл в следующих
+    // генерациях (именно так в чате 734 появились три одинаковых сообщения).
+    if (repetitionAborted && !fullContent.trim()) {
+      console.log(`[ChatsRoute] Generation aborted due to repetition for chat ${chatId}; removing empty assistant message`);
+      messageRepository.deleteMessage(tempMessage.id);
+      sendSSEEvent(res, 'error', {
+        message: 'Генерация остановлена: модель повторила собственный предыдущий ответ. Попробуйте повторить или поднять temperature в настройках подключения.',
+      });
+      return;
     }
 
     // 7. Вычисляем метрики генерации
@@ -638,6 +665,8 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
   let genStartTime = 0;
   let genContentTokenCount = 0;
   let genReasoningTokenCount = 0;
+  /** Модель скопировала собственный предыдущий ход и после ретрая - генерацию отменяем */
+  let genRepetitionAborted = false;
 
   try {
     // 1. Проверяем доступ к чату
@@ -738,10 +767,31 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
           sendSSEEvent(res, 'content_token', { token: chunk.token });
           fullContent += chunk.token;
           genContentTokenCount++;
+        } else if (chunk.type === 'repetition_detected') {
+          sendSSEEvent(res, 'repetition_detected', chunk.meta ?? {});
+        } else if (chunk.type === 'stream_restart') {
+          fullContent = '';
+          genFullReasoning = '';
+          sendSSEEvent(res, 'stream_restart', chunk.meta ?? {});
+        } else if (chunk.type === 'repetition_warning') {
+          fullContent = '';
+          genFullReasoning = '';
+          genRepetitionAborted = true;
+          sendSSEEvent(res, 'repetition_warning', chunk.meta ?? {});
         }
       }
     } finally {
       clearInterval(genKeepAliveInterval);
+    }
+
+    // Дословный повтор предыдущего хода ассистента: сообщение не сохраняем,
+    // иначе дубликат осядет в истории и будет провоцировать повтор снова.
+    if (genRepetitionAborted && !fullContent.trim()) {
+      console.log(`[ChatsRoute] Generation aborted due to repetition for chat ${chatIdNum}`);
+      sendSSEEvent(res, 'error', {
+        message: 'Генерация остановлена: модель повторила собственный предыдущий ответ. Попробуйте повторить или поднять temperature в настройках подключения.',
+      });
+      return;
     }
 
     // 7. Вычисляем метрики генерации

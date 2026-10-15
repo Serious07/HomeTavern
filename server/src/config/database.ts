@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { LLM_CONNECTION_SAMPLING_COLUMNS } from '../utils/llm-connection-columns';
 
 const db: any = new Database('hometavern.db');
 
@@ -389,6 +390,39 @@ try {
     console.log('[Database] Column strict_role_alternation already exists in llm_connections');
   } else {
     console.error('[Database] strict_role_alternation migration error:', error);
+  }
+}
+
+// Миграция: параметры сэмплирования и защиты от повторов в llm_connections.
+//
+// Зачем это нужно: HomeTavern раньше не отправлял ни temperature, ни top_p, и
+// локальные движки (например Strata) по умолчанию декодируют жадно. В связке с
+// chat_template_kwargs {enable_thinking:false} это приводило к тому, что модель
+// выдавала байт-в-байт копию своего предыдущего сообщения, и повтор закреплялся
+// в истории. Теперь сэмплирование отправляется всегда, а значения хранятся
+// в подключении.
+try {
+  const llmConnExists = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='llm_connections'"
+  ).get() as { name: string } | undefined;
+
+  if (llmConnExists) {
+    const samplingColumnNames = (db.prepare('PRAGMA table_info(llm_connections)').all() as any[])
+      .map((col: any) => col.name);
+
+    for (const [name, definition] of LLM_CONNECTION_SAMPLING_COLUMNS) {
+      if (!samplingColumnNames.includes(name)) {
+        db.exec(`ALTER TABLE llm_connections ADD COLUMN ${name} ${definition};`);
+        console.log(`[Database] Added column: ${name} to llm_connections`);
+      }
+    }
+  }
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate column')) {
+    console.log('[Database] Sampling columns already exist in llm_connections');
+  } else {
+    console.error('[Database] llm_connections sampling migration error:', error);
   }
 }
 

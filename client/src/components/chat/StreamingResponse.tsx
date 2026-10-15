@@ -43,6 +43,12 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [reasoningContent, setReasoningContent] = useState('');
+  /**
+   * Предупреждение о дословном повторе: сервер прерывает такую генерацию и
+   * один раз перезапускает её. Пользователь должен видеть, что происходит,
+   * иначе «исчезнувший» текст выглядит как баг клиента.
+   */
+  const [repetitionNotice, setRepetitionNotice] = useState<string | null>(null);
   // Локальное состояние только если не передано внешнее
   const [internalShowThinking, setInternalShowThinking] = useState(false);
   
@@ -313,6 +319,41 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       }
     });
 
+    // === Защита от дословных повторов на стороне сервера ===
+    // Генерация скопировала предыдущий ход ассистента и будет перезапущена
+    eventSource.addEventListener('repetition_detected', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        diagLog('stream-repetition', `attempt=${data.attempt} detected=${data.detectedChars} prev=${data.previousChars}`);
+        setRepetitionNotice(
+          'Модель начала повторять собственный предыдущий ответ - генерация перезапущена с другими параметрами.'
+        );
+      } catch (err) {
+        // Ignore parse errors
+      }
+    });
+
+    // Новая попытка начинается с чистого листа: накопленный дубликат стираем,
+    // иначе он останется на экране и попадёт в сохраняемое сообщение
+    eventSource.addEventListener('stream_restart', () => {
+      contentRef.current = '';
+      reasoningContentRef.current = '';
+      flushTokensNow();
+    });
+
+    // Повтор остался и после перезапуска - генерация остановлена на сервере
+    eventSource.addEventListener('repetition_warning', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        diagLog('stream-repetition-final', `attempt=${data.attempt} detected=${data.detectedChars}`);
+        setRepetitionNotice(
+          'Модель упорно повторяет предыдущий ответ - генерация остановлена, чтобы не засорять историю.'
+        );
+      } catch (err) {
+        // Ignore parse errors
+      }
+    });
+
     eventSource.addEventListener('error', (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
@@ -506,6 +547,12 @@ const StreamingResponse: React.FC<StreamingResponseProps> = ({
       <div ref={contentEndRef} className="scroll-mb-20" />
 
       {/* Error message */}
+      {repetitionNotice && !error && (
+        <div className="mt-3 p-3 bg-amber-900/30 border border-amber-700 rounded-lg">
+          <p className="text-amber-400 text-sm">{repetitionNotice}</p>
+        </div>
+      )}
+
       {error && (
         <div className="mt-3 p-3 bg-red-900/30 border border-red-700 rounded-lg">
           <p className="text-red-400 text-sm">{error}</p>

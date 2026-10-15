@@ -2,6 +2,7 @@
  * Initialize llm_connections table and seed from .env
  */
 import db from '../config/database';
+import { LLM_CONNECTION_SAMPLING_COLUMNS } from './llm-connection-columns';
 
 export function initLlmConnectionsTable(): void {
   // Safely create the table IF IT DOESN'T EXIST
@@ -34,7 +35,31 @@ export function initLlmConnectionsTable(): void {
     console.log('[LLM Connections] Added column: context_length');
   }
 
+  ensureSamplingColumns();
+
   console.log('[LLM Connections] Table llm_connections checked/initialized');
+}
+
+/**
+ * Колонки сэмплирования и защит от повторов.
+ *
+ * Причина, почему они нужны здесь, а не только в миграциях config/database.ts:
+ * initLlmConnectionsTable() вызывается из index.ts уже ПОСЛЕ того, как импорты
+ * создали синглтон LLMService. На чистой базе на первом запуске таблица
+ * создаётся именно здесь, и если колонок в ней нет, LLMService до следующего
+ * перезапуска работает с настройками из .env.
+ */
+export function ensureSamplingColumns(): void {
+  const existing = new Set(
+    (db.prepare('PRAGMA table_info(llm_connections)').all() as Array<{ name: string }>).map((col) => col.name)
+  );
+
+  for (const [name, definition] of LLM_CONNECTION_SAMPLING_COLUMNS) {
+    if (!existing.has(name)) {
+      db.exec(`ALTER TABLE llm_connections ADD COLUMN ${name} ${definition};`);
+      console.log(`[LLM Connections] Added column: ${name}`);
+    }
+  }
 }
 
 /**

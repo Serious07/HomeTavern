@@ -90,6 +90,19 @@ export interface SystemPrompt {
 // LLM Connection types
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 
+/**
+ * Как управлять режимом размышлений:
+ *  - 'reasoning_effort' (по умолчанию): слать chat_template_kwargs.reasoning_effort,
+ *    никогда не слать enable_thinking:false (на hybrid-thinking моделях это
+ *    провоцирует дословное копирование предыдущего хода);
+ *  - 'chat_template_kwargs': историческое поведение, enable_thinking = reasoning;
+ *  - 'none': не слать ничего.
+ */
+export type ThinkingControl = 'reasoning_effort' | 'chat_template_kwargs' | 'none';
+
+/** Стоп-строки: 'auto' - по чат-шаблону движка, 'legacy' - старые Human:/Assistant:, 'none' - не слать */
+export type StopTokensMode = 'auto' | 'legacy' | 'none';
+
 export interface LlmConnection {
   id: number;
   user_id: number;
@@ -106,6 +119,17 @@ export interface LlmConnection {
   reasoning_effort: string;
   /** Enable strict role alternation (1=enabled, 0=disabled) - merges consecutive same-role messages */
   strict_role_alternation: number;
+  /** Параметры сэмплирования; temperature/top_p отправляются всегда, top_k/min_p - только если заданы */
+  temperature: number | null;
+  top_p: number | null;
+  top_k: number | null;
+  min_p: number | null;
+  thinking_control: ThinkingControl;
+  stop_tokens_mode: StopTokensMode;
+  /** Защита от дословного повтора предыдущего хода (1=вкл, 0=выкл) */
+  repetition_guard: number;
+  /** Автоперезапуск генерации с другим сэмплированием при повторе (1=вкл, 0=выкл) */
+  repetition_auto_retry: number;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -125,6 +149,14 @@ export interface LlmConnectionCreate {
   /** low | medium | high | xhigh */
   reasoning_effort?: string;
   strict_role_alternation?: number;
+  temperature?: number | null;
+  top_p?: number | null;
+  top_k?: number | null;
+  min_p?: number | null;
+  thinking_control?: ThinkingControl;
+  stop_tokens_mode?: StopTokensMode;
+  repetition_guard?: number;
+  repetition_auto_retry?: number;
 }
 
 export interface LlmConnectionUpdate {
@@ -138,6 +170,14 @@ export interface LlmConnectionUpdate {
   /** low | medium | high | xhigh */
   reasoning_effort?: string;
   strict_role_alternation?: number;
+  temperature?: number | null;
+  top_p?: number | null;
+  top_k?: number | null;
+  min_p?: number | null;
+  thinking_control?: ThinkingControl;
+  stop_tokens_mode?: StopTokensMode;
+  repetition_guard?: number;
+  repetition_auto_retry?: number;
 }
 
 export interface LlmTestResult {

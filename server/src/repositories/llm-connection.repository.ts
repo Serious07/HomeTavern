@@ -20,6 +20,23 @@ export interface LlmConnection {
   reasoning_effort: string;
   /** Enable strict role alternation (merge consecutive same-role messages). Default: 0 */
   strict_role_alternation: number;
+  /**
+   * Параметры сэмплирования. NULL у top_k/min_p = «не отправлять поле провайдеру».
+   * temperature/top_p отправляются всегда: без них локальные движки декодируют
+   * жадно и начинают повторять предыдущий ход дословно.
+   */
+  temperature: number | null;
+  top_p: number | null;
+  top_k: number | null;
+  min_p: number | null;
+  /** 'reasoning_effort' (default) | 'chat_template_kwargs' | 'none' */
+  thinking_control: string;
+  /** 'auto' (default) | 'legacy' | 'none' */
+  stop_tokens_mode: string;
+  /** Защита от дословного повтора предыдущего хода (1 = включена, default) */
+  repetition_guard: number;
+  /** Авто-ретрай с другим сэмплированием при обнаружении повтора (1 = включён, default) */
+  repetition_auto_retry: number;
   is_active: number; // 0 or 1
   created_at: string;
   updated_at: string;
@@ -37,6 +54,14 @@ export interface CreateLlmConnectionInput {
   /** low | medium | high | xhigh */
   reasoning_effort?: string;
   strict_role_alternation?: number;
+  temperature?: number | null;
+  top_p?: number | null;
+  top_k?: number | null;
+  min_p?: number | null;
+  thinking_control?: string;
+  stop_tokens_mode?: string;
+  repetition_guard?: number;
+  repetition_auto_retry?: number;
 }
 
 export interface UpdateLlmConnectionInput {
@@ -51,7 +76,22 @@ export interface UpdateLlmConnectionInput {
   /** low | medium | high | xhigh */
   reasoning_effort?: string;
   strict_role_alternation?: number;
+  temperature?: number | null;
+  top_p?: number | null;
+  top_k?: number | null;
+  min_p?: number | null;
+  thinking_control?: string;
+  stop_tokens_mode?: string;
+  repetition_guard?: number;
+  repetition_auto_retry?: number;
 }
+
+/**
+ * Единый список колонок для всех SELECT по llm_connections.
+ * Раньше он был продублирован в трёх запросах, из-за чего новая колонка
+ * обязана была добавляться сразу в три места.
+ */
+const CONNECTION_COLUMNS = `id, user_id, name, base_url, api_key_encrypted, model, max_tokens, context_length, reasoning, reasoning_effort, strict_role_alternation, temperature, top_p, top_k, min_p, thinking_control, stop_tokens_mode, repetition_guard, repetition_auto_retry, is_active, created_at, updated_at`;
 
 class LlmConnectionRepository {
   /**
@@ -71,7 +111,7 @@ class LlmConnectionRepository {
 
   getAllByUserId(userId: number): LlmConnection[] {
     const rows = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, context_length, reasoning, reasoning_effort, strict_role_alternation, is_active, created_at, updated_at
+      SELECT ${CONNECTION_COLUMNS}
       FROM llm_connections
       WHERE user_id = ?
       ORDER BY created_at DESC
@@ -81,7 +121,7 @@ class LlmConnectionRepository {
 
   getById(id: number): LlmConnection | null {
     const row = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, context_length, reasoning, reasoning_effort, strict_role_alternation, is_active, created_at, updated_at
+      SELECT ${CONNECTION_COLUMNS}
       FROM llm_connections
       WHERE id = ?
     `).get(id) as LlmConnection | undefined;
@@ -99,7 +139,7 @@ class LlmConnectionRepository {
 
   getActiveByUserId(userId: number): LlmConnection | null {
     const row = db.prepare(`
-      SELECT id, user_id, name, base_url, api_key_encrypted, model, max_tokens, context_length, reasoning, reasoning_effort, strict_role_alternation, is_active, created_at, updated_at
+      SELECT ${CONNECTION_COLUMNS}
       FROM llm_connections
       WHERE user_id = ? AND is_active = 1
       LIMIT 1
@@ -112,9 +152,17 @@ class LlmConnectionRepository {
     const reasoning = input.reasoning ?? 1; // Default: reasoning enabled
     const reasoningEffort = input.reasoning_effort ?? 'medium'; // Default: medium
     const strictRoleAlternation = input.strict_role_alternation ?? 0; // Default: disabled
+    // Сэмплирование по умолчанию: без него локальные движки декодируют жадно
+    const temperature = input.temperature ?? 0.8;
+    const topP = input.top_p ?? 0.95;
+    const thinkingControl = input.thinking_control ?? 'reasoning_effort';
+    const stopTokensMode = input.stop_tokens_mode ?? 'auto';
+    const repetitionGuard = input.repetition_guard ?? 1;
+    const repetitionAutoRetry = input.repetition_auto_retry ?? 1;
+
     const stmt = db.prepare(`
-      INSERT INTO llm_connections (user_id, name, base_url, api_key_encrypted, model, max_tokens, context_length, reasoning, reasoning_effort, strict_role_alternation, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO llm_connections (user_id, name, base_url, api_key_encrypted, model, max_tokens, context_length, reasoning, reasoning_effort, strict_role_alternation, temperature, top_p, top_k, min_p, thinking_control, stop_tokens_mode, repetition_guard, repetition_auto_retry, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
     const result = stmt.run(
       input.user_id,
@@ -126,7 +174,15 @@ class LlmConnectionRepository {
       input.context_length ?? null,
       reasoning,
       reasoningEffort,
-      strictRoleAlternation
+      strictRoleAlternation,
+      temperature,
+      topP,
+      input.top_k ?? null,
+      input.min_p ?? null,
+      thinkingControl,
+      stopTokensMode,
+      repetitionGuard,
+      repetitionAutoRetry
     );
     return result.lastInsertRowid as number;
   }
@@ -170,6 +226,38 @@ class LlmConnectionRepository {
     if (input.strict_role_alternation !== undefined) {
       updates.push('strict_role_alternation = ?');
       params.push(input.strict_role_alternation);
+    }
+    if (input.temperature !== undefined) {
+      updates.push('temperature = ?');
+      params.push(input.temperature);
+    }
+    if (input.top_p !== undefined) {
+      updates.push('top_p = ?');
+      params.push(input.top_p);
+    }
+    if (input.top_k !== undefined) {
+      updates.push('top_k = ?');
+      params.push(input.top_k);
+    }
+    if (input.min_p !== undefined) {
+      updates.push('min_p = ?');
+      params.push(input.min_p);
+    }
+    if (input.thinking_control !== undefined) {
+      updates.push('thinking_control = ?');
+      params.push(input.thinking_control);
+    }
+    if (input.stop_tokens_mode !== undefined) {
+      updates.push('stop_tokens_mode = ?');
+      params.push(input.stop_tokens_mode);
+    }
+    if (input.repetition_guard !== undefined) {
+      updates.push('repetition_guard = ?');
+      params.push(input.repetition_guard);
+    }
+    if (input.repetition_auto_retry !== undefined) {
+      updates.push('repetition_auto_retry = ?');
+      params.push(input.repetition_auto_retry);
     }
 
     updates.push('updated_at = CURRENT_TIMESTAMP');

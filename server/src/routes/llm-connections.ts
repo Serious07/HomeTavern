@@ -114,6 +114,39 @@ function normalizeReasoningEffort(raw: unknown): string {
 }
 
 /**
+ * Числовые параметры сэмплирования приходят из формы строками. Пустая строка
+ * приводит к def (для top_k/min_p def = null, то есть «не отправлять поле»),
+ * всё остальное зажимается в допустимый диапазон, чтобы случайный ввод не
+ * уложил генерацию в temperature=0 (жадный декодинг = повторы) или в 10.
+ */
+function normalizeSamplingNumber(raw: unknown, min: number, max: number, def: number | null): number | null {
+  if (raw === null || raw === undefined || raw === '') return def;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return def;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+/**
+ * Строковые режимы (thinking_control, stop_tokens_mode): принимаем только
+ * известные значения, иначе - дефолт. Неизвестная строка ушла бы прямо в тело
+ * запроса к провайдеру.
+ */
+function normalizeChoice(raw: unknown, allowed: string[], def: string): string {
+  const value = String(raw ?? '').trim().toLowerCase();
+  return allowed.includes(value) ? value : def;
+}
+
+/** Флаг 0/1 (SQLite boolean) */
+function normalizeFlag(raw: unknown, def: number): number {
+  if (raw === undefined || raw === null || raw === '') return def;
+  if (typeof raw === 'boolean') return raw ? 1 : 0;
+  const value = String(raw).trim().toLowerCase();
+  if (['0', 'false', 'off', 'no'].includes(value)) return 0;
+  if (['1', 'true', 'on', 'yes'].includes(value)) return 1;
+  return def;
+}
+
+/**
  * POST /api/llm-connections
  * Creates a new LLM connection for the authenticated user
  */
@@ -139,6 +172,14 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
       reasoning: reasoning ?? 1,
       reasoning_effort: normalizeReasoningEffort(reasoning_effort),
       strict_role_alternation: strict_role_alternation ?? 0,
+      temperature: normalizeSamplingNumber(req.body.temperature, 0.01, 2, 0.8),
+      top_p: normalizeSamplingNumber(req.body.top_p, 0.01, 1, 0.95),
+      top_k: normalizeSamplingNumber(req.body.top_k, 1, 1000, null),
+      min_p: normalizeSamplingNumber(req.body.min_p, 0, 1, null),
+      thinking_control: normalizeChoice(req.body.thinking_control, ['reasoning_effort', 'chat_template_kwargs', 'none'], 'reasoning_effort'),
+      stop_tokens_mode: normalizeChoice(req.body.stop_tokens_mode, ['auto', 'legacy', 'none'], 'auto'),
+      repetition_guard: normalizeFlag(req.body.repetition_guard, 1),
+      repetition_auto_retry: normalizeFlag(req.body.repetition_auto_retry, 1),
     });
 
     const conn = llmConnectionRepository.getById(id);
@@ -185,6 +226,30 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
       updates.reasoning_effort = normalizeReasoningEffort(req.body.reasoning_effort);
     }
     if (req.body.strict_role_alternation !== undefined) updates.strict_role_alternation = req.body.strict_role_alternation;
+    if (req.body.temperature !== undefined) {
+      updates.temperature = normalizeSamplingNumber(req.body.temperature, 0.01, 2, 0.8);
+    }
+    if (req.body.top_p !== undefined) {
+      updates.top_p = normalizeSamplingNumber(req.body.top_p, 0.01, 1, 0.95);
+    }
+    if (req.body.top_k !== undefined) {
+      updates.top_k = normalizeSamplingNumber(req.body.top_k, 1, 1000, null);
+    }
+    if (req.body.min_p !== undefined) {
+      updates.min_p = normalizeSamplingNumber(req.body.min_p, 0, 1, null);
+    }
+    if (req.body.thinking_control !== undefined) {
+      updates.thinking_control = normalizeChoice(req.body.thinking_control, ['reasoning_effort', 'chat_template_kwargs', 'none'], 'reasoning_effort');
+    }
+    if (req.body.stop_tokens_mode !== undefined) {
+      updates.stop_tokens_mode = normalizeChoice(req.body.stop_tokens_mode, ['auto', 'legacy', 'none'], 'auto');
+    }
+    if (req.body.repetition_guard !== undefined) {
+      updates.repetition_guard = normalizeFlag(req.body.repetition_guard, 1);
+    }
+    if (req.body.repetition_auto_retry !== undefined) {
+      updates.repetition_auto_retry = normalizeFlag(req.body.repetition_auto_retry, 1);
+    }
 
     llmConnectionRepository.update(id, updates, userId);
 
@@ -193,7 +258,11 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
     const activeConnAfterUpdate = llmConnectionRepository.getActiveByUserId(userId);
     if (activeConnAfterUpdate && activeConnAfterUpdate.id === id) {
       if (updates.base_url !== undefined || updates.api_key !== undefined ||
-          updates.model !== undefined || updates.max_tokens !== undefined) {
+          updates.model !== undefined || updates.max_tokens !== undefined ||
+          updates.temperature !== undefined || updates.top_p !== undefined ||
+          updates.top_k !== undefined || updates.min_p !== undefined ||
+          updates.thinking_control !== undefined || updates.stop_tokens_mode !== undefined ||
+          updates.repetition_guard !== undefined || updates.repetition_auto_retry !== undefined) {
         await llmService.switchToConnection(userId, id);
       }
     }

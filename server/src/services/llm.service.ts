@@ -274,8 +274,17 @@ export interface LLMOptions {
 }
 
 export interface StreamChunk {
-  type: 'reasoning_token' | 'content_token';
+  /**
+   * 'reasoning_token' | 'content_token' - токены генерации.
+   * 'repetition_detected' - обнаружен дословный повтор предыдущего хода, генерация
+   *   прервана и начнётся заново;
+   * 'stream_restart' - клиенту надо стереть уже показанный текст новой попытки;
+   * 'repetition_warning' - повтор остался и после ретрая, генерация остановлена.
+   */
+  type: 'reasoning_token' | 'content_token' | 'repetition_detected' | 'stream_restart' | 'repetition_warning';
   token: string;
+  /** Служебная информация для событий повтора */
+  meta?: Record<string, any>;
 }
 
 /**
@@ -667,6 +676,57 @@ export class LLMService {
   private reasoningEffort: string = 'medium';
   /** Enable strict role alternation (merge consecutive same-role messages before sending) */
   private strictRoleAlternation: boolean = false;
+
+  /**
+   * Параметры сэмплирования активного подключения.
+   *
+   * temperature/top_p отправляются провайдеру ВСЕГДА. Раньше они не отправлялись
+   * вообще, и локальные движки (например Strata) уходили в жадный декодинг:
+   * модель выдавала байт-в-байт копию своего предыдущего сообщения.
+   * top_k/min_p - расширения llama.cpp-семейства, NULL = не отправлять поле,
+   * чтобы облачные API не отвечали 400 на неизвестные параметры.
+   */
+  private temperature: number = 0.8;
+  private topP: number = 0.95;
+  private topK: number | null = null;
+  private minP: number | null = null;
+
+  /**
+   * Как управлять режимом размышлений:
+   *   'reasoning_effort' (default) - слать chat_template_kwargs.reasoning_effort
+   *     (+ продублировать верхнеуровнево), НИКОГДА не слать enable_thinking:false.
+   *     На hybrid-thinking моделях (Qwen3-семейство) принудительное
+   *     enable_thinking:false приводит к вырожденному копированию предыдущего хода.
+   *   'chat_template_kwargs' - историческое поведение: enable_thinking = reasoning.
+   *   'none' - не слать ни то, ни другое.
+   */
+  private thinkingControl: string = 'reasoning_effort';
+
+  /** 'auto' (по чат-шаблону движка) | 'legacy' | 'none' */
+  private stopTokensMode: string = 'auto';
+
+  /** Защита от дословного повтора предыдущего хода ассистента */
+  private repetitionGuard: boolean = true;
+  /** Авто-ретрай с другим сэмплированием, если повтор всё же начался */
+  private repetitionAutoRetry: boolean = true;
+
+  /** Кэш решения по стоп-строкам: origin -> массив стоп-строк либо null */
+  private stopTokensByOrigin: Map<string, string[] | null> = new Map();
+  /**
+   * Кэш chat_template по origin: undefined - ещё не спрашивали, null - эндпоинт
+   * шаблон не отдаёт (облачной API). По нему решаем, слать ли chat_template_kwargs.
+   */
+  private chatTemplateByOrigin: Map<string, string | null> = new Map();
+
+  /** Старые стоп-строки для Vicuna/Alpaca-подобных шаблонов */
+  private static readonly LEGACY_STOP_TOKENS = ['\n\nHuman:', '\n\nAssistant:'];
+
+  /** Сколько нормализованных символов сравниваем с предыдущим ходом */
+  private static readonly REPETITION_CHECK_WINDOW = 400;
+  /** Столько же накапливаем, прежде чем сравнивать (раньше - слишком мало данных) */
+  private static readonly REPETITION_MIN_CHARS = 200;
+  /** Короткие ходы (приветствия) не считаем повтором */
+  private static readonly REPETITION_MIN_PREV_CHARS = 80;
   private client: any; // LLMClient instance
   private activeAbortControllers: Map<number, AbortController> = new Map();
   private currentConnectionId: number | null = null;
@@ -873,17 +933,189 @@ export class LLMService {
   }
 
   /**
-   * Получает стоп-токены в зависимости от провайдера
-   * Для Silicon Flow и некоторых других cloud провайдеров возвращает пустой массив,
-   * так как их модели не используют специфические стоп-токены в формате ChatML
+   * Стоп-строки для текущего подключения.
+   *
+   * Раньше выбор был зашит: '\n\nHuman:' / '\n\nAssistant:' отправлялись всем
+   * провайдерам, кроме Silicon Flow. Для ChatML-шаблонов (Qwen и большинство
+   * современных) эти строки в шаблоне отсутствуют, а для старых
+   * Vicuna/Alpaca-подобных моделей они по-прежнему нужны. Поэтому режим
+   * теперь задаётся подключением:
+   *   'legacy' - всегда слать старые стоп-строки;
+   *   'none'   - никогда не слать;
+   *   'auto'   - смотреть chat_template llama.cpp-совместимого движка (/props):
+   *              есть Human:/Assistant: - слать, ChatML - не слать.
+   * Если /props недоступен (облачные API), остаётся прежнее поведение, чтобы
+   * существующие подключения не сломались.
    */
-  private getStopTokens(): string[] | null {
+  private async resolveStopTokens(): Promise<string[] | null> {
     // Для Silicon Flow — не используем стоп-токены (модели могут их не поддерживать)
-    if (this._isSiliconFlow()) {
-      return null;
+    if (this._isSiliconFlow()) return null;
+    if (this.stopTokensMode === 'none') return null;
+    if (this.stopTokensMode === 'legacy') return LLMService.LEGACY_STOP_TOKENS;
+
+    const origin = this.getOrigin();
+    const cached = this.stopTokensByOrigin.get(origin);
+    if (cached !== undefined) return cached;
+
+    const template = await this.probeChatTemplate();
+    let result: string[] | null;
+    if (!template) {
+      // Движок не отдал шаблон - держим прежнее поведение
+      result = LLMService.LEGACY_STOP_TOKENS;
+    } else if (/Human:|Assistant:/.test(template)) {
+      result = LLMService.LEGACY_STOP_TOKENS;
+    } else {
+      result = null;
     }
-    // По умолчанию — стоп-токены для ChatML/instruct форматов
-    return ['\n\nHuman:', '\n\nAssistant:'];
+
+    this.stopTokensByOrigin.set(origin, result);
+    console.log(
+      `[LLMService] Stop tokens for ${origin}: ${result ? JSON.stringify(result) : 'none'} ` +
+      `(mode=${this.stopTokensMode}, chat_template=${template ? 'получен' : 'недоступен'})`
+    );
+    return result;
+  }
+
+  /** Origin эндпоинта: /props живёт на корне сервера, а не внутри /v1 */
+  private getOrigin(): string {
+    try {
+      return new URL(this.baseURL).origin;
+    } catch {
+      return this.baseURL;
+    }
+  }
+
+  /**
+   * GET /props на llama.cpp-совместимом движке (llama.cpp, TabbyAPI, Strata,
+   * LM Studio). Возвращает chat_template либо null, если эндпоинт недоступен.
+   */
+  private async probeChatTemplate(timeoutMs: number = 3000): Promise<string | null> {
+    const origin = this.getOrigin();
+    if (this.chatTemplateByOrigin.has(origin)) {
+      return this.chatTemplateByOrigin.get(origin) ?? null;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let template: string | null = null;
+    try {
+      const response = await fetch(`${origin}/props`, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      });
+      if (response.ok) {
+        const props = await response.json() as any;
+        template = typeof props?.chat_template === 'string' ? props.chat_template : null;
+      }
+    } catch {
+      template = null;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    this.chatTemplateByOrigin.set(origin, template);
+    return template;
+  }
+
+  /**
+   * Понимает ли эндпоинет chat_template_kwargs. Это расширение llama.cpp-семейства
+   * (llama.cpp, TabbyAPI, Strata, LM Studio) - движок, который отдал chat_template
+   * через /props, его точно принимает. Облачные API (OpenAI, Gemini, OpenRouter)
+   * такое поле не понимают, поэтому для них остаётся только верхнеуровневый
+   * reasoning_effort. Если /props мы ещё не спрашивали - держим прежнее поведение
+   * (поле отправляется), чтобы не менять поведение провайдеров без данных.
+   */
+  private supportsChatTemplateKwargs(): boolean {
+    const cached = this.chatTemplateByOrigin.get(this.getOrigin());
+    return cached === undefined ? true : cached !== null;
+  }
+
+  /**
+   * Единственная точка, собирающая тело запроса /chat/completions.
+   * Из неё же пишется и лог запроса, поэтому сохранённый лог воспроизводится
+   * curl'ом 1-в-1 (раньше лог расходился с реальным телом: в нём не было
+   * chat_template_kwargs и сэмплирования, из-за чего диагностика вводила в заблуждение).
+   */
+  private buildChatRequestBody(
+    messages: LLMMessage[],
+    maxTokens: number,
+    stopTokens: string[] | null,
+    overrides: {
+      temperature?: number;
+      topP?: number;
+      thinkingControl?: string;
+      reasoningEffort?: string;
+    } = {}
+  ): Record<string, any> {
+    const body: Record<string, any> = {
+      model: this.model,
+      messages,
+      stream: true,
+      max_tokens: maxTokens,
+    };
+
+    if (stopTokens !== null) {
+      body.stop = stopTokens;
+    }
+
+    // Сэмплирование отправляем всегда: без него локальные движки декодируют жадно
+    body.temperature = overrides.temperature ?? this.temperature ?? 0.8;
+    body.top_p = overrides.topP ?? this.topP ?? 0.95;
+    if (this.topK !== null && this.topK !== undefined) body.top_k = this.topK;
+    if (this.minP !== null && this.minP !== undefined) body.min_p = this.minP;
+
+    const thinkingControl = overrides.thinkingControl ?? this.thinkingControl;
+    const effort = overrides.reasoningEffort ?? this.reasoningEffort ?? 'medium';
+    const chatTemplateKwargs: Record<string, any> = {};
+
+    if (thinkingControl === 'reasoning_effort') {
+      // На выключенном reasoning ничего не отправляем: принудительное
+      // enable_thinking:false на hybrid-thinking моделях и есть триггер
+      // вырожденного копирования предыдущего хода.
+      if (this.reasoning) {
+        chatTemplateKwargs.reasoning_effort = effort;
+        // llama.cpp/Strata читают reasoning_effort внутри chat_template_kwargs;
+        // верхнеуровневое поле оставляем для провайдеров, которые понимают только его.
+        body.reasoning_effort = effort;
+      }
+    } else if (thinkingControl === 'chat_template_kwargs') {
+      // Историческое поведение: явный переключатель мышления
+      chatTemplateKwargs.enable_thinking = this.reasoning;
+      if (this.reasoning) {
+        body.reasoning_effort = effort;
+      }
+    }
+
+    // chat_template_kwargs - расширение llama.cpp-семейства (llama.cpp, TabbyAPI,
+    // Strata, LM Studio). Облачные API /props не отдают, и такое поле им не нужно:
+    // там остаётся только верхнеуровневый reasoning_effort. Режим
+    // chat_template_kwargs - явный выбор пользователя, в нём поле шлём всегда.
+    const explicitTemplateKwargs = thinkingControl === 'chat_template_kwargs';
+    if (Object.keys(chatTemplateKwargs).length > 0 && (explicitTemplateKwargs || this.supportsChatTemplateKwargs())) {
+      body.chat_template_kwargs = chatTemplateKwargs;
+    }
+
+    return body;
+  }
+
+  /**
+   * Параметры повторной попытки при обнаружении повтора: более широкое
+   * сэмплирование и обязательно включённое размышление с минимальным усилием
+   * (дешевле обычного, но ровно это разрывает жадный цикл копирования).
+   */
+  private buildRepetitionRetryOverrides(): {
+    temperature: number;
+    topP: number;
+    thinkingControl: string;
+    reasoningEffort: string;
+  } {
+    return {
+      temperature: Math.max(this.temperature ?? 0.8, 1.0),
+      topP: Math.max(this.topP ?? 0.95, 0.98),
+      thinkingControl: 'reasoning_effort',
+      reasoningEffort: 'low',
+    };
   }
 
   constructor() {
@@ -948,11 +1180,8 @@ export class LLMService {
       this.maxOutputTokens = this.maxTokens;
       this.maxContextLength = 0;
       this.useContextLimits = false;
-      // reasoning: 1 = enabled (default), 0 = disabled
-      this.reasoning = decryptedConn.reasoning !== 0;
-      this.reasoningEffort = decryptedConn.reasoning_effort || 'medium';
-      // strict_role_alternation: 1 = enabled, 0 = disabled (default)
-      this.strictRoleAlternation = (decryptedConn.strict_role_alternation || 0) === 1;
+      // reasoning/сэмплирование/защиты - общие для старта и переключения
+      this.applyConnectionSettings(decryptedConn);
 
       console.log('[LLMService] Loaded active connection from database:', decryptedConn.name);
       console.log('[LLMService] Connection ID:', activeConn.id);
@@ -1010,11 +1239,8 @@ export class LLMService {
       this.maxOutputTokens = this.maxTokens;
       this.maxContextLength = 0;
       this.useContextLimits = false;
-      // reasoning: 1 = enabled (default), 0 = disabled
-      this.reasoning = conn.reasoning !== 0;
-      this.reasoningEffort = conn.reasoning_effort || 'medium';
-      // strict_role_alternation: 1 = enabled, 0 = disabled (default)
-      this.strictRoleAlternation = (conn.strict_role_alternation || 0) === 1;
+      // reasoning/сэмплирование/защиты - общие для старта и переключения
+      this.applyConnectionSettings(conn);
 
       // Reinitialize client with new settings
       this._initLLMClient();
@@ -1024,6 +1250,14 @@ export class LLMService {
       console.log('[LLMService] New MODEL:', this.model);
       console.log('[LLMService] New MAX_TOKENS:', this.maxTokens);
       console.log('[LLMService] New MAX_CONTEXT_LENGTH:', this.maxContextLength);
+      console.log(
+        `[LLMService] New SAMPLING: temperature=${this.temperature}, top_p=${this.topP}, ` +
+        `top_k=${this.topK ?? 'не отправляется'}, min_p=${this.minP ?? 'не отправляется'}`
+      );
+      console.log(
+        `[LLMService] New THINKING: control=${this.thinkingControl}, effort=${this.reasoningEffort}, ` +
+        `reasoning=${this.reasoning}; stop_tokens_mode=${this.stopTokensMode}; repetition_guard=${this.repetitionGuard}`
+      );
 
       return Promise.resolve({
         success: true,
@@ -1052,6 +1286,45 @@ export class LLMService {
   }
 
   /**
+   * Применяет настройки подключения (режим мышления, сэмплирование, защиты).
+   * Общая для старта сервиса и переключения подключения: раньше поля приходилось
+   * переписывать в двух местах, и новые настройки неминуемо терялись в одном из них.
+   */
+  private applyConnectionSettings(conn: any): void {
+    // reasoning: 1 = enabled (default), 0 = disabled
+    this.reasoning = conn.reasoning !== 0;
+    this.reasoningEffort = conn.reasoning_effort || 'medium';
+    // strict_role_alternation: 1 = enabled, 0 = disabled (default)
+    this.strictRoleAlternation = (conn.strict_role_alternation || 0) === 1;
+
+    const clamp = (value: any, min: number, max: number, def: number): number => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return def;
+      return Math.min(max, Math.max(min, parsed));
+    };
+
+    // temperature/top_p не могут быть NULL: жадный декодинг = дословные повторы
+    this.temperature = clamp(conn.temperature, 0.01, 2, 0.8);
+    this.topP = clamp(conn.top_p, 0.01, 1, 0.95);
+    // top_k/min_p: NULL = не отправлять поле провайдеру
+    this.topK = conn.top_k === null || conn.top_k === undefined
+      ? null
+      : Math.max(1, Math.round(Number(conn.top_k)) || 1);
+    this.minP = conn.min_p === null || conn.min_p === undefined
+      ? null
+      : Math.min(1, Math.max(0, Number(conn.min_p) || 0));
+
+    this.thinkingControl = ['reasoning_effort', 'chat_template_kwargs', 'none'].includes(conn.thinking_control)
+      ? conn.thinking_control
+      : 'reasoning_effort';
+    this.stopTokensMode = ['auto', 'legacy', 'none'].includes(conn.stop_tokens_mode)
+      ? conn.stop_tokens_mode
+      : 'auto';
+    this.repetitionGuard = (conn.repetition_guard ?? 1) !== 0;
+    this.repetitionAutoRetry = (conn.repetition_auto_retry ?? 1) !== 0;
+  }
+
+  /**
    * Update reasoning mode without reinitializing the client.
    * Called when the active connection's reasoning setting is toggled.
    */
@@ -1075,6 +1348,66 @@ export class LLMService {
   setStrictRoleAlternation(enabled: boolean): void {
     this.strictRoleAlternation = enabled;
     console.log(`[LLMService] Strict role alternation ${enabled ? 'enabled' : 'disabled'} (updated via API)`);
+  }
+
+  /**
+   * Пишет лог запроса в файл. Тело пишется ровно то же, что уходит в API
+   * (тот же объект), поэтому сохранённый лог воспроизводится curl'ом 1-в-1.
+   * Раньше лог собирался отдельно и в него не попадали chat_template_kwargs и
+   * параметры сэмплирования - диагностика по таким логам вводила в заблуждение.
+   */
+  private writeRequestLog(
+    fsUtil: any,
+    filePath: string,
+    requestBody: Record<string, any>,
+    meta: {
+      chatId: number;
+      userId: number;
+      now: Date;
+      finalMaxOutput: number;
+      stopTokens: string[] | null;
+      messagesCount: number;
+    }
+  ): void {
+    let logContent = '';
+    logContent += `# ========================================\n`;
+    logContent += `# Точный запрос к API чата\n`;
+    logContent += `# ========================================\n`;
+    logContent += `\n`;
+    logContent += `# URL: POST ${this.baseURL}/chat/completions\n`;
+    logContent += `# Headers:\n`;
+    logContent += `#   Content-Type: application/json\n`;
+    logContent += `\n`;
+    logContent += `# Body (JSON — скопируйте и отправьте через curl для тестирования):\n`;
+    logContent += JSON.stringify(requestBody, null, 2);
+    logContent += `\n`;
+    logContent += `\n`;
+    logContent += `# ========================================\n`;
+    logContent += `# Метаданные\n`;
+    logContent += `# ========================================\n`;
+    logContent += `Date: ${meta.now.toISOString()}\n`;
+    logContent += `chatId: ${meta.chatId}\n`;
+    logContent += `userId: ${meta.userId}\n`;
+    logContent += `model: ${this.model}\n`;
+    logContent += `baseURL: ${this.baseURL}\n`;
+    logContent += `max_tokens: ${meta.finalMaxOutput}\n`;
+    logContent += `stop tokens: ${meta.stopTokens === null ? 'null (provider-specific)' : JSON.stringify(meta.stopTokens)}\n`;
+    logContent += `stop_tokens_mode: ${this.stopTokensMode}\n`;
+    logContent += `thinking_control: ${this.thinkingControl}\n`;
+    logContent += `sampling: temperature=${requestBody.temperature}, top_p=${requestBody.top_p}, top_k=${requestBody.top_k ?? 'не отправляется'}, min_p=${requestBody.min_p ?? 'не отправляется'}\n`;
+    logContent += `chat_template_kwargs: ${JSON.stringify(requestBody.chat_template_kwargs ?? {})}\n`;
+    logContent += `repetition_guard: ${this.repetitionGuard}\n`;
+    logContent += `useContextLimits: ${this.useContextLimits}\n`;
+    logContent += `messages count: ${meta.messagesCount}\n`;
+    logContent += `\n`;
+    logContent += `# ========================================\n`;
+
+    try {
+      fsUtil.writeFileSync(filePath, logContent, 'utf-8');
+      console.log(`[LLMService.generateStream] >>> Request logged to file: ${filePath}`);
+    } catch (logError) {
+      console.error(`[LLMService.generateStream] FAILED to write log file:`, logError);
+    }
   }
 
   /**
@@ -1153,6 +1486,71 @@ export class LLMService {
     return normalized;
   }
 
+  /** Нормализация текста для вопроса «это тот же самый ход?» */
+  static normalizeForRepetitionCheck(text: string): string {
+    return (text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  /** Последний assistant-ход в отправляемом промпте - эталон для проверки повторов */
+  private getLastAssistantContent(messages: LLMMessage[]): string {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') return messages[i].content || '';
+    }
+    return '';
+  }
+
+  /**
+   * Убирает из истории assistant-ходы, которые дословно повторяют более ранний
+   * assistant-ход.
+   *
+   * Это не косметика: попав в историю, такой повтор становится сильнейшим
+   * прецедентом для жадного декодинга, и модель начинает копировать его снова
+   * (в чате 734 оказалось три байт-идентичных сообщения подряд, и генерация
+   * застряла в цикле). Удаляем более поздний дубликат, первый ход оставляем.
+   */
+  private stripDuplicateAssistantTurns(messages: LLMMessage[]): LLMMessage[] {
+    if (!this.repetitionGuard || messages.length < 2) return messages;
+
+    const seenAssistant = new Set<string>();
+    const result: LLMMessage[] = [];
+    let removed = 0;
+
+    for (const msg of messages) {
+      if (msg.role === 'assistant') {
+        const normalized = LLMService.normalizeForRepetitionCheck(msg.content);
+        if (normalized.length >= LLMService.REPETITION_MIN_PREV_CHARS && seenAssistant.has(normalized)) {
+          removed++;
+          continue;
+        }
+        if (normalized.length > 0) seenAssistant.add(normalized);
+      }
+      result.push(msg);
+    }
+
+    if (removed > 0) {
+      console.log(`[LLMService] Repetition guard: removed ${removed} duplicate assistant turn(s) from history`);
+    }
+    return result;
+  }
+
+  /**
+   * Начался ли ответ как дословное продолжение предыдущего хода ассистента.
+   * Сравниваем нормализованные префиксы: точные байтовые повторы ловит надёжно,
+   * а перефразированные повторы (совсем другой механизм) не трогает.
+   */
+  private looksLikeRepetitionOf(streamed: string, previous: string): boolean {
+    const prevNorm = LLMService.normalizeForRepetitionCheck(previous);
+    if (prevNorm.length < LLMService.REPETITION_MIN_PREV_CHARS) return false;
+
+    const streamedNorm = LLMService.normalizeForRepetitionCheck(streamed);
+    if (streamedNorm.length < LLMService.REPETITION_MIN_CHARS) return false;
+
+    const window = Math.min(prevNorm.length, LLMService.REPETITION_CHECK_WINDOW, streamedNorm.length);
+    if (window < LLMService.REPETITION_MIN_CHARS) return false;
+
+    return streamedNorm.startsWith(prevNorm.slice(0, window));
+  }
+
   /**
    * Get current connection info (without API key)
    */
@@ -1165,7 +1563,15 @@ export class LLMService {
       connectionId: this.currentConnectionId,
       reasoning: this.reasoning,
       reasoningEffort: this.reasoningEffort,
+      thinkingControl: this.thinkingControl,
       strictRoleAlternation: this.strictRoleAlternation,
+      temperature: this.temperature,
+      topP: this.topP,
+      topK: this.topK,
+      minP: this.minP,
+      stopTokensMode: this.stopTokensMode,
+      repetitionGuard: this.repetitionGuard,
+      repetitionAutoRetry: this.repetitionAutoRetry,
     };
   }
 
@@ -1348,6 +1754,12 @@ export class LLMService {
       // (e.g., Magnum-v4) — merges consecutive same-role messages
       messages = this.normalizeRoleAlternation(messages);
 
+      // Защита от дословных повторов: убираем из истории assistant-ходы, которые
+      // уже являются копией более раннего хода. Без этого один дубликат в истории
+      // (в чате 734 их было три байт-идентичных подряд) продолжает порождать копии
+      // даже при нормальном сэмплировании.
+      messages = this.stripDuplicateAssistantTurns(messages);
+
       // Проверяем наличие клиента
       if (!this.client) {
         // Fallback: эмуляция потока
@@ -1403,7 +1815,7 @@ export class LLMService {
       
       // Формируем точный JSON запроса который отправляется в API
       // Стоп-токены зависят от провайдера (для Silicon Flow — null)
-      const stopTokens = this.getStopTokens();
+      const stopTokens = await this.resolveStopTokens();
       
       // ============================================================================
       // 🔍 ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ ЗАПРОСА ДЛЯ ДИАГНОСТИКИ
@@ -1431,88 +1843,58 @@ export class LLMService {
       // Формируем имя файла: ДАТА_ВРЕМЯ_IDЧАТА.log
       const now = new Date();
       const dateStr = now.toISOString().replace(/:/g, '-').split('.')[0]; // YYYY-MM-DDTHH-mm-ss
-      const fileName = `${dateStr}_chat${chatId}.log`;
-      const filePath = pathLibUtil.join(logsDir, fileName);
-      
-      const exactRequestBody: Record<string, any> = {
-        model: this.model,
-        messages: messages,
-        stream: true,
-        max_tokens: finalMaxOutput,
-      };
-      // Лог должен совпадать с реальным телом запроса: reasoning_effort добавляется
-      // только когда reasoning включён
-      if (this.reasoning) {
-        exactRequestBody.reasoning_effort = this.reasoningEffort;
-      }
-      if (stopTokens !== null) {
-        exactRequestBody.stop = stopTokens;
-      }
-      
-      let logContent = '';
-      logContent += `# ========================================\n`;
-      logContent += `# Точный запрос к llama.cpp API\n`;
-      logContent += `# ========================================\n`;
-      logContent += `\n`;
-      logContent += `# URL: POST ${this.baseURL}/chat/completions\n`;
-      logContent += `# Headers:\n`;
-      logContent += `#   Content-Type: application/json\n`;
-      logContent += `\n`;
-      logContent += `# Body (JSON — скопируйте и отправьте через curl для тестирования):\n`;
-      logContent += JSON.stringify(exactRequestBody, null, 2);
-      logContent += `\n`;
-      logContent += `\n`;
-      logContent += `# ========================================\n`;
-      logContent += `# Метаданные\n`;
-      logContent += `# ========================================\n`;
-      logContent += `Date: ${now.toISOString()}\n`;
-      logContent += `chatId: ${chatId}\n`;
-      logContent += `userId: ${userId}\n`;
-      logContent += `model: ${this.model}\n`;
-      logContent += `baseURL: ${this.baseURL}\n`;
-      logContent += `max_tokens: ${finalMaxOutput}\n`;
-      logContent += `stop tokens: ${stopTokens === null ? 'null (provider-specific)' : JSON.stringify(stopTokens)}\n`;
-      logContent += `useContextLimits: ${this.useContextLimits}\n`;
-      logContent += `messages count: ${messages.length}\n`;
-      logContent += `\n`;
-      logContent += `# ========================================\n`;
-      
-      // Записываем лог в файл
-      try {
-        fsUtil.writeFileSync(filePath, logContent, 'utf-8');
-        console.log(`[LLMService.generateStream] >>> Prompt logged to file: ${filePath}`);
-      } catch (logError) {
-        console.error(`[LLMService.generateStream] FAILED to write log file:`, logError);
-      }
+      const logBaseName = `${dateStr}_chat${chatId}`;
 
-        // Формируем запрос с правильными стоп-токенами для текущего провайдера
-        // Для Silicon Flow — стоп-токены не используются (модели могут их не поддерживать)
-        // Для локальных серверов (llama.cpp) — позволяют использовать KV cache чекпоинты
-        const streamRequest: Record<string, any> = {
-          model: this.model,
-          messages: messages,
-          stream: true,
-          max_tokens: finalMaxOutput,
-          chat_template_kwargs: { enable_thinking: this.reasoning },
-        };
-        // reasoning_effort отправляется только при включённом reasoning: при выключенном
-        // мышлении поле не попадает в тело запроса (некоторые эндпоинты на него ругаются)
-        if (this.reasoning) {
-          streamRequest.reasoning_effort = this.reasoningEffort;
-        }
-        if (stopTokens !== null) {
-          streamRequest.stop = stopTokens;
-        }
-        
-        console.log(`[LLMService.generateStream] reasoning: ${this.reasoning}, reasoning_effort: ${this.reasoning ? this.reasoningEffort : 'не отправляется'}, chat_template_kwargs: ${JSON.stringify({ enable_thinking: this.reasoning })}`);
+      // Эталон для защиты от дословных повторов: последний assistant-ход промпта.
+      // Именно его копирование мы ловим во время стрима.
+      const previousAssistantContent = this.getLastAssistantContent(messages);
 
-        // Вызываем API с retry логикой при временных ошибках
-        const stream = await this.withRetry(
-          async () => {
-            return await this.client.chatCompletionsCreate(streamRequest, { signal: abortSignal });
-          },
-          `generateStream chat${chatId}`
-        );
+
+        // ============================================================================
+        // Генерация с защитой от дословных повторов
+        // ============================================================================
+        // Если новый ответ начинается ровно как предыдущий ход ассистента, он
+        // бесполезен и лишь закрепляет цикл в истории. Такой поток обрывается, а
+        // одна повторная попытка идёт с другим сэмплированием (см.
+        // buildRepetitionRetryOverrides). maxAttempts = 1, если защита выключена.
+        const maxAttempts = this.repetitionGuard && this.repetitionAutoRetry ? 2 : 1;
+        let attempt = 0;
+
+        while (attempt < maxAttempts) {
+          attempt++;
+
+          // Запрос и его лог строятся из одного объекта, поэтому сохранённый лог
+          // воспроизводится curl'ом 1-в-1 (раньше лог расходился с реальным телом)
+          const samplingOverrides = attempt > 1 ? this.buildRepetitionRetryOverrides() : {};
+          const streamRequest = this.buildChatRequestBody(messages, finalMaxOutput, stopTokens, samplingOverrides);
+
+          const logFileName = attempt === 1 ? `${logBaseName}.log` : `${logBaseName}_retry${attempt - 1}.log`;
+          this.writeRequestLog(fsUtil, pathLibUtil.join(logsDir, logFileName), streamRequest, {
+            chatId,
+            userId,
+            now,
+            finalMaxOutput,
+            stopTokens,
+            messagesCount: messages.length,
+          });
+
+          console.log(`[LLMService.generateStream] >>> Attempt ${attempt}/${maxAttempts}`);
+          console.log(`[LLMService.generateStream]     SAMPLING: temperature=${streamRequest.temperature}, top_p=${streamRequest.top_p}, top_k=${streamRequest.top_k ?? 'не отправляется'}, min_p=${streamRequest.min_p ?? 'не отправляется'}`);
+          console.log(`[LLMService.generateStream]     THINKING: control=${this.thinkingControl}, chat_template_kwargs=${JSON.stringify(streamRequest.chat_template_kwargs ?? {})}, reasoning_effort=${streamRequest.reasoning_effort ?? 'не отправляется'}`);
+          console.log(`[LLMService.generateStream]     STOP: ${JSON.stringify(streamRequest.stop ?? null)}`);
+
+          // Вызываем API с retry логикой при временных ошибках
+          const stream = await this.withRetry(
+            async () => {
+              return await this.client.chatCompletionsCreate(streamRequest, { signal: abortSignal });
+            },
+            `generateStream chat${chatId}`
+          );
+
+          // Накопленный content этой попытки - по нему определяем повтор
+          let streamedContent = '';
+          let repetitionDetected = false;
+
 
         // Обрабатываем поток
         // Отслеживаем состояние генерации для определения "заблудших" токенов
@@ -1680,6 +2062,15 @@ export class LLMService {
             type: 'content_token',
             token: content
           };
+
+          // Защита от дословного повтора: как только накопленный текст совпал с
+          // началом предыдущего хода ассистента, генерация обрывается - дальше
+          // будет только хуже, а дубликат ушёл бы в историю и закрепил цикл
+          streamedContent += content;
+          if (this.repetitionGuard && !repetitionDetected && this.looksLikeRepetitionOf(streamedContent, previousAssistantContent)) {
+            repetitionDetected = true;
+            break;
+          }
         }
       }
 
@@ -1695,6 +2086,33 @@ export class LLMService {
        }
        channelBuf = '';
      }
+          // ============================================================================
+          // Итог попытки: дословный повтор или нормальное завершение
+          // ============================================================================
+          if (!repetitionDetected) {
+            break;
+          }
+
+          if (attempt < maxAttempts) {
+            console.log(`[LLMService.generateStream] Repetition of the previous assistant turn detected on attempt ${attempt}; retrying with different sampling`);
+            yield {
+              type: 'repetition_detected',
+              token: '',
+              meta: { attempt, previousChars: previousAssistantContent.length, detectedChars: streamedContent.length },
+            };
+            // Клиент по этому событию стирает уже показанный текст: попытка
+            // начинается с чистого листа
+            yield { type: 'stream_restart', token: '', meta: { attempt } };
+            continue;
+          }
+
+          console.log(`[LLMService.generateStream] Repetition still present after retry (attempt ${attempt}); generation stopped`);
+          yield {
+            type: 'repetition_warning',
+            token: '',
+            meta: { attempt, previousChars: previousAssistantContent.length, detectedChars: streamedContent.length },
+          };
+        }
 
      // Удаляем AbortController после завершения генерации
        this.activeAbortControllers.delete(chatId);
