@@ -174,6 +174,12 @@ export const settingsApi = {
   delete: (key: string) => api.delete(`/settings?key=${encodeURIComponent(key)}`),
 };
 
+// Quick Replies API («Быстрый ответ»)
+export const quickRepliesApi = {
+  getAll: () => api.get<{ quickReplies: string[] }>('/quick-replies'),
+  save: (replies: string[]) => api.put<{ quickReplies: string[] }>('/quick-replies', { replies }),
+};
+
 // LLM Connections API
 export const llmConnectionsApi = {
   getAll: () => api.get<LlmConnection[]>('/llm-connections'),

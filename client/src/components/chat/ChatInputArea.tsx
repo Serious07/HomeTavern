@@ -14,6 +14,8 @@ interface ChatInputAreaProps {
   initialValue?: string;
   onChange: (value: string) => void;
   onSend: () => void;
+  // Вызывается при отправке с пустым полем ввода — открывает модалку «Быстрый ответ»
+  onSendEmpty?: () => void;
   disabled: boolean;
   placeholder?: string;
   showMobileModal?: boolean;
@@ -30,6 +32,7 @@ const ChatInputAreaInternal: React.FC<ChatInputAreaProps> = ({
   initialValue = '',
   onChange,
   onSend,
+  onSendEmpty,
   disabled,
   placeholder = 'Введите сообщение...',
   showMobileModal,
@@ -116,13 +119,25 @@ const ChatInputAreaInternal: React.FC<ChatInputAreaProps> = ({
     autoResize(e.target);
   }, [onChange, autoResize]);
 
+  // Единая точка отправки: пустое поле — открывает «Быстрый ответ»,
+  // непустое — отправляет сообщение как обычно
+  const handleSubmit = useCallback(() => {
+    if (value.trim()) {
+      onSend();
+    } else if (onSendEmpty) {
+      onSendEmpty();
+    } else {
+      onSend();
+    }
+  }, [value, onSend, onSendEmpty]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       // Focus after send (handled by parent via autoFocus prop)
-      onSend();
+      handleSubmit();
     }
-  }, [onSend]);
+  }, [handleSubmit]);
 
   return (
     <div className="flex items-end gap-3 w-full">
@@ -155,10 +170,11 @@ const ChatInputAreaInternal: React.FC<ChatInputAreaProps> = ({
         enterKeyHint="send"
       />
       <button
-        onClick={onSend}
-        disabled={disabled || !value.trim()}
+        onClick={handleSubmit}
+        disabled={disabled}
         className="p-3 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg transition shrink-0 flex items-center justify-center"
-        aria-label="Отправить сообщение"
+        aria-label={value.trim() ? 'Отправить сообщение' : 'Быстрый ответ'}
+        title={value.trim() ? 'Отправить сообщение' : 'Быстрый ответ'}
       >
         <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

@@ -116,6 +116,21 @@ db.exec(`
   -- Index for fast queries on user_id and is_active
   CREATE INDEX IF NOT EXISTS idx_system_prompts_user_active ON system_prompts(user_id, is_active);
 
+  -- Quick Replies table - «Быстрый ответ»: варианты сообщений, которые показываются
+  -- в модальном окне при отправке пустого поля ввода (максимум 5 на пользователя)
+  CREATE TABLE IF NOT EXISTS quick_replies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  -- Индекс для быстрого поиска быстрых ответов пользователя
+  CREATE INDEX IF NOT EXISTS idx_quick_replies_user_id ON quick_replies(user_id);
+
   -- Chat Blocks table - stores compressed history blocks (chapters)
   CREATE TABLE IF NOT EXISTS chat_blocks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

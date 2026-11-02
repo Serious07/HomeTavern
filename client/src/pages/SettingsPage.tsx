@@ -1,10 +1,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../contexts/AuthContext';
-import { api } from '../services/api';
+import { api, quickRepliesApi } from '../services/api';
 import AppHeader from '../components/common/AppHeader';
 import { getVisibleMessageLimit, setVisibleMessageLimit } from '../components/chat/MessageList';
 import { CompressionMethod } from '../types/compression';
+import { DEFAULT_QUICK_REPLIES, MAX_QUICK_REPLIES } from '../constants/quickReplies';
 
 // 3.1: Supported languages for translation
 export const SUPPORTED_LANGUAGES = [
@@ -88,6 +89,12 @@ const SettingsPage: React.FC = () => {
   const [compressionLlmReasoning, setCompressionLlmReasoning] = useState<boolean>(false);
   const [compressionLlmReasoningLoading, setCompressionLlmReasoningLoading] = useState<boolean>(false);
 
+  // Быстрые ответы («Быстрый ответ»)
+  const [quickReplies, setQuickReplies] = useState<string[]>(DEFAULT_QUICK_REPLIES);
+  const [quickRepliesLoading, setQuickRepliesLoading] = useState<boolean>(false);
+  const [quickRepliesSaved, setQuickRepliesSaved] = useState<boolean>(false);
+  const [quickRepliesError, setQuickRepliesError] = useState<string | null>(null);
+
   useEffect(() => {
     setLimitInput(String(visibleMessageLimit));
   }, [visibleMessageLimit]);
@@ -134,6 +141,14 @@ const SettingsPage: React.FC = () => {
         }
         if (data?.expand_thinking_after_generation !== undefined) {
           setExpandThinkingAfterGeneration(data.expand_thinking_after_generation === 'true');
+        }
+        try {
+          const qrData = await quickRepliesApi.getAll();
+          if (Array.isArray(qrData.data.quickReplies) && qrData.data.quickReplies.length > 0) {
+            setQuickReplies(qrData.data.quickReplies);
+          }
+        } catch (qrError) {
+          console.warn('Failed to load quick replies:', qrError);
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
@@ -238,6 +253,49 @@ const SettingsPage: React.FC = () => {
       setCompressionLlmReasoning(!newValue);
     } finally {
       setCompressionLlmReasoningLoading(false);
+    }
+  };
+
+  // Быстрые ответы: редактирование списка (1..MAX_QUICK_REPLIES)
+  const handleQuickReplyChange = (index: number, value: string) => {
+    setQuickReplies(prev => prev.map((reply, i) => (i === index ? value : reply)));
+    setQuickRepliesSaved(false);
+    setQuickRepliesError(null);
+  };
+
+  const handleQuickReplyAdd = () => {
+    if (quickReplies.length >= MAX_QUICK_REPLIES) return;
+    setQuickReplies(prev => [...prev, '']);
+    setQuickRepliesSaved(false);
+    setQuickRepliesError(null);
+  };
+
+  const handleQuickReplyDelete = (index: number) => {
+    if (quickReplies.length <= 1) return;
+    setQuickReplies(prev => prev.filter((_, i) => i !== index));
+    setQuickRepliesSaved(false);
+    setQuickRepliesError(null);
+  };
+
+  const handleSaveQuickReplies = async () => {
+    const cleaned = quickReplies.map(reply => reply.trim());
+    if (cleaned.some(reply => !reply)) {
+      setQuickRepliesError('Быстрый ответ не может быть пустым');
+      return;
+    }
+    setQuickRepliesError(null);
+    setQuickRepliesLoading(true);
+    setQuickRepliesSaved(false);
+    try {
+      const { data } = await quickRepliesApi.save(cleaned);
+      setQuickReplies(data.quickReplies);
+      setQuickRepliesSaved(true);
+      setTimeout(() => setQuickRepliesSaved(false), 3000);
+    } catch (error) {
+      console.error('Failed to save quick replies:', error);
+      setQuickRepliesError('Не удалось сохранить быстрые ответы');
+    } finally {
+      setQuickRepliesLoading(false);
     }
   };
   
@@ -434,6 +492,65 @@ const SettingsPage: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* Quick replies section («Быстрый ответ») */}
+          <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6">
+            <h2 className="text-xl font-bold text-white mb-2">Быстрые ответы</h2>
+            <p className="text-sm text-gray-400 mb-4">
+              Варианты сообщений, которые показываются в окне «Быстрый ответ», когда нажимаешь
+              «Отправить» с пустым полем ввода. От 1 до {MAX_QUICK_REPLIES} вариантов.
+            </p>
+
+            <div className="space-y-3">
+              {quickReplies.map((reply, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={reply}
+                    maxLength={500}
+                    onChange={(e) => handleQuickReplyChange(index, e.target.value)}
+                    className="flex-1 min-w-0 px-3 py-2.5 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-500"
+                    placeholder="Текст быстрого ответа"
+                    aria-label={`Быстрый ответ ${index + 1}`}
+                  />
+                  <button
+                    onClick={() => handleQuickReplyDelete(index)}
+                    disabled={quickReplies.length <= 1}
+                    className="p-2.5 bg-gray-700 hover:bg-red-600/80 text-gray-300 hover:text-white disabled:opacity-40 disabled:hover:bg-gray-700 rounded-lg transition shrink-0"
+                    title="Удалить быстрый ответ"
+                    aria-label={`Удалить быстрый ответ ${index + 1}`}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 mt-4">
+              <button
+                onClick={handleQuickReplyAdd}
+                disabled={quickReplies.length >= MAX_QUICK_REPLIES}
+                className="py-2.5 px-4 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-white font-medium transition"
+              >
+                Добавить
+              </button>
+              <button
+                onClick={handleSaveQuickReplies}
+                disabled={quickRepliesLoading}
+                className="py-2.5 px-6 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded-lg font-semibold text-white transition"
+              >
+                Сохранить
+              </button>
+              <span className="text-xs text-gray-500">{quickReplies.length} из {MAX_QUICK_REPLIES}</span>
+              {quickRepliesSaved && <span className="text-sm text-green-400">Сохранено</span>}
+            </div>
+
+            {quickRepliesError && (
+              <p className="text-sm text-red-400 mt-2">{quickRepliesError}</p>
+            )}
           </div>
 
           {/* Notifications section */}

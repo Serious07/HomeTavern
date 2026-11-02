@@ -5,6 +5,8 @@ interface MobileMessageInputModalProps {
   value: string;
   onChange: (value: string) => void;
   onSend: () => void;
+  // Вызывается при отправке с пустым полем — открывает модалку «Быстрый ответ»
+  onEmptySend?: () => void;
   onClose: () => void;
   placeholder?: string;
 }
@@ -19,6 +21,7 @@ export const MobileMessageInputModal: React.FC<MobileMessageInputModalProps> = (
   value,
   onChange,
   onSend,
+  onEmptySend,
   onClose,
   placeholder = 'Введите сообщение...',
 }) => {
@@ -44,8 +47,11 @@ export const MobileMessageInputModal: React.FC<MobileMessageInputModalProps> = (
       onClose();
       // Отправляем сообщение
       onSend();
+    } else if (onEmptySend) {
+      // Пустое поле — родителю открывать модалку «Быстрый ответ» (и закрыть эту)
+      onEmptySend();
     }
-  }, [localValue, onChange, onClose, onSend]);
+  }, [localValue, onChange, onSend, onEmptySend, onClose]);
   
   const handleClose = useCallback(() => {
     // Сохраняем текущее значение перед закрытием
@@ -98,13 +104,13 @@ export const MobileMessageInputModal: React.FC<MobileMessageInputModalProps> = (
             </button>
             <button
               onClick={handleSend}
-              disabled={!localValue.trim()}
-              className="flex-1 px-4 py-3 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition flex items-center justify-center gap-2"
+              className="flex-1 px-4 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition flex items-center justify-center gap-2"
+              aria-label={localValue.trim() ? 'Отправить' : 'Быстрый ответ'}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
               </svg>
-              Отправить
+              {localValue.trim() ? 'Отправить' : 'Быстрый ответ'}
             </button>
           </div>
         </div>

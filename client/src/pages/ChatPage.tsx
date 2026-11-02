@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { chatsApi, charactersApi, settingsApi } from '../services/api';
+import { chatsApi, charactersApi, settingsApi, quickRepliesApi } from '../services/api';
 import { compressionApi } from '../services/api';
 import { STORAGE_KEYS } from '../constants/storage';
+import { DEFAULT_QUICK_REPLIES } from '../constants/quickReplies';
 import { Chat, Message, Character } from '../types';
 import { CompressionMethod } from '../types/compression';
 import { playNotificationSound } from '../utils/notificationSound';
@@ -12,6 +13,7 @@ import MessageList from '../components/chat/MessageList';
 import StreamingResponse from '../components/chat/StreamingResponse';
 import ChatInputArea from '../components/chat/ChatInputArea';
 import MobileMessageInputModal from '../components/chat/MobileMessageInputModal';
+import QuickReplyModal from '../components/chat/QuickReplyModal';
 import ContextStatsDisplay from '../components/chat/ContextStatsDisplay';
 import { useContextStats } from '../hooks/useContextStats';
 import { useCompression } from '../hooks/useCompression';
@@ -188,6 +190,10 @@ const ChatPage: React.FC = () => {
   
   // Значение текста из основного поля ввода при открытии модального окна
   const [mobileModalValue, setMobileModalValue] = useState('');
+
+  // «Быстрый ответ»: варианты сообщений для модалки при отправке пустого поля ввода
+  const [quickReplies, setQuickReplies] = useState<string[]>(DEFAULT_QUICK_REPLIES);
+  const [showQuickReplyModal, setShowQuickReplyModal] = useState(false);
   
   // Принудительный ре-рендер для обновления StreamingResponse при переключении showThinking
   const [, forceUpdate] = useState(0);
@@ -459,6 +465,14 @@ const ChatPage: React.FC = () => {
         if (data.expand_thinking_after_generation !== undefined) {
           setExpandThinkingDefault(data.expand_thinking_after_generation === 'true');
         }
+        try {
+          const qrResponse = await quickRepliesApi.getAll();
+          if (Array.isArray(qrResponse.data.quickReplies) && qrResponse.data.quickReplies.length > 0) {
+            setQuickReplies(qrResponse.data.quickReplies);
+          }
+        } catch (qrErr) {
+          console.warn('Failed to load quick replies:', qrErr);
+        }
       } catch (err) {
         console.error('Error loading settings:', err);
       }
@@ -527,6 +541,19 @@ const ChatPage: React.FC = () => {
   const handleInputChanged = useCallback((value: string) => {
     currentInputRef.current = value;
   }, []);
+
+  // «Быстрый ответ»: нажатие «Отправить» с пустым полем ввода открывает модалку с вариантами
+  const handleOpenQuickReplyModal = useCallback(() => {
+    if (isSending || isStreaming || !currentChat) return;
+    if (quickReplies.length === 0) return;
+    setShowQuickReplyModal(true);
+  }, [isSending, isStreaming, currentChat, quickReplies]);
+
+  const handleQuickReplySelect = useCallback((reply: string) => {
+    setShowQuickReplyModal(false);
+    currentInputRef.current = reply.trim();
+    handleSendMessage();
+  }, [handleSendMessage]);
 
   const handleRegenerate = async (messageId: number) => {
     if (!chatId || isStreaming) return;
@@ -1622,6 +1649,7 @@ const ChatPage: React.FC = () => {
             key={inputClearKey}
             onChange={handleInputChanged}
             onSend={handleSendMessage}
+            onSendEmpty={handleOpenQuickReplyModal}
             disabled={isSending || isStreaming || !currentChat}
             placeholder="Введите сообщение..."
             showMobileModal={true}
@@ -1683,8 +1711,21 @@ const ChatPage: React.FC = () => {
           currentInputRef.current = val;
         }}
         onSend={handleSendMessage}
+        onEmptySend={() => {
+          // Из мобильного окна: закрываем его и открываем «Быстрый ответ»
+          setShowMobileInputModal(false);
+          handleOpenQuickReplyModal();
+        }}
         onClose={() => setShowMobileInputModal(false)}
         placeholder="Введите сообщение..."
+      />
+
+      {/* Модальное окно «Быстрый ответ» */}
+      <QuickReplyModal
+        isOpen={showQuickReplyModal}
+        replies={quickReplies}
+        onSelect={handleQuickReplySelect}
+        onClose={() => setShowQuickReplyModal(false)}
       />
 
       {/* Delete confirmation modal */}

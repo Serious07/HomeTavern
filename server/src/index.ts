@@ -23,6 +23,7 @@ import compressionRoutes from './routes/compression';
 import translateRoutes from './routes/translate';
 import systemPromptsRoutes from './routes/system-prompts';
 import settingsRoutes from './routes/settings';
+import quickRepliesRoutes from './routes/quick-replies';
 import llmConnectionsRoutes from './routes/llm-connections';
 import { initLlmConnectionsTable, seedConnectionsFromEnv } from './utils/llm-connections-init';
 
@@ -110,6 +111,9 @@ app.use('/api/system-prompts', systemPromptsRoutes);
 
 // Settings routes
 app.use('/api/settings', settingsRoutes);
+
+// Quick Replies routes («Быстрый ответ»)
+app.use('/api/quick-replies', quickRepliesRoutes);
 
 // LLM Connections routes
 app.use('/api/llm-connections', llmConnectionsRoutes);
