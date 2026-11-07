@@ -118,7 +118,8 @@ const serviceCache = new ServiceCache();
 function buildLibrary(settings: UserTranslationSettings, userId?: number): TranslationLibrary {
   const config: any = {
     provider: settings.provider,
-    timeout: 30000,
+    // LLM с reasoning думает долго: лимит как в редактировании перевода (5 минут)
+    timeout: settings.provider === 'llm' ? 300000 : 30000,
     retries: 3,
   };
 
@@ -151,7 +152,7 @@ function buildLibrary(settings: UserTranslationSettings, userId?: number): Trans
       const client = new LLMClient({
         baseURL: connection.base_url,
         apiKey: connection.api_key_decrypted,
-        timeout: config.timeout || 60000,
+        timeout: 900000,
       });
       (library as any).setLlmClient(client);
     } else {
@@ -377,10 +378,14 @@ export async function* translateForUserStream(
   const { library, settings } = getTranslationService(userId);
 
   try {
-    if (settings.provider === 'llm' && (library as any).translateStream) {
+    const canStream =
+      typeof (library as any).supportsStreaming === 'function'
+        ? (library as any).supportsStreaming()
+        : settings.provider === 'llm' && typeof (library as any).translateStream === 'function';
+
+    if (canStream) {
       // Use LLM streaming translation
-      yield* (library as any).translateStream(processedText, {
-        targetLanguage: targetLang,
+      yield* (library as any).translateStream(processedText, targetLang, {
         sourceLanguage: sourceLang,
       });
     } else {

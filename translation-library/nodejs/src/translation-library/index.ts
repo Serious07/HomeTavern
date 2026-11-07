@@ -132,6 +132,43 @@ export class TranslationLibrary {
   }
 
   /**
+   * Поддерживает ли текущий переводчик потоковый перевод (LLM)
+   */
+  supportsStreaming(): boolean {
+    return typeof (this.translator as any).translateStream === 'function';
+  }
+
+  /**
+   * Потоковый перевод: делегирует переводчику, если тот умеет стримить.
+   * Для провайдеров без стриминга отдаёт результат одним куском.
+   */
+  async *translateStream(
+    text: string,
+    targetLanguage: string,
+    options?: Partial<TranslationOptions>
+  ): AsyncGenerator<{ token: string; done?: boolean; fullText?: string; isReasoning?: boolean }, void, undefined> {
+    const streamingTranslator = this.translator as any;
+    if (typeof streamingTranslator.translateStream !== 'function') {
+      const result = await this.translate(text, targetLanguage, options);
+      yield { token: result.text, done: true, fullText: result.text };
+      return;
+    }
+
+    const translationOptions: TranslationOptions = {
+      targetLanguage,
+      sourceLanguage: options?.sourceLanguage,
+      provider: options?.provider || this.translator.provider,
+      chunkSize: options?.chunkSize,
+      apiKey: options?.apiKey || this.translator.apiKey,
+      endpoint: options?.endpoint || this.translator.endpoint,
+      timeout: options?.timeout || this.translator.timeout,
+      retries: options?.retries || this.translator.retries,
+    };
+
+    yield* streamingTranslator.translateStream(text, translationOptions);
+  }
+
+  /**
    * Определяет язык текста
    * @param text Текст для определения языка
    * @returns Код языка

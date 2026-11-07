@@ -50,6 +50,8 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   const [isThinking, setIsThinking] = useState(false);
   // Прогресс инкрементального перевода: сколько изменённых абзацев всего и какой сейчас
   const [segmentProgress, setSegmentProgress] = useState<{ total: number; current: number } | null>(null);
+  // Текущий абзац переводится (пауза до первых токенов абзаца)
+  const [segmentPending, setSegmentPending] = useState<boolean>(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const onCompleteRef = useRef(onComplete);
   const onCancelRef = useRef(onCancel);
@@ -77,6 +79,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
     setHasReceivedToken(false);
     setIsThinking(false);
     setSegmentProgress(null);
+    setSegmentPending(false);
     rawBufferRef.current = '';
     insideThinkingRef.current = false;
   }, [translationKey]);
@@ -301,6 +304,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
                 if (data.reasoningToken) {
                   setHasReceivedToken(true);
                   setIsThinking(false);
+                  setSegmentPending(false);
                   clearTimeout(timeoutId);
                   clearTimeout(thinkingId);
                   setReasoningText((prev) => prev + data.reasoningToken);
@@ -311,9 +315,10 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
                 }
                 if (typeof data.segmentCurrent === 'number') {
                   setHasReceivedToken(true);
-                  setIsThinking(false);
                   clearTimeout(timeoutId);
                   clearTimeout(thinkingId);
+                  // Пауза до первых токенов абзаца показываем как печать абзаца
+                  setSegmentPending(true);
                   setSegmentProgress((prev) => ({
                     total: Math.max(prev?.total ?? 0, data.segmentCurrent),
                     current: data.segmentCurrent,
@@ -322,6 +327,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
                 if (data.token) {
                   setHasReceivedToken(true);
                   setIsThinking(false);
+                  setSegmentPending(false);
                   clearTimeout(timeoutId);
                   clearTimeout(thinkingId);
                   // Process token through thinking filter
@@ -439,8 +445,10 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
           <p className="text-xs text-blue-400 mb-1 flex items-center justify-between gap-2">
             <span>Перевод:</span>
             {segmentProgress && segmentProgress.total > 0 && status === 'translating' && (
-              <span className="text-blue-300">
-                изменённых абзацев: {Math.min(segmentProgress.current, segmentProgress.total)}/{segmentProgress.total}
+              <span className={`text-blue-300 ${segmentPending ? 'animate-pulse' : ''}`}>
+                {segmentPending
+                  ? `печатаем абзац ${Math.min(segmentProgress.current, segmentProgress.total)}/${segmentProgress.total}…`
+                  : `изменённых абзацев: ${Math.min(segmentProgress.current, segmentProgress.total)}/${segmentProgress.total}`}
               </span>
             )}
           </p>
