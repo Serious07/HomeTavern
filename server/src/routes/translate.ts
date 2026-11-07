@@ -90,6 +90,7 @@ router.get('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       autoTranslate: settings.autoTranslate,
       llmSystemPrompt: settings.llmSystemPrompt,
       llmReasoning: settings.llmReasoning,
+      paragraphTranslation: settings.paragraphTranslation,
     });
   } catch (error) {
     console.error('[TranslateRoute] Error getting settings:', error);
@@ -100,12 +101,12 @@ router.get('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
 /**
  * PUT /api/translate/settings
  * Обновить настройки перевода пользователя
- * Body: { provider?, displayLang?, enabled?, libreEndpoint?, autoTranslate?, llmSystemPrompt? }
+ * Body: { provider?, displayLang?, enabled?, libreEndpoint?, autoTranslate?, llmSystemPrompt?, llmReasoning?, paragraphTranslation? }
  */
 router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { provider, displayLang, enabled, libreEndpoint, autoTranslate, llmSystemPrompt, llmReasoning } = req.body;
+    const { provider, displayLang, enabled, libreEndpoint, autoTranslate, llmSystemPrompt, llmReasoning, paragraphTranslation } = req.body;
 
     const validProviders = ['google', 'yandex', 'libre', 'llm'];
 
@@ -153,6 +154,10 @@ router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       saveSetting('translation_llm_reasoning', String(llmReasoning));
     }
 
+    if (paragraphTranslation !== undefined) {
+      saveSetting('translation_paragraph', String(paragraphTranslation));
+    }
+
     // Invalidate cache so next translation uses new settings
     invalidateServiceCache(userId);
 
@@ -166,6 +171,7 @@ router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       autoTranslate: settings.autoTranslate,
       llmSystemPrompt: settings.llmSystemPrompt,
       llmReasoning: settings.llmReasoning,
+      paragraphTranslation: settings.paragraphTranslation,
     });
   } catch (error) {
     console.error('[TranslateRoute] Error updating settings:', error);

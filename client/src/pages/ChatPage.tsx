@@ -118,12 +118,16 @@ const ChatPage: React.FC = () => {
     sourceLang: string;
     targetLang: string;
     messageId: number;
+    endpoint?: string;
+    extraBody?: Record<string, unknown>;
   } | null>(null);
   const [llmResponseTranslation, setLlmResponseTranslation] = useState<{
     text: string;
     sourceLang: string;
     targetLang: string;
     messageId: number;
+    endpoint?: string;
+    extraBody?: Record<string, unknown>;
   } | null>(null);
   // Ref для хранения ожидающего перевода ответа LLM (пока открыто окно перевода сообщения)
   const pendingLlmResponseTranslationRef = useRef<{
@@ -170,6 +174,8 @@ const ChatPage: React.FC = () => {
   const editTranslationCallbackRef = useRef<{
     messageId: number;
     targetField: 'content' | 'translated_content';
+    editedField: 'content' | 'translated_content';
+    editedText: string;
     onComplete: (translatedText: string) => Promise<void>;
   } | null>(null);
   
@@ -724,26 +730,27 @@ const ChatPage: React.FC = () => {
           }
         }
 
-        // Сохраняем отредактированное поле сразу
-        await chatsApi.updateMessage(parseInt(chatId), messageId, {
-          [editedField]: newContent,
-        });
+        // Инкрементальный серверный перевод: обе стороны сохраняет сервер
+        // (переиспользует абзацы, переводит только изменённые), поэтому
+        // редактированное поле обновляем только оптимистично в локальном состоянии
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === messageId ? { ...m, [editedField]: newContent } : m
+          )
+        );
 
         translatingMessagesRef.current.add(messageId);
 
         // Создаем inline-обработчик который сохраняет результат в ПРАВИЛЬНОЕ поле
         const handleEditTranslationComplete = async (translatedText: string) => {
           try {
-            await chatsApi.updateMessage(parseInt(chatId), messageId, {
-              [targetField]: translatedText,
-            });
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === messageId ? { ...m, [targetField]: translatedText } : m
               )
             );
           } catch (err: any) {
-            console.error('Error saving edit translation:', err);
+            console.error('Error applying edit translation:', err);
           } finally {
             translatedMessagesRef.current.add(messageId);
             translatingMessagesRef.current.delete(messageId);
@@ -761,8 +768,12 @@ const ChatPage: React.FC = () => {
         editTranslationCallbackRef.current = {
           messageId,
           targetField,
+          editedField,
+          editedText: newContent,
           onComplete: handleEditTranslationComplete,
         };
+
+        const incrementalEndpoint = `/api/chats/${chatId}/messages/${messageId}/translate-incremental`;
 
         // Открываем модалку перевода
         // Используем setLlmResponseTranslation для sourceLang='en' (EN→DisplayLang)
@@ -773,6 +784,8 @@ const ChatPage: React.FC = () => {
             sourceLang,
             targetLang,
             messageId,
+            endpoint: incrementalEndpoint,
+            extraBody: { field: editedField },
           });
         } else {
           setUserMessageTranslation({
@@ -780,10 +793,11 @@ const ChatPage: React.FC = () => {
             sourceLang,
             targetLang,
             messageId,
+            endpoint: incrementalEndpoint,
+            extraBody: { field: editedField },
           });
         }
 
-        await fetchMessages(false);
         return;
       }
 
@@ -1005,6 +1019,19 @@ const ChatPage: React.FC = () => {
     }
     if (streamingTranslation) {
       translatingMessagesRef.current.delete(streamingTranslationMessageIdRef.current || 0);
+    }
+
+    // При отмене перевода после редактирования серверные обе стороны не менялись -
+    // сохраняем хотя бы отредактированный текст, чтобы правка не потерялась
+    const edit = editTranslationCallbackRef.current;
+    if (edit) {
+      editTranslationCallbackRef.current = null;
+      if (chatId) {
+        chatsApi
+          .updateMessage(parseInt(chatId), edit.messageId, { [edit.editedField]: edit.editedText })
+          .then(() => fetchMessages(false))
+          .catch((err) => console.error('Failed to save edited text after cancelling translation:', err));
+      }
     }
     
     // Сбрасываем все состояния
@@ -1818,6 +1845,8 @@ const ChatPage: React.FC = () => {
           sourceLang={userMessageTranslation.sourceLang}
           targetLang={userMessageTranslation.targetLang}
           reasoningEnabled={translationLlmReasoning}
+          endpoint={userMessageTranslation.endpoint}
+          extraBody={userMessageTranslation.extraBody}
           onComplete={handleUserMessageTranslationComplete}
           onCancel={handleLlmTranslationCancel}
         />
@@ -1828,6 +1857,8 @@ const ChatPage: React.FC = () => {
           sourceLang={llmResponseTranslation.sourceLang}
           targetLang={llmResponseTranslation.targetLang}
           reasoningEnabled={translationLlmReasoning}
+          endpoint={llmResponseTranslation.endpoint}
+          extraBody={llmResponseTranslation.extraBody}
           onComplete={handleLlmResponseTranslationComplete}
           onCancel={handleLlmTranslationCancel}
         />

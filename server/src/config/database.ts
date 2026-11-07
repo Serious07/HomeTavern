@@ -54,6 +54,7 @@ db.exec(`
     role TEXT NOT NULL,
     content TEXT NOT NULL,
     translated_content TEXT,
+    translation_segments TEXT,
     reasoning_content TEXT,
     message_id TEXT,
     hidden INTEGER DEFAULT 0,
@@ -244,12 +245,35 @@ try {
   }
 }
 
+// Миграция: Добавление колонки translation_segments в таблицу messages.
+// Additive-only: старые строки остаются NULL и работают через полный перевод
+// с автоматическим выводом пар при следующем обновлении перевода.
+try {
+  const messagesTableInfo = db.prepare("PRAGMA table_info(messages)").all() as any[];
+  const messagesColumnNames = messagesTableInfo.map((col: any) => col.name);
+
+  if (!messagesColumnNames.includes('translation_segments')) {
+    db.exec(`
+      ALTER TABLE messages ADD COLUMN translation_segments TEXT;
+    `);
+    console.log('[Database] Added column: translation_segments');
+  } else {
+    console.log('[Database] Column translation_segments already exists');
+  }
+} catch (error) {
+  const errorMessage = (error as Error).message;
+  if (errorMessage.includes('duplicate column')) {
+    console.log('[Database] Column translation_segments already exists');
+  } else {
+    console.error('[Database] translation_segments migration error:', error);
+  }
+}
+
 // Миграция: Добавление колонки short_description в таблицу characters
 try {
   db.exec(`
     ALTER TABLE characters ADD COLUMN short_description TEXT;
   `);
-  
   console.log('[Database] Added column: short_description');
 } catch (error) {
   const errorMessage = (error as Error).message;

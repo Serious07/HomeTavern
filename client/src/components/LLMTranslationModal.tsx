@@ -21,6 +21,9 @@ interface LLMTranslationModalProps {
   };
   // Разрешить отображение reasoning (мыслей модели). По умолчанию true для обратной совместимости.
   reasoningEnabled?: boolean;
+  // Кастомный SSE-эндпоинт (инкрементальный перевод при редактировании) и доп. тело запроса
+  endpoint?: string;
+  extraBody?: Record<string, unknown>;
 }
 
 const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
@@ -29,8 +32,12 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   targetLang,
   onComplete,
   onCancel,
+  // Внешний стриминг (от SSE events)
   externalStream,
+  // Разрешить отображение reasoning (мыслей модели). По умолчанию true для обратной совместимости.
   reasoningEnabled = true,
+  endpoint,
+  extraBody,
 }) => {
   const [displayText, setDisplayText] = useState<string>('');
   const [status, setStatus] = useState<'translating' | 'error' | 'done'>('translating');
@@ -41,6 +48,8 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
   const [isReasoningCollapsed, setIsReasoningCollapsed] = useState(false);
   // Фаза "размышления" — показывается пока не пришли первые токены
   const [isThinking, setIsThinking] = useState(false);
+  // Прогресс инкрементального перевода: сколько изменённых абзацев всего и какой сейчас
+  const [segmentProgress, setSegmentProgress] = useState<{ total: number; current: number } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const onCompleteRef = useRef(onComplete);
   const onCancelRef = useRef(onCancel);
@@ -67,6 +76,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
     setErrorMessage('');
     setHasReceivedToken(false);
     setIsThinking(false);
+    setSegmentProgress(null);
     rawBufferRef.current = '';
     insideThinkingRef.current = false;
   }, [translationKey]);
@@ -249,13 +259,13 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
       }
     }, 3000);
 
-    fetch(`${apiBase}/api/translate/stream`, {
+    fetch(`${apiBase}${endpoint || '/api/translate/stream'}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${localStorage.getItem(STORAGE_KEYS.TOKEN)}`,
       },
-      body: JSON.stringify({ text, sourceLang, targetLang }),
+      body: JSON.stringify({ text, sourceLang, targetLang, ...(extraBody || {}) }),
       signal: controller.signal,
     })
       .then((response) => {
@@ -295,6 +305,20 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
                   clearTimeout(thinkingId);
                   setReasoningText((prev) => prev + data.reasoningToken);
                 }
+                // Прогресс инкрементального перевода изменённых абзацев
+                if (typeof data.segmentTotal === 'number') {
+                  setSegmentProgress({ total: data.segmentTotal, current: 0 });
+                }
+                if (typeof data.segmentCurrent === 'number') {
+                  setHasReceivedToken(true);
+                  setIsThinking(false);
+                  clearTimeout(timeoutId);
+                  clearTimeout(thinkingId);
+                  setSegmentProgress((prev) => ({
+                    total: Math.max(prev?.total ?? 0, data.segmentCurrent),
+                    current: data.segmentCurrent,
+                  }));
+                }
                 if (data.token) {
                   setHasReceivedToken(true);
                   setIsThinking(false);
@@ -328,7 +352,7 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
         isRegisteredRef.current = false;
       }
     };
-  }, [text, sourceLang, targetLang, translationKey, isExternalMode, processToken, flushBuffer]);
+  }, [text, sourceLang, targetLang, translationKey, isExternalMode, processToken, flushBuffer, endpoint]);
 
   // Автоматическое закрытие после завершения перевода
   useEffect(() => {
@@ -412,7 +436,14 @@ const LLMTranslationModal: React.FC<LLMTranslationModalProps> = ({
 
         {/* Translation output */}
         <div ref={translationContainerRef} className="mb-4 p-3 bg-gray-900/50 rounded-lg border border-blue-800/50 min-h-[100px] max-h-[300px] overflow-y-auto">
-          <p className="text-xs text-blue-400 mb-1">Перевод:</p>
+          <p className="text-xs text-blue-400 mb-1 flex items-center justify-between gap-2">
+            <span>Перевод:</span>
+            {segmentProgress && segmentProgress.total > 0 && status === 'translating' && (
+              <span className="text-blue-300">
+                изменённых абзацев: {Math.min(segmentProgress.current, segmentProgress.total)}/{segmentProgress.total}
+              </span>
+            )}
+          </p>
           {status === 'translating' && (
             <p className="text-sm text-white whitespace-pre-wrap">
               {displayText}

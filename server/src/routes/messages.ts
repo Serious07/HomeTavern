@@ -3,11 +3,15 @@ import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { messageService } from '../services/message.service';
 import { chatService } from '../services/chat.service';
 import {
-  translateForUser,
   detectLanguage,
   getTranslationService,
-  translationService,
 } from '../services/translation.service';
+import {
+  translateEditIncremental,
+  translateEditIncrementalStream,
+  IncrementalOutcome,
+} from '../services/incremental-translation.service';
+import { EditedField } from '../utils/text-segments';
 import { messageRepository, UpdateMessageParams } from '../repositories/message.repository';
 import { chatRepository } from '../repositories/chat.repository';
 import db from '../config/database';
@@ -228,10 +232,10 @@ router.post('/chats/:chatId/messages/:id/translate', async (req: AuthenticatedRe
 });
 
 /**
-* PUT /api/chats/:chatId/messages/:id/translate-bidirectional
-* Двунаправленный перевод при редактировании сообщения
-* Body: { content?: string, translated_content?: string }
-*/
+ * PUT /api/chats/:chatId/messages/:id/translate-bidirectional
+ * Двунаправленный перевод при редактировании сообщения
+ * Body: { content?: string, translated_content?: string }
+ */
 router.put('/chats/:chatId/messages/:id/translate-bidirectional', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
@@ -259,90 +263,65 @@ router.put('/chats/:chatId/messages/:id/translate-bidirectional', async (req: Au
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    let updatedMessage = { ...message };
-
     // 2.5: Двунаправленный перевод (per-user с displayLang)
     const { settings: userSettings } = getTranslationService(userId);
     const displayLang = userSettings.displayLang;
 
-    if (userSettings.enabled) {
-    // Определяем роль сообщения для логики перевода
-    const isUserMessage = message.role === 'user';
+    const updates: UpdateMessageParams = {};
 
-    // User сообщения: displayLang = content (оригинал), EN = translated_content (перевод)
-    // Assistant сообщения: EN = content (оригинал), displayLang = translated_content (перевод)
-    if (isUserMessage) {
-      // Пользовательское сообщение
+    if (userSettings.enabled) {
+      const isUserMessage = message.role === 'user';
+
+      // Определяем, какая сторона редактируется, и направление перевода
+      let editedField: EditedField | undefined;
+      let newText: string | undefined;
+      let srcLang: string = 'en';
+      let tgtLang: string = 'en';
+
       if (content !== undefined && content !== message.content) {
-        // Обновлен оригинал (displayLang) - переводим на EN
-        try {
-          const srcLang = await detectLanguage(content);
-          const translation = await translateForUser(userId, content, srcLang, 'en');
-          updatedMessage.content = content;
-          updatedMessage.translated_content = translation;
-          console.log(`[Bidirectional Translation] User message ${srcLang}->EN:`, translation.substring(0, 50));
-        } catch (translateErr) {
-          console.error('[Bidirectional Translation] Translation to English failed:', translateErr);
-          updatedMessage.translated_content = message.translated_content;
+        editedField = 'content';
+        newText = content;
+        if (isUserMessage) {
+          // User: content = DisplayLang -> translated_content = EN
+          srcLang = await detectLanguage(content);
+          tgtLang = 'en';
+        } else {
+          // Assistant: content = EN -> translated_content = DisplayLang
+          srcLang = 'en';
+          tgtLang = displayLang;
+        }
+      } else if (translated_content !== undefined && translated_content !== message.translated_content && translated_content) {
+        editedField = 'translated_content';
+        newText = translated_content;
+        if (isUserMessage) {
+          // User: translated_content = EN -> content = DisplayLang
+          srcLang = 'en';
+          tgtLang = displayLang;
+        } else {
+          // Assistant: translated_content = DisplayLang -> content = EN
+          srcLang = displayLang;
+          tgtLang = 'en';
         }
       }
-      if (translated_content !== undefined && translated_content !== message.translated_content && translated_content) {
-        // Обновлен перевод (EN) - переводим обратно на displayLang
-        try {
-          const translation = await translateForUser(userId, translated_content, 'en', displayLang);
-          updatedMessage.content = translation;
-          updatedMessage.translated_content = translated_content;
-          console.log(`[Bidirectional Translation] User message EN->${displayLang}:`, translation.substring(0, 50));
-        } catch (translateErr) {
-          console.error('[Bidirectional Translation] Translation to displayLang failed:', translateErr);
-          updatedMessage.content = message.content;
-        }
+
+      if (editedField && newText !== undefined) {
+        const outcome = await translateEditIncremental(userId, message, editedField, newText, srcLang, tgtLang);
+        console.log(`[Bidirectional Translation] ${outcome.mode} edit of message ${messageId} (${srcLang}->${tgtLang}), field=${editedField}`);
+        updates.content = outcome.content;
+        updates.translated_content = outcome.translated_content;
+        updates.translation_segments = outcome.translation_segments;
       }
-    } else {
-      // Assistant сообщение
-      if (content !== undefined && content !== message.content) {
-        // Обновлен оригинал (EN) - переводим на displayLang
-        try {
-          const translation = await translateForUser(userId, content, 'en', displayLang);
-          updatedMessage.content = content;
-          updatedMessage.translated_content = translation;
-          console.log(`[Bidirectional Translation] Assistant message EN->${displayLang}:`, translation.substring(0, 50));
-        } catch (translateErr) {
-          console.error('[Bidirectional Translation] Translation to displayLang failed:', translateErr);
-          updatedMessage.translated_content = message.translated_content;
-        }
-      }
-      if (translated_content !== undefined && translated_content !== message.translated_content && translated_content) {
-        // Обновлен перевод (displayLang) - переводим обратно на EN
-        try {
-          const translation = await translateForUser(userId, translated_content, displayLang, 'en');
-          updatedMessage.content = translation;
-          updatedMessage.translated_content = translated_content;
-          console.log(`[Bidirectional Translation] Assistant message ${displayLang}->EN:`, translation.substring(0, 50));
-        } catch (translateErr) {
-          console.error('[Bidirectional Translation] Translation to English failed:', translateErr);
-          updatedMessage.content = message.content;
-        }
-      }
-    }
     } else {
       // Перевод отключен — сохраняем переданные значения как есть, без перевода
       if (content !== undefined && content !== message.content) {
-        updatedMessage.content = content;
+        updates.content = content;
       }
       if (translated_content !== undefined && translated_content !== message.translated_content) {
-        updatedMessage.translated_content = translated_content;
+        updates.translated_content = translated_content;
       }
     }
 
     // Сохраняем в БД - передаем только поля для обновления
-    const updates: UpdateMessageParams = {
-      content: updatedMessage.content,
-    };
-    // Только если translated_content не null, добавляем его в updates
-    if (updatedMessage.translated_content !== null) {
-      updates.translated_content = updatedMessage.translated_content;
-    }
     const savedMessage = messageService.updateMessage(messageId, userId, updates);
 
     res.status(200).json(savedMessage);
@@ -351,6 +330,123 @@ router.put('/chats/:chatId/messages/:id/translate-bidirectional', async (req: Au
     const error_ = error as Error & { statusCode?: number };
     const statusCode = error_.statusCode || 500;
     res.status(statusCode).json({ error: error_.message });
+  }
+});
+
+/**
+ * POST /api/chats/:chatId/messages/:id/translate-incremental
+ * Инкрементальный перевод при редактировании сообщения (LLM-провайдер, SSE).
+ * Переиспользованные абзацы выдаются мгновенно, переводятся только изменённые.
+ * Body: { field: 'content' | 'translated_content', text: string }
+ * Ответ: SSE { token } | { reasoningToken } | { done, fullText, message }
+ */
+router.post('/chats/:chatId/messages/:id/translate-incremental', async (req: AuthenticatedRequest, res: Response) => {
+  let keepAliveTimer: NodeJS.Timeout | undefined;
+  try {
+    const userId = req.user!.userId;
+    const chatId = parseInt(req.params.chatId, 10);
+    const messageId = parseInt(req.params.id, 10);
+    const { field, text } = req.body;
+
+    if (isNaN(chatId) || isNaN(messageId)) {
+      return res.status(400).json({ error: 'Invalid chat or message ID' });
+    }
+
+    if (field !== 'content' && field !== 'translated_content') {
+      return res.status(400).json({ error: 'field must be content or translated_content' });
+    }
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'text is required' });
+    }
+
+    const message = messageRepository.getMessageById(messageId);
+    if (!message || message.chat_id !== chatId) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    const chat = chatRepository.getChatById(chatId);
+    if (!chat || chat.user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const { settings: userSettings } = getTranslationService(userId);
+    if (!userSettings.enabled) {
+      return res.status(403).json({ error: 'Translation is disabled' });
+    }
+
+    const isUserMessage = message.role === 'user';
+    const displayLang = userSettings.displayLang;
+    let srcLang: string;
+    let tgtLang: string;
+
+    if (field === 'content') {
+      if (isUserMessage) {
+        srcLang = await detectLanguage(text);
+        tgtLang = 'en';
+      } else {
+        srcLang = 'en';
+        tgtLang = displayLang;
+      }
+    } else {
+      if (isUserMessage) {
+        srcLang = 'en';
+        tgtLang = displayLang;
+      } else {
+        srcLang = displayLang;
+        tgtLang = 'en';
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    let lastActivity = Date.now();
+    keepAliveTimer = setInterval(() => {
+      if (!res.writableEnded && Date.now() - lastActivity > 5000) {
+        try { res.write(': keepalive\n\n'); } catch { /* ignore */ }
+      }
+    }, 1000);
+
+    const stream = translateEditIncrementalStream(userId, message, field, text, srcLang, tgtLang);
+
+    let outcome: IncrementalOutcome | undefined;
+    for (;;) {
+      const step = await stream.next();
+      if (step.done) {
+        outcome = step.value;
+        break;
+      }
+      if (res.writableEnded) break; // Клиент отключился - не сохраняем частичный перевод
+      lastActivity = Date.now();
+      res.write(`data: ${JSON.stringify(step.value)}\n\n`);
+    }
+
+    if (!outcome) {
+      console.log(`[IncrementalTranslation] Client disconnected during message ${messageId} edit, changes not saved`);
+      return;
+    }
+    const savedMessage = messageService.updateMessage(messageId, userId, {
+      content: outcome.content,
+      translated_content: outcome.translated_content,
+      translation_segments: outcome.translation_segments,
+    });
+
+    const fullText = field === 'content' ? outcome.translated_content : outcome.content;
+    res.write(`data: ${JSON.stringify({ done: true, fullText, message: savedMessage })}\n\n`);
+    res.end();
+  } catch (error) {
+    console.error('[IncrementalTranslation] Error:', error);
+    if (!res.headersSent) {
+      const error_ = error as Error & { statusCode?: number };
+      res.status(error_.statusCode || 500).json({ error: error_.message });
+    } else if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ error: 'Incremental translation failed' })}\n\n`);
+      res.end();
+    }
+  } finally {
+    if (keepAliveTimer) clearInterval(keepAliveTimer);
   }
 });
 

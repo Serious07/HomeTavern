@@ -19,6 +19,8 @@ export interface UserTranslationSettings {
   llmSystemPrompt?: string;
   /** Enable reasoning/thinking mode for LLM translation (llama.cpp) */
   llmReasoning: boolean;
+  /** Переводить при редактировании только изменённые абзацы (экономия токенов) */
+  paragraphTranslation: boolean;
 }
 
 export interface TranslationServiceInstance {
@@ -49,6 +51,7 @@ const DEFAULT_SETTINGS: UserTranslationSettings = {
   libreEndpoint: '',
   autoTranslate: true,
   llmReasoning: true, // Reasoning enabled by default
+  paragraphTranslation: true, // Поабзацный перевод при редактировании - по умолчанию вкл
 };
 
 // ─── 1.1: getUserTranslationSettings ────────────────────────────────────────
@@ -71,6 +74,7 @@ function getUserTranslationSettings(userId: number): UserTranslationSettings {
     autoTranslate: map['translation_auto_translate'] !== 'false', // default true
     llmSystemPrompt: map['translation_llm_system_prompt'] || undefined,
     llmReasoning: map['translation_llm_reasoning'] !== 'false', // default true
+    paragraphTranslation: map['translation_paragraph'] !== 'false', // default true
   };
 }
 

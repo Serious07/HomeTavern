@@ -1,4 +1,5 @@
 import db from '../config/database';
+import { tryBuildPairsFromTexts, serializeSegments } from '../utils/text-segments';
 
 export interface Message {
   id: number;
@@ -6,6 +7,7 @@ export interface Message {
   role: string;
   content: string;
   translated_content: string | null;
+  translation_segments?: string | null;
   message_id: string | null;
   hidden: number;
   created_at: string;
@@ -29,6 +31,7 @@ export interface UpdateMessageParams {
   role?: string;
   content?: string;
   translated_content?: string;
+  translation_segments?: string | null;
   message_id?: string;
   hidden?: number;
   generated_at?: string;
@@ -79,24 +82,30 @@ export class MessageRepository {
     `);
     const createdAtUTC = createdAt || new Date().toISOString();
     const result = stmt.run(chatId, role, content, translatedContent || null, messageId || null, createdAtUTC);
-    return this.getMessageById(result.lastInsertRowid as number)!;
+    return this.syncSegmentsIfNeeded(result.lastInsertRowid as number)!;
   }
 
   /**
  * Обновление сообщения
  */
   updateMessage(id: number, updates: UpdateMessageParams): Message | undefined {
-    const { role, content, translated_content, message_id, hidden, generated_at, tokens_per_sec, total_tokens, reasoning_tokens, reasoning_content } = updates;
+    const { role, content, translated_content, translation_segments, message_id, hidden, generated_at, tokens_per_sec, total_tokens, reasoning_tokens, reasoning_content } = updates;
 
     // reasoning_content: undefined = не менять, null = явно очистить (NULL), string = установить
     // (COALESCE(?, col) не умеет записывать NULL, поэтому отдельный CASE-флаг)
     const clearReasoning = reasoning_content === null;
+
+    // Изменение content/translated_content без явного translation_segments делает
+    // старые пары невалидными - сбрасываем их, связка перестроится автоматически
+    const invalidateSegments =
+      (content !== undefined || translated_content !== undefined) && translation_segments === undefined;
 
     const stmt = db.prepare(`
       UPDATE messages
       SET role = COALESCE(?, role),
           content = COALESCE(?, content),
           translated_content = COALESCE(?, translated_content),
+          translation_segments = CASE WHEN ? = 1 THEN NULL ELSE COALESCE(?, translation_segments) END,
           message_id = COALESCE(?, message_id),
           hidden = COALESCE(?, hidden),
           generated_at = COALESCE(?, generated_at),
@@ -110,6 +119,8 @@ export class MessageRepository {
       role || null,
       content || null,
       translated_content !== undefined ? translated_content : null,
+      invalidateSegments ? 1 : 0,
+      translation_segments !== undefined ? translation_segments : null,
       message_id || null,
       hidden !== undefined ? hidden : null,
       generated_at !== undefined ? generated_at : null,
@@ -121,6 +132,25 @@ export class MessageRepository {
       id
     );
 
+    return this.syncSegmentsIfNeeded(id);
+  }
+
+  /**
+   * Если у сообщения есть обе стороны перевода, но связка абзацев отсутствует -
+   * пытаемся вывести её из текущих текстов (без обращений к переводчику).
+   * При несовпадении структуры строк связка остаётся NULL (полный перевод как fallback).
+   */
+  private syncSegmentsIfNeeded(id: number): Message | undefined {
+    const message = this.getMessageById(id);
+    if (!message || message.translation_segments || !message.translated_content) {
+      return message;
+    }
+    const pairs = tryBuildPairsFromTexts(message.content, message.translated_content);
+    if (!pairs) {
+      return message;
+    }
+    const stmt = db.prepare('UPDATE messages SET translation_segments = ? WHERE id = ?');
+    stmt.run(serializeSegments(pairs), id);
     return this.getMessageById(id);
   }
 
