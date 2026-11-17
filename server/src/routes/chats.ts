@@ -8,6 +8,8 @@ import {
   detectLanguage,
   getTranslationService,
   translationService,
+  resolveTranslationLlmConnection,
+  getSelectedLlmConnectionId,
 } from '../services/translation.service';
 import { messageRepository } from '../repositories/message.repository';
 import { chatRepository } from '../repositories/chat.repository';
@@ -157,15 +159,22 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
             "SELECT value FROM settings WHERE user_id = ? AND key = 'translation_llm_reasoning'"
           ).get(userId) as { value?: string | null } | undefined;
           const llmReasoning = reasoningRow?.value !== 'false';
+          // Разрешаем подключение для перевода (выбранное в настройках или активное)
+          // ДО создания переводчика: LlmTranslator фиксирует model/reasoningEffort в
+          // конструкторе, иначе запрос уходит с дефолтной моделью вместо выбранной.
+          const connection = resolveTranslationLlmConnection(userId, getSelectedLlmConnectionId(userId));
           const llmTranslator = new LlmTranslator({
             systemPrompt: userSettings.llmSystemPrompt,
             timeout: 300000,
             reasoning: llmReasoning, // Передаем настройку reasoning
+            ...(connection ? {
+              model: connection.model,
+              reasoningEffort: connection.reasoning_effort || 'medium',
+            } : {}),
           });
           
-          // Инжектируем LLMClient из llmService
+          // Инжектируем LLMClient выбранного (или активного) подключения
           try {
-            const connection = llmService.getActiveConnection(userId);
             if (connection) {
               const { LLMClient } = require('llm-client');
               const injectedClient = new LLMClient({
@@ -392,15 +401,22 @@ router.get('/:chatId/stream', async (req: AuthenticatedRequest, res: Response) =
             "SELECT value FROM settings WHERE user_id = ? AND key = 'translation_llm_reasoning'"
           ).get(userId) as { value?: string | null } | undefined;
           const llmReasoning = reasoningRow?.value !== 'false';
+          // Разрешаем подключение для перевода (выбранное в настройках или активное)
+          // ДО создания переводчика: LlmTranslator фиксирует model/reasoningEffort в
+          // конструкторе, иначе запрос уходит с дефолтной моделью вместо выбранной.
+          const connection = resolveTranslationLlmConnection(userId, getSelectedLlmConnectionId(userId));
           const llmTranslator = new LlmTranslator({
             systemPrompt: userSettings.llmSystemPrompt,
             timeout: 30000,
             reasoning: llmReasoning, // Передаем настройку reasoning
+            ...(connection ? {
+              model: connection.model,
+              reasoningEffort: connection.reasoning_effort || 'medium',
+            } : {}),
           });
           
-          // Инжектируем LLMClient из llmService
+          // Инжектируем LLMClient выбранного (или активного) подключения
           try {
-            const connection = llmService.getActiveConnection(userId);
             if (connection) {
               const { LLMClient } = require('llm-client');
               const injectedClient = new LLMClient({
