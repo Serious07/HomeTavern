@@ -5,9 +5,11 @@ import {
   detectLanguage,
   getTranslationService,
   invalidateServiceCache,
+  resolveTranslationLlmConnection,
+  getSelectedLlmConnectionId,
 } from '../services/translation.service';
 import { LlmTranslator } from 'translation-library';
-import { llmService } from '../services/llm.service';
+import { llmConnectionRepository } from '../repositories/llm-connection.repository';
 import db from '../config/database';
 
 const router = Router();
@@ -91,6 +93,7 @@ router.get('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       llmSystemPrompt: settings.llmSystemPrompt,
       llmReasoning: settings.llmReasoning,
       paragraphTranslation: settings.paragraphTranslation,
+      llmConnectionId: settings.llmConnectionId ?? null,
     });
   } catch (error) {
     console.error('[TranslateRoute] Error getting settings:', error);
@@ -106,7 +109,7 @@ router.get('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
 router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { provider, displayLang, enabled, libreEndpoint, autoTranslate, llmSystemPrompt, llmReasoning, paragraphTranslation } = req.body;
+    const { provider, displayLang, enabled, libreEndpoint, autoTranslate, llmSystemPrompt, llmReasoning, paragraphTranslation, llmConnectionId } = req.body;
 
     const validProviders = ['google', 'yandex', 'libre', 'llm'];
 
@@ -158,6 +161,29 @@ router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       saveSetting('translation_paragraph', String(paragraphTranslation));
     }
 
+    if (llmConnectionId !== undefined) {
+      if (llmConnectionId === null || llmConnectionId === '') {
+        // null - сброс к основному (активному) подключению
+        saveSetting('translation_llm_connection_id', null);
+      } else {
+        const parsedId = Number(llmConnectionId);
+        if (!Number.isInteger(parsedId) || parsedId <= 0) {
+          return res.status(400).json({
+            error: 'Invalid llmConnectionId',
+            message: 'llmConnectionId must be a positive integer or null',
+          });
+        }
+        const conn = llmConnectionRepository.getById(parsedId);
+        if (!conn || conn.user_id !== userId) {
+          return res.status(400).json({
+            error: 'Invalid llmConnectionId',
+            message: 'Connection not found',
+          });
+        }
+        saveSetting('translation_llm_connection_id', String(parsedId));
+      }
+    }
+
     // Invalidate cache so next translation uses new settings
     invalidateServiceCache(userId);
 
@@ -172,6 +198,7 @@ router.put('/settings', authenticate, (req: AuthenticatedRequest, res: Response)
       llmSystemPrompt: settings.llmSystemPrompt,
       llmReasoning: settings.llmReasoning,
       paragraphTranslation: settings.paragraphTranslation,
+      llmConnectionId: settings.llmConnectionId ?? null,
     });
   } catch (error) {
     console.error('[TranslateRoute] Error updating settings:', error);
@@ -249,19 +276,19 @@ router.post('/stream', authenticate, async (req: AuthenticatedRequest, res: Resp
     console.log(`[TranslateRoute] llmReasoning from DB: ${llmReasoning} (cached settings: ${settings.llmReasoning})`);
 
     // Create LLM translator for streaming
-    // Inject the server's LLMClient so it uses the active connection
+    // Inject the server's LLMClient so it uses the selected (or active) connection
     const llmTranslator = new LlmTranslator({
       systemPrompt: settings.llmSystemPrompt,
       timeout: 300000, // 5 минут — модели с reasoning могут долго думать
       reasoning: llmReasoning, // Use fresh value from DB, not cached
     });
     
-     // Inject the LLMClient from the server's llmService
-     // This ensures we use the active database connection (correct base_url, api_key, model)
+     // Inject the LLMClient for the translation connection
+     // This ensures we use the selected (or active) database connection (correct base_url, api_key, model)
      try {
-       const connection = llmService.getActiveConnection(userId);
+       const connection = resolveTranslationLlmConnection(userId, getSelectedLlmConnectionId(userId));
        if (connection) {
-         console.log(`[TranslateRoute] Found active connection: ${connection.base_url}`);
+         console.log(`[TranslateRoute] Found LLM connection for translation: ${connection.base_url}`);
          const { LLMClient } = require('llm-client');
          const injectedClient = new LLMClient({
            baseURL: connection.base_url,

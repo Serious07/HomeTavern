@@ -1,10 +1,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../contexts/AuthContext';
-import { api, quickRepliesApi } from '../services/api';
+import { api, quickRepliesApi, llmConnectionsApi } from '../services/api';
 import AppHeader from '../components/common/AppHeader';
 import { getVisibleMessageLimit, setVisibleMessageLimit } from '../components/chat/MessageList';
 import { CompressionMethod } from '../types/compression';
+import { LlmConnection } from '../types';
 import { DEFAULT_QUICK_REPLIES, MAX_QUICK_REPLIES } from '../constants/quickReplies';
 
 // 3.1: Supported languages for translation
@@ -75,6 +76,9 @@ const SettingsPage: React.FC = () => {
   const [translationLlmReasoningLoading, setTranslationLlmReasoningLoading] = useState<boolean>(false);
   const [translationParagraph, setTranslationParagraph] = useState<boolean>(true);
   const [translationParagraphLoading, setTranslationParagraphLoading] = useState<boolean>(false);
+  const [llmConnections, setLlmConnections] = useState<LlmConnection[]>([]);
+  // '' = основное (активное) подключение - значение по умолчанию
+  const [translationLlmConnectionId, setTranslationLlmConnectionId] = useState<string>('');
   const [dialogTaggingEnabled, setDialogTaggingEnabled] = useState<boolean>(true);
   const [dialogTaggingLoading, setDialogTaggingLoading] = useState<boolean>(false);
 
@@ -123,12 +127,21 @@ const SettingsPage: React.FC = () => {
             setTranslationLlmSystemPrompt(transData.data.llmSystemPrompt || '');
             setTranslationLlmReasoning(transData.data.llmReasoning !== false); // default true
             setTranslationParagraph(transData.data.paragraphTranslation !== false); // default true
+            setTranslationLlmConnectionId(transData.data.llmConnectionId ? String(transData.data.llmConnectionId) : '');
           }
         } catch (transError) {
           console.warn('Failed to load translation settings:', transError);
           if (data?.translation_enabled !== undefined) {
             setTranslationEnabled(data.translation_enabled === 'true');
           }
+        }
+        try {
+          const conns = await llmConnectionsApi.getAll();
+          if (Array.isArray(conns.data)) {
+            setLlmConnections(conns.data);
+          }
+        } catch (connsError) {
+          console.warn('Failed to load LLM connections:', connsError);
         }
         if (data?.dialog_tagging_enabled !== undefined) {
           setDialogTaggingEnabled(data.dialog_tagging_enabled === 'true');
@@ -171,6 +184,17 @@ const SettingsPage: React.FC = () => {
       setTranslationEnabled(!newValue); // Revert on error
     } finally {
       setTranslationLoading(false);
+    }
+  };
+
+  const handleTranslationConnectionChange = async (value: string) => {
+    const prev = translationLlmConnectionId;
+    setTranslationLlmConnectionId(value);
+    try {
+      await api.put('/translate/settings', { llmConnectionId: value === '' ? null : Number(value) });
+    } catch (error) {
+      console.error('Failed to save translation LLM connection:', error);
+      setTranslationLlmConnectionId(prev); // Revert on error
     }
   };
 
@@ -693,6 +717,32 @@ const SettingsPage: React.FC = () => {
                   <option value="llm">LLM (через локальную модель)</option>
                 </select>
               </div>
+
+              {/* LLM Connection Selector */}
+              {translationProvider === 'llm' && (
+                <div className="mb-6">
+                  <label htmlFor="translation-llm-connection" className="block text-sm font-medium text-gray-300 mb-2">
+                    Подключение для перевода через LLM
+                  </label>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Какое API-подключение (со страницы «Подключения») использовать для перевода.
+                    По умолчанию — основное (текущее активное) подключение.
+                  </p>
+                  <select
+                    id="translation-llm-connection"
+                    value={translationLlmConnectionId}
+                    onChange={(e) => handleTranslationConnectionChange(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
+                  >
+                    <option value="">Основное подключение (текущее)</option>
+                    {llmConnections.map((conn) => (
+                      <option key={conn.id} value={String(conn.id)}>
+                        {conn.name} · {conn.model}{conn.is_active === 1 ? ' (основное)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Paragraph (поабзацный) Translation Toggle */}
               <div className="flex items-center justify-between mb-6">

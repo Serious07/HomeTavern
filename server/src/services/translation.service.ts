@@ -7,6 +7,7 @@ import db from '../config/database';
 import { TranslationLibrary, TranslationLibraryConfig } from 'translation-library';
 import { llmService } from './llm.service';
 import { heroVariationRepository } from '../repositories/hero.variation.repository';
+import { llmConnectionRepository } from '../repositories/llm-connection.repository';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,8 @@ export interface UserTranslationSettings {
   llmReasoning: boolean;
   /** Переводить при редактировании только изменённые абзацы (экономия токенов) */
   paragraphTranslation: boolean;
+  /** id подключения для LLM-перевода; undefined = основное (активное) подключение */
+  llmConnectionId?: number;
 }
 
 export interface TranslationServiceInstance {
@@ -56,6 +59,12 @@ const DEFAULT_SETTINGS: UserTranslationSettings = {
 
 // ─── 1.1: getUserTranslationSettings ────────────────────────────────────────
 
+function parseLlmConnectionId(raw: string | null | undefined): number | undefined {
+  if (raw === null || raw === undefined || raw === '') return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function getUserTranslationSettings(userId: number): UserTranslationSettings {
   const rows = db.prepare(
     'SELECT key, value FROM settings WHERE user_id = ?'
@@ -75,7 +84,39 @@ function getUserTranslationSettings(userId: number): UserTranslationSettings {
     llmSystemPrompt: map['translation_llm_system_prompt'] || undefined,
     llmReasoning: map['translation_llm_reasoning'] !== 'false', // default true
     paragraphTranslation: map['translation_paragraph'] !== 'false', // default true
+    llmConnectionId: parseLlmConnectionId(map['translation_llm_connection_id']),
   };
+}
+
+/**
+ * Разрешает подключение для LLM-перевода: выбранное пользователем, если оно
+ * существует и принадлежит пользователю; иначе - активное (основное).
+ * Если сохранённое подключение было удалено, происходит молчаливый фолбэк
+ * на основном: настройки в БД при этом не чистятся, данные не удаляются.
+ */
+export function resolveTranslationLlmConnection(
+  userId: number,
+  llmConnectionId?: number,
+): ReturnType<typeof llmService.getActiveConnection> {
+  if (llmConnectionId) {
+    const selected = llmConnectionRepository.getByIdWithDecryptedKey(llmConnectionId);
+    if (selected && selected.user_id === userId) {
+      return selected;
+    }
+    console.warn(`[TranslationService] Selected LLM connection ${llmConnectionId} not found for user ${userId}, falling back to active connection`);
+  }
+  return llmService.getActiveConnection(userId);
+}
+
+/**
+ * Читает выбранный пользователем id подключения для перевода прямо из БД,
+ * минуя кэш настроек (как это уже сделано для translation_llm_reasoning).
+ */
+export function getSelectedLlmConnectionId(userId: number): number | undefined {
+  const row = db.prepare(
+    "SELECT value FROM settings WHERE user_id = ? AND key = 'translation_llm_connection_id'"
+  ).get(userId) as { value?: string | null } | undefined;
+  return parseLlmConnectionId(row?.value);
 }
 
 // ─── 1.2: Service Cache with TTL ────────────────────────────────────────────
@@ -135,9 +176,9 @@ function buildLibrary(settings: UserTranslationSettings, userId?: number): Trans
     config.reasoning = settings.llmReasoning;
   }
 
-  // Активное подключение читается ДО создания переводчика: LlmTranslator фиксирует
+  // Активное/выбранное подключение читается ДО создания переводчика: LlmTranslator фиксирует
   // model и reasoningEffort в конструкторе, поэтому config должен быть заполнен заранее.
-  const connection = settings.provider === 'llm' && userId ? llmService.getActiveConnection(userId) : null;
+  const connection = settings.provider === 'llm' && userId ? resolveTranslationLlmConnection(userId, settings.llmConnectionId) : null;
   if (connection) {
     config.model = connection.model;
     // effort берётся из подключения; применяется только когда reasoning включён
